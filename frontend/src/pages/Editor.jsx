@@ -24,8 +24,8 @@ import {
   User,
   ChevronDown,
   ChevronUp,
-  X,
-  MessageSquare
+  MessageSquare,
+  Pencil
 } from "lucide-react";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -35,6 +35,7 @@ export default function Editor() {
   const [selectedBatch, setSelectedBatch] = useState("");
   const [questions, setQuestions] = useState([]);
   const [expandedId, setExpandedId] = useState(null);
+  const [editingNameId, setEditingNameId] = useState(null);
   const [loading, setLoading] = useState(false);
   const [correcting, setCorrecting] = useState(false);
   const [correctingId, setCorrectingId] = useState(null);
@@ -156,6 +157,15 @@ export default function Editor() {
     }
   };
 
+  const handleNameKeyDown = (e, questionId) => {
+    if (e.key === 'Enter') {
+      setEditingNameId(null);
+    }
+    if (e.key === 'Escape') {
+      setEditingNameId(null);
+    }
+  };
+
   const validQuestions = questions.filter(q => !q.is_greeting && !q.is_duplicate);
 
   return (
@@ -271,10 +281,7 @@ export default function Editor() {
               data-testid={`question-card-${question.id}`}
             >
               {/* Question Header - Always Visible */}
-              <div 
-                className="p-5 cursor-pointer"
-                onClick={() => setExpandedId(expandedId === question.id ? null : question.id)}
-              >
+              <div className="p-5">
                 <div className="flex items-start gap-4">
                   {/* Number */}
                   <div className="w-10 h-10 rounded-full bg-primary/10 text-primary flex items-center justify-center font-bold flex-shrink-0">
@@ -283,16 +290,39 @@ export default function Editor() {
                   
                   {/* Main Content */}
                   <div className="flex-1 min-w-0">
-                    {/* User Info Row */}
+                    {/* User Info Row - EDITABLE NAME */}
                     <div className="flex items-center gap-3 mb-3">
-                      <span className="font-mono text-sm text-muted-foreground bg-secondary/50 px-2 py-1 rounded">
+                      <span className="font-mono text-xs text-muted-foreground bg-secondary/50 px-2 py-1 rounded">
                         {question.youtube_username}
                       </span>
-                      {question.real_name && question.real_name !== question.youtube_username && (
-                        <>
-                          <span className="text-muted-foreground">→</span>
-                          <span className="font-medium">{question.real_name}</span>
-                        </>
+                      <span className="text-muted-foreground">→</span>
+                      
+                      {/* Editable Name Field */}
+                      {editingNameId === question.id ? (
+                        <Input
+                          value={question.real_name || ""}
+                          onChange={(e) => handleUpdateQuestion(question.id, "real_name", e.target.value)}
+                          onBlur={() => setEditingNameId(null)}
+                          onKeyDown={(e) => handleNameKeyDown(e, question.id)}
+                          className="h-8 w-48 rounded-sm text-sm font-medium"
+                          placeholder="Nombre para mostrar"
+                          autoFocus
+                          data-testid={`name-input-${question.id}`}
+                        />
+                      ) : (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setEditingNameId(question.id);
+                          }}
+                          className="flex items-center gap-1.5 px-2 py-1 rounded hover:bg-secondary/50 transition-colors group"
+                          data-testid={`name-edit-button-${question.id}`}
+                        >
+                          <span className="font-medium">
+                            {question.real_name || "Sin nombre"}
+                          </span>
+                          <Pencil className="w-3 h-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
+                        </button>
                       )}
                       
                       {/* Badges */}
@@ -316,14 +346,22 @@ export default function Editor() {
                       </div>
                     </div>
                     
-                    {/* Question Text Preview */}
-                    <p className={`text-base leading-relaxed ${expandedId === question.id ? "" : "line-clamp-2"}`}>
-                      {question.corrected_text || question.original_text}
-                    </p>
+                    {/* Question Text Preview - Clickable to expand */}
+                    <div 
+                      onClick={() => setExpandedId(expandedId === question.id ? null : question.id)}
+                      className="cursor-pointer"
+                    >
+                      <p className={`text-base leading-relaxed ${expandedId === question.id ? "" : "line-clamp-2"}`}>
+                        {question.corrected_text || question.original_text}
+                      </p>
+                    </div>
                   </div>
                   
                   {/* Expand Icon */}
-                  <div className="flex-shrink-0 text-muted-foreground">
+                  <div 
+                    className="flex-shrink-0 text-muted-foreground cursor-pointer p-2 hover:bg-secondary/50 rounded"
+                    onClick={() => setExpandedId(expandedId === question.id ? null : question.id)}
+                  >
                     {expandedId === question.id ? (
                       <ChevronUp className="w-5 h-5" />
                     ) : (
@@ -337,22 +375,8 @@ export default function Editor() {
               {expandedId === question.id && (
                 <div className="px-5 pb-6 pt-2 border-t border-border bg-secondary/20">
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                    {/* Left Column - User & Original */}
-                    <div className="space-y-5">
-                      {/* Real Name Input */}
-                      <div>
-                        <label className="text-xs font-bold uppercase tracking-wide text-muted-foreground block mb-2">
-                          Nombre para mostrar
-                        </label>
-                        <Input
-                          value={question.real_name || ""}
-                          onChange={(e) => handleUpdateQuestion(question.id, "real_name", e.target.value)}
-                          placeholder="Nombre real del usuario"
-                          className="rounded-sm text-base h-12"
-                          data-testid="real-name-input"
-                        />
-                      </div>
-                      
+                    {/* Left Column - Original */}
+                    <div className="space-y-4">
                       {/* Original Text */}
                       <div>
                         <label className="text-xs font-bold uppercase tracking-wide text-muted-foreground block mb-2">
@@ -361,14 +385,14 @@ export default function Editor() {
                         <Textarea
                           value={question.original_text}
                           onChange={(e) => handleUpdateQuestion(question.id, "original_text", e.target.value)}
-                          className="rounded-sm font-mono text-sm min-h-[180px] leading-relaxed"
+                          className="rounded-sm font-mono text-sm min-h-[200px] leading-relaxed"
                           data-testid="original-text-textarea"
                         />
                       </div>
                     </div>
                     
                     {/* Right Column - Corrected */}
-                    <div className="space-y-5">
+                    <div className="space-y-4">
                       {/* Corrected Text */}
                       <div>
                         <div className="flex items-center justify-between mb-2">
@@ -398,62 +422,62 @@ export default function Editor() {
                           value={question.corrected_text || ""}
                           onChange={(e) => handleUpdateQuestion(question.id, "corrected_text", e.target.value)}
                           placeholder="El texto corregido aparecerá aquí o escríbelo manualmente..."
-                          className="rounded-sm text-base min-h-[180px] leading-relaxed"
+                          className="rounded-sm text-base min-h-[200px] leading-relaxed"
                           data-testid="corrected-text-textarea"
                         />
                       </div>
-                      
-                      {/* Action Buttons */}
-                      <div className="flex items-center gap-3 pt-2">
-                        <Button
-                          variant={question.is_greeting ? "secondary" : "outline"}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleToggleGreeting(question);
-                          }}
-                          className="rounded-sm uppercase tracking-wide text-xs"
-                          data-testid="toggle-greeting-button"
-                        >
-                          {question.is_greeting ? (
-                            <>
-                              <Check className="w-4 h-4 mr-2" />
-                              Es saludo
-                            </>
-                          ) : (
-                            <>
-                              <AlertTriangle className="w-4 h-4 mr-2" />
-                              Marcar saludo
-                            </>
-                          )}
-                        </Button>
-                        
-                        <div className="flex-1" />
-                        
-                        <Button
-                          variant="ghost"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setExpandedId(null);
-                          }}
-                          className="rounded-sm text-xs"
-                        >
-                          Cerrar
-                        </Button>
-                        
-                        <Button
-                          variant="destructive"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleDeleteQuestion(question.id);
-                          }}
-                          className="rounded-sm uppercase tracking-wide text-xs"
-                          data-testid="delete-question-button"
-                        >
-                          <Trash2 className="w-4 h-4 mr-2" />
-                          Eliminar
-                        </Button>
-                      </div>
                     </div>
+                  </div>
+                  
+                  {/* Action Buttons */}
+                  <div className="flex items-center gap-3 pt-4 mt-4 border-t border-border">
+                    <Button
+                      variant={question.is_greeting ? "secondary" : "outline"}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleToggleGreeting(question);
+                      }}
+                      className="rounded-sm uppercase tracking-wide text-xs"
+                      data-testid="toggle-greeting-button"
+                    >
+                      {question.is_greeting ? (
+                        <>
+                          <Check className="w-4 h-4 mr-2" />
+                          Es saludo
+                        </>
+                      ) : (
+                        <>
+                          <AlertTriangle className="w-4 h-4 mr-2" />
+                          Marcar saludo
+                        </>
+                      )}
+                    </Button>
+                    
+                    <div className="flex-1" />
+                    
+                    <Button
+                      variant="ghost"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setExpandedId(null);
+                      }}
+                      className="rounded-sm text-xs"
+                    >
+                      Cerrar
+                    </Button>
+                    
+                    <Button
+                      variant="destructive"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDeleteQuestion(question.id);
+                      }}
+                      className="rounded-sm uppercase tracking-wide text-xs"
+                      data-testid="delete-question-button"
+                    >
+                      <Trash2 className="w-4 h-4 mr-2" />
+                      Eliminar
+                    </Button>
                   </div>
                 </div>
               )}
