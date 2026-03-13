@@ -21,8 +21,11 @@ import {
   AlertTriangle,
   Loader2,
   Search,
-  Copy,
-  User
+  User,
+  ChevronDown,
+  ChevronUp,
+  X,
+  MessageSquare
 } from "lucide-react";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -31,9 +34,10 @@ export default function Editor() {
   const [batches, setBatches] = useState([]);
   const [selectedBatch, setSelectedBatch] = useState("");
   const [questions, setQuestions] = useState([]);
-  const [selectedQuestion, setSelectedQuestion] = useState(null);
+  const [expandedId, setExpandedId] = useState(null);
   const [loading, setLoading] = useState(false);
   const [correcting, setCorrecting] = useState(false);
+  const [correctingId, setCorrectingId] = useState(null);
   const [checkingDuplicates, setCheckingDuplicates] = useState(false);
 
   useEffect(() => {
@@ -65,9 +69,6 @@ export default function Editor() {
         params: { batch_id: selectedBatch, include_greetings: true }
       });
       setQuestions(response.data);
-      if (response.data.length > 0 && !selectedQuestion) {
-        setSelectedQuestion(response.data[0]);
-      }
     } catch (error) {
       console.error("Error fetching questions:", error);
     } finally {
@@ -90,7 +91,7 @@ export default function Editor() {
   };
 
   const handleCorrectSingle = async (questionId) => {
-    setCorrecting(true);
+    setCorrectingId(questionId);
     try {
       await axios.post(`${API}/questions/correct`, {
         question_ids: [questionId]
@@ -101,7 +102,7 @@ export default function Editor() {
       console.error("Error correcting:", error);
       toast.error("Error al corregir pregunta");
     } finally {
-      setCorrecting(false);
+      setCorrectingId(null);
     }
   };
 
@@ -130,13 +131,15 @@ export default function Editor() {
     }
   };
 
-  const handleUpdateQuestion = async (field, value) => {
-    if (!selectedQuestion) return;
+  const handleUpdateQuestion = async (questionId, field, value) => {
     try {
-      await axios.put(`${API}/questions/${selectedQuestion.id}`, {
+      await axios.put(`${API}/questions/${questionId}`, {
         [field]: value
       });
-      fetchQuestions();
+      // Update local state for immediate feedback
+      setQuestions(prev => prev.map(q => 
+        q.id === questionId ? { ...q, [field]: value } : q
+      ));
     } catch (error) {
       console.error("Error updating question:", error);
     }
@@ -146,7 +149,7 @@ export default function Editor() {
     try {
       await axios.delete(`${API}/questions/${questionId}`);
       toast.success("Pregunta eliminada");
-      setSelectedQuestion(null);
+      setExpandedId(null);
       fetchQuestions();
     } catch (error) {
       console.error("Error deleting question:", error);
@@ -156,7 +159,7 @@ export default function Editor() {
   const validQuestions = questions.filter(q => !q.is_greeting && !q.is_duplicate);
 
   return (
-    <div className="p-8 md:p-12 animate-fade-in">
+    <div className="p-6 md:p-10 animate-fade-in">
       {/* Header */}
       <div className="mb-8 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
         <div>
@@ -170,13 +173,13 @@ export default function Editor() {
         
         <div className="flex items-center gap-3">
           <Select value={selectedBatch} onValueChange={setSelectedBatch}>
-            <SelectTrigger className="w-48 rounded-sm" data-testid="batch-selector">
+            <SelectTrigger className="w-56 rounded-sm" data-testid="batch-selector">
               <SelectValue placeholder="Seleccionar lote" />
             </SelectTrigger>
             <SelectContent>
               {batches.map((batch) => (
                 <SelectItem key={batch.id} value={batch.id}>
-                  {new Date(batch.created_at).toLocaleDateString('es-ES')} ({batch.question_count})
+                  {new Date(batch.created_at).toLocaleDateString('es-ES')} ({batch.question_count} preguntas)
                 </SelectItem>
               ))}
             </SelectContent>
@@ -185,10 +188,11 @@ export default function Editor() {
       </div>
 
       {/* Actions Bar */}
-      <div className="flex flex-wrap items-center gap-3 mb-6 p-4 bg-secondary/30 rounded-sm">
+      <div className="flex flex-wrap items-center gap-4 mb-8 p-5 bg-card border border-border rounded-sm">
         <Button
           onClick={handleCorrectAll}
           disabled={correcting || questions.length === 0}
+          size="lg"
           className="rounded-sm uppercase tracking-wide text-xs"
           data-testid="correct-all-button"
         >
@@ -204,6 +208,7 @@ export default function Editor() {
           variant="outline"
           onClick={handleCheckDuplicates}
           disabled={checkingDuplicates || questions.length === 0}
+          size="lg"
           className="rounded-sm uppercase tracking-wide text-xs"
           data-testid="check-duplicates-button"
         >
@@ -217,217 +222,244 @@ export default function Editor() {
 
         <div className="flex-1" />
         
-        <div className="text-sm text-muted-foreground">
-          <span className="font-bold text-foreground">{validQuestions.length}</span> preguntas válidas
+        <div className="flex items-center gap-6 text-sm">
+          <div className="flex items-center gap-2">
+            <div className="w-3 h-3 rounded-full bg-green-500" />
+            <span><strong>{validQuestions.length}</strong> válidas</span>
+          </div>
           {questions.filter(q => q.is_greeting).length > 0 && (
-            <span className="ml-2">
-              | <span className="text-yellow-600">{questions.filter(q => q.is_greeting).length}</span> saludos
-            </span>
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 rounded-full bg-yellow-500" />
+              <span><strong>{questions.filter(q => q.is_greeting).length}</strong> saludos</span>
+            </div>
           )}
           {questions.filter(q => q.is_duplicate).length > 0 && (
-            <span className="ml-2">
-              | <span className="text-red-500">{questions.filter(q => q.is_duplicate).length}</span> duplicados
-            </span>
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 rounded-full bg-red-500" />
+              <span><strong>{questions.filter(q => q.is_duplicate).length}</strong> duplicados</span>
+            </div>
           )}
         </div>
       </div>
 
-      {/* Split View */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Questions List */}
-        <Card className="bg-card border border-border rounded-sm">
-          <CardHeader className="pb-3">
-            <CardTitle className="font-heading text-lg uppercase tracking-tight">
-              LISTA DE PREGUNTAS
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="p-0">
-            <ScrollArea className="h-[600px]">
-              {loading ? (
-                <div className="p-6 text-center">
-                  <Loader2 className="w-6 h-6 animate-spin mx-auto mb-2" />
-                  <p className="text-sm text-muted-foreground">Cargando...</p>
-                </div>
-              ) : questions.length === 0 ? (
-                <div className="p-6 text-center">
-                  <p className="text-sm text-muted-foreground">
-                    No hay preguntas en este lote
-                  </p>
-                </div>
-              ) : (
-                <div className="divide-y divide-border">
-                  {questions.map((question) => (
-                    <div
-                      key={question.id}
-                      onClick={() => setSelectedQuestion(question)}
-                      className={`p-4 cursor-pointer transition-colors tracing-beam ${
-                        selectedQuestion?.id === question.id 
-                          ? "bg-secondary/50 active" 
-                          : "hover:bg-secondary/30"
-                      } ${question.is_greeting ? "opacity-50" : ""} ${
-                        question.is_duplicate ? "border-l-2 border-l-red-500" : ""
-                      }`}
-                      data-testid={`question-item-${question.id}`}
-                    >
-                      <div className="flex items-start justify-between gap-2 mb-2">
-                        <div className="flex items-center gap-2">
-                          <span className="font-mono text-xs text-muted-foreground">
-                            {question.youtube_username}
-                          </span>
-                          {question.real_name && question.real_name !== question.youtube_username && (
-                            <span className="text-xs font-medium">
-                              → {question.real_name}
-                            </span>
-                          )}
-                        </div>
-                        <div className="flex gap-1">
-                          {question.is_corrected && (
-                            <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
-                              <Check className="w-3 h-3" />
-                            </Badge>
-                          )}
-                          {question.is_greeting && (
-                            <Badge variant="outline" className="text-[10px] px-1.5 py-0 text-yellow-600 border-yellow-600">
-                              Saludo
-                            </Badge>
-                          )}
-                          {question.is_duplicate && (
-                            <Badge variant="destructive" className="text-[10px] px-1.5 py-0">
-                              Duplicado
-                            </Badge>
-                          )}
-                        </div>
-                      </div>
-                      <p className="text-sm line-clamp-2">
-                        {question.corrected_text || question.original_text}
-                      </p>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </ScrollArea>
-          </CardContent>
-        </Card>
-
-        {/* Editor Panel */}
-        <Card className="bg-card border border-border rounded-sm">
-          <CardHeader className="pb-3">
-            <CardTitle className="font-heading text-lg uppercase tracking-tight">
-              EDITAR PREGUNTA
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            {selectedQuestion ? (
-              <div className="space-y-6">
-                {/* User info */}
-                <div className="p-4 bg-secondary/30 rounded-sm space-y-3">
-                  <div className="flex items-center gap-2">
-                    <User className="w-4 h-4 text-muted-foreground" />
-                    <span className="font-mono text-sm">{selectedQuestion.youtube_username}</span>
+      {/* Questions List - Full Width Cards */}
+      <div className="space-y-4">
+        {loading ? (
+          <div className="py-16 text-center">
+            <Loader2 className="w-8 h-8 animate-spin mx-auto mb-4" />
+            <p className="text-muted-foreground">Cargando preguntas...</p>
+          </div>
+        ) : questions.length === 0 ? (
+          <Card className="bg-card border border-border rounded-sm">
+            <CardContent className="py-16 text-center">
+              <MessageSquare className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
+              <h3 className="font-heading text-xl mb-2">SIN PREGUNTAS</h3>
+              <p className="text-muted-foreground">
+                No hay preguntas en este lote. Ve a "Importar" para añadir comentarios.
+              </p>
+            </CardContent>
+          </Card>
+        ) : (
+          questions.map((question, index) => (
+            <Card 
+              key={question.id}
+              className={`bg-card border rounded-sm transition-all ${
+                question.is_greeting ? "opacity-60 border-yellow-500/30" : 
+                question.is_duplicate ? "opacity-60 border-red-500/30" : 
+                "border-border hover:border-foreground/20"
+              } ${expandedId === question.id ? "ring-2 ring-primary/20" : ""}`}
+              data-testid={`question-card-${question.id}`}
+            >
+              {/* Question Header - Always Visible */}
+              <div 
+                className="p-5 cursor-pointer"
+                onClick={() => setExpandedId(expandedId === question.id ? null : question.id)}
+              >
+                <div className="flex items-start gap-4">
+                  {/* Number */}
+                  <div className="w-10 h-10 rounded-full bg-primary/10 text-primary flex items-center justify-center font-bold flex-shrink-0">
+                    {index + 1}
                   </div>
-                  <div>
-                    <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                      Nombre Real
-                    </label>
-                    <Input
-                      value={selectedQuestion.real_name || ""}
-                      onChange={(e) => handleUpdateQuestion("real_name", e.target.value)}
-                      placeholder="Nombre para mostrar"
-                      className="mt-1 rounded-sm"
-                      data-testid="real-name-input"
-                    />
-                  </div>
-                </div>
-
-                {/* Original text */}
-                <div>
-                  <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                    Texto Original
-                  </label>
-                  <Textarea
-                    value={selectedQuestion.original_text}
-                    onChange={(e) => handleUpdateQuestion("original_text", e.target.value)}
-                    className="mt-1 min-h-[120px] rounded-sm font-mono text-sm"
-                    data-testid="original-text-textarea"
-                  />
-                </div>
-
-                {/* Corrected text */}
-                <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                      Texto Corregido
-                    </label>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => handleCorrectSingle(selectedQuestion.id)}
-                      disabled={correcting}
-                      className="text-xs"
-                      data-testid="correct-single-button"
-                    >
-                      {correcting ? (
-                        <Loader2 className="w-3 h-3 animate-spin" />
-                      ) : (
+                  
+                  {/* Main Content */}
+                  <div className="flex-1 min-w-0">
+                    {/* User Info Row */}
+                    <div className="flex items-center gap-3 mb-3">
+                      <span className="font-mono text-sm text-muted-foreground bg-secondary/50 px-2 py-1 rounded">
+                        {question.youtube_username}
+                      </span>
+                      {question.real_name && question.real_name !== question.youtube_username && (
                         <>
-                          <Wand2 className="w-3 h-3 mr-1" />
-                          Corregir
+                          <span className="text-muted-foreground">→</span>
+                          <span className="font-medium">{question.real_name}</span>
                         </>
                       )}
-                    </Button>
+                      
+                      {/* Badges */}
+                      <div className="flex gap-2 ml-auto">
+                        {question.is_corrected && (
+                          <Badge variant="secondary" className="text-xs">
+                            <Check className="w-3 h-3 mr-1" />
+                            Corregido
+                          </Badge>
+                        )}
+                        {question.is_greeting && (
+                          <Badge variant="outline" className="text-xs text-yellow-600 border-yellow-500">
+                            Saludo
+                          </Badge>
+                        )}
+                        {question.is_duplicate && (
+                          <Badge variant="destructive" className="text-xs">
+                            Duplicado
+                          </Badge>
+                        )}
+                      </div>
+                    </div>
+                    
+                    {/* Question Text Preview */}
+                    <p className={`text-base leading-relaxed ${expandedId === question.id ? "" : "line-clamp-2"}`}>
+                      {question.corrected_text || question.original_text}
+                    </p>
                   </div>
-                  <Textarea
-                    value={selectedQuestion.corrected_text || ""}
-                    onChange={(e) => handleUpdateQuestion("corrected_text", e.target.value)}
-                    placeholder="El texto corregido aparecerá aquí..."
-                    className="min-h-[120px] rounded-sm text-sm"
-                    data-testid="corrected-text-textarea"
-                  />
-                </div>
-
-                {/* Actions */}
-                <div className="flex items-center gap-3 pt-4 border-t border-border">
-                  <Button
-                    variant={selectedQuestion.is_greeting ? "secondary" : "outline"}
-                    size="sm"
-                    onClick={() => handleToggleGreeting(selectedQuestion)}
-                    className="rounded-sm uppercase tracking-wide text-xs"
-                    data-testid="toggle-greeting-button"
-                  >
-                    {selectedQuestion.is_greeting ? (
-                      <>
-                        <Check className="w-4 h-4 mr-1" />
-                        Marcado como saludo
-                      </>
+                  
+                  {/* Expand Icon */}
+                  <div className="flex-shrink-0 text-muted-foreground">
+                    {expandedId === question.id ? (
+                      <ChevronUp className="w-5 h-5" />
                     ) : (
-                      <>
-                        <AlertTriangle className="w-4 h-4 mr-1" />
-                        Marcar como saludo
-                      </>
+                      <ChevronDown className="w-5 h-5" />
                     )}
-                  </Button>
-                  
-                  <div className="flex-1" />
-                  
-                  <Button
-                    variant="destructive"
-                    size="sm"
-                    onClick={() => handleDeleteQuestion(selectedQuestion.id)}
-                    className="rounded-sm uppercase tracking-wide text-xs"
-                    data-testid="delete-question-button"
-                  >
-                    <Trash2 className="w-4 h-4 mr-1" />
-                    Eliminar
-                  </Button>
+                  </div>
                 </div>
               </div>
-            ) : (
-              <div className="h-[400px] flex items-center justify-center text-muted-foreground">
-                <p className="text-sm">Selecciona una pregunta para editar</p>
-              </div>
-            )}
-          </CardContent>
-        </Card>
+              
+              {/* Expanded Editor */}
+              {expandedId === question.id && (
+                <div className="px-5 pb-6 pt-2 border-t border-border bg-secondary/20">
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    {/* Left Column - User & Original */}
+                    <div className="space-y-5">
+                      {/* Real Name Input */}
+                      <div>
+                        <label className="text-xs font-bold uppercase tracking-wide text-muted-foreground block mb-2">
+                          Nombre para mostrar
+                        </label>
+                        <Input
+                          value={question.real_name || ""}
+                          onChange={(e) => handleUpdateQuestion(question.id, "real_name", e.target.value)}
+                          placeholder="Nombre real del usuario"
+                          className="rounded-sm text-base h-12"
+                          data-testid="real-name-input"
+                        />
+                      </div>
+                      
+                      {/* Original Text */}
+                      <div>
+                        <label className="text-xs font-bold uppercase tracking-wide text-muted-foreground block mb-2">
+                          Texto original
+                        </label>
+                        <Textarea
+                          value={question.original_text}
+                          onChange={(e) => handleUpdateQuestion(question.id, "original_text", e.target.value)}
+                          className="rounded-sm font-mono text-sm min-h-[180px] leading-relaxed"
+                          data-testid="original-text-textarea"
+                        />
+                      </div>
+                    </div>
+                    
+                    {/* Right Column - Corrected */}
+                    <div className="space-y-5">
+                      {/* Corrected Text */}
+                      <div>
+                        <div className="flex items-center justify-between mb-2">
+                          <label className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
+                            Texto corregido
+                          </label>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleCorrectSingle(question.id);
+                            }}
+                            disabled={correctingId === question.id}
+                            className="rounded-sm text-xs"
+                            data-testid="correct-single-button"
+                          >
+                            {correctingId === question.id ? (
+                              <Loader2 className="w-3 h-3 animate-spin mr-1" />
+                            ) : (
+                              <Wand2 className="w-3 h-3 mr-1" />
+                            )}
+                            Corregir con IA
+                          </Button>
+                        </div>
+                        <Textarea
+                          value={question.corrected_text || ""}
+                          onChange={(e) => handleUpdateQuestion(question.id, "corrected_text", e.target.value)}
+                          placeholder="El texto corregido aparecerá aquí o escríbelo manualmente..."
+                          className="rounded-sm text-base min-h-[180px] leading-relaxed"
+                          data-testid="corrected-text-textarea"
+                        />
+                      </div>
+                      
+                      {/* Action Buttons */}
+                      <div className="flex items-center gap-3 pt-2">
+                        <Button
+                          variant={question.is_greeting ? "secondary" : "outline"}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleToggleGreeting(question);
+                          }}
+                          className="rounded-sm uppercase tracking-wide text-xs"
+                          data-testid="toggle-greeting-button"
+                        >
+                          {question.is_greeting ? (
+                            <>
+                              <Check className="w-4 h-4 mr-2" />
+                              Es saludo
+                            </>
+                          ) : (
+                            <>
+                              <AlertTriangle className="w-4 h-4 mr-2" />
+                              Marcar saludo
+                            </>
+                          )}
+                        </Button>
+                        
+                        <div className="flex-1" />
+                        
+                        <Button
+                          variant="ghost"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setExpandedId(null);
+                          }}
+                          className="rounded-sm text-xs"
+                        >
+                          Cerrar
+                        </Button>
+                        
+                        <Button
+                          variant="destructive"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDeleteQuestion(question.id);
+                          }}
+                          className="rounded-sm uppercase tracking-wide text-xs"
+                          data-testid="delete-question-button"
+                        >
+                          <Trash2 className="w-4 h-4 mr-2" />
+                          Eliminar
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </Card>
+          ))
+        )}
       </div>
     </div>
   );

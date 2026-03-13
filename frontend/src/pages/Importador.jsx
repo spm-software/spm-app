@@ -36,9 +36,11 @@ export default function Importador() {
 
   const exampleText = `@usuario123 Hola, me gustaría saber cómo funciona el sistema de puntos. ¿Se pueden canjear por premios?
 
-@maria_garcia Tengo una duda sobre el último video. ¿Podrías explicar mejor la parte de la configuración inicial?
+María García: Tengo una duda sobre el último video. ¿Podrías explicar mejor la parte de la configuración inicial?
 
-@pedro_lopez2024 Gracias por el contenido! Mi pregunta es: ¿Cuánto tiempo tarda normalmente el proceso?`;
+Pedro López - Gracias por el contenido! Mi pregunta es: ¿Cuánto tiempo tarda normalmente el proceso?
+
+@otro_usuario Otra pregunta de ejemplo con formato de username`;
 
   return (
     <div className="p-8 md:p-12 animate-fade-in">
@@ -67,9 +69,10 @@ export default function Importador() {
                 data-testid="import-textarea"
                 placeholder="Pega aquí los comentarios de YouTube...
 
-Formato esperado:
-@usuario1 Texto del comentario o pregunta
-@usuario2 Otro comentario..."
+Formatos aceptados:
+@usuario1 Texto del comentario
+Nombre Real: Texto del comentario
+Nombre Real - Texto del comentario"
                 value={rawText}
                 onChange={(e) => setRawText(e.target.value)}
                 className="min-h-[400px] font-mono text-sm bg-background resize-none rounded-sm"
@@ -133,7 +136,7 @@ Formato esperado:
               <div className="space-y-2">
                 <p className="font-medium">3. Pega aquí</p>
                 <p className="text-muted-foreground text-xs">
-                  El formato debe incluir @username seguido del texto
+                  Formatos: <code className="bg-secondary px-1">@usuario texto</code> o <code className="bg-secondary px-1">Nombre: texto</code>
                 </p>
               </div>
             </CardContent>

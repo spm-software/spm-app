@@ -167,11 +167,18 @@ async def extract_display_name(youtube_username: str) -> str:
     return clean_name
 
 def parse_comments(raw_text: str) -> List[Dict[str, str]]:
-    """Parse raw text into individual comments with usernames"""
+    """Parse raw text into individual comments with usernames or real names
+    
+    Supported formats:
+    - @username Texto del comentario
+    - Nombre Real: Texto del comentario
+    - Nombre Real - Texto del comentario
+    """
     comments = []
     lines = raw_text.strip().split('\n')
     
-    current_username = None
+    current_identifier = None
+    current_is_username = False
     current_text = []
     
     for line in lines:
@@ -180,26 +187,43 @@ def parse_comments(raw_text: str) -> List[Dict[str, str]]:
             continue
         
         # Check if line starts with @username
-        username_match = re.match(r'^(@[\w\-\.]+)', line)
+        username_match = re.match(r'^(@[\w\-\.]+)\s*(.*)', line)
+        # Check if line starts with "Name:" or "Name -" format
+        realname_match = re.match(r'^([A-ZÁÉÍÓÚÑ][a-záéíóúñA-ZÁÉÍÓÚÑ\s]+?)(?::|[-–—])\s*(.*)', line)
+        
         if username_match:
             # Save previous comment
-            if current_username and current_text:
+            if current_identifier and current_text:
                 comments.append({
-                    "youtube_username": current_username,
-                    "original_text": '\n'.join(current_text).strip()
+                    "youtube_username": current_identifier if current_is_username else f"@{current_identifier.lower().replace(' ', '_')}",
+                    "original_text": '\n'.join(current_text).strip(),
+                    "real_name": None if current_is_username else current_identifier
                 })
-            current_username = username_match.group(1)
-            # Rest of line is the comment
-            rest = line[len(current_username):].strip()
+            current_identifier = username_match.group(1)
+            current_is_username = True
+            rest = username_match.group(2).strip()
             current_text = [rest] if rest else []
-        elif current_username:
+        elif realname_match:
+            # Save previous comment
+            if current_identifier and current_text:
+                comments.append({
+                    "youtube_username": current_identifier if current_is_username else f"@{current_identifier.lower().replace(' ', '_')}",
+                    "original_text": '\n'.join(current_text).strip(),
+                    "real_name": None if current_is_username else current_identifier
+                })
+            current_identifier = realname_match.group(1).strip()
+            current_is_username = False
+            rest = realname_match.group(2).strip()
+            current_text = [rest] if rest else []
+        elif current_identifier:
             current_text.append(line)
     
     # Save last comment
-    if current_username and current_text:
+    if current_identifier and current_text:
         comments.append({
-            "youtube_username": current_username,
-            "original_text": '\n'.join(current_text).strip()
+            "youtube_username": current_identifier if current_is_username else f"@{current_identifier.lower().replace(' ', '_')}",
+            "original_text": '\n'.join(current_text).strip(),
+            "real_name": None if current_is_username else current_identifier
         })
     
     return comments
@@ -428,7 +452,10 @@ async def import_comments(data: CommentImport):
     
     questions_created = []
     for comment in comments:
-        real_name = await get_real_name(comment["youtube_username"])
+        # Check if real_name came from parsing
+        real_name = comment.get("real_name")
+        if not real_name:
+            real_name = await get_real_name(comment["youtube_username"])
         if not real_name:
             real_name = await extract_display_name(comment["youtube_username"])
         
