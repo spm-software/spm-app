@@ -260,10 +260,18 @@ export default function Editor() {
   };
 
   const handleDeleteQuestion = async (questionId) => {
+    // Guardar posición del scroll antes de eliminar
+    const scrollY = window.scrollY;
+    
     try {
       await axios.delete(`${API}/questions/${questionId}`);
       setQuestions(prev => prev.filter(q => q.id !== questionId));
       toast.success("Pregunta eliminada");
+      
+      // Restaurar posición del scroll después de un breve delay para que React actualice
+      requestAnimationFrame(() => {
+        window.scrollTo(0, scrollY);
+      });
     } catch (error) {
       console.error("Error deleting question:", error);
     }
