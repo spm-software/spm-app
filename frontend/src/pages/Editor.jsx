@@ -1,12 +1,11 @@
 import { useEffect, useState } from "react";
 import axios from "axios";
 import { toast } from "sonner";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { 
   Select,
   SelectContent,
@@ -21,11 +20,10 @@ import {
   AlertTriangle,
   Loader2,
   Search,
-  User,
-  ChevronDown,
-  ChevronUp,
   MessageSquare,
-  Pencil
+  Pencil,
+  X,
+  CheckCircle
 } from "lucide-react";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -34,8 +32,8 @@ export default function Editor() {
   const [batches, setBatches] = useState([]);
   const [selectedBatch, setSelectedBatch] = useState("");
   const [questions, setQuestions] = useState([]);
-  const [expandedId, setExpandedId] = useState(null);
   const [editingNameId, setEditingNameId] = useState(null);
+  const [editingTextId, setEditingTextId] = useState(null);
   const [loading, setLoading] = useState(false);
   const [correcting, setCorrecting] = useState(false);
   const [correctingId, setCorrectingId] = useState(null);
@@ -127,6 +125,7 @@ export default function Editor() {
         is_greeting: !question.is_greeting
       });
       fetchQuestions();
+      toast.success(question.is_greeting ? "Desmarcado como saludo" : "Marcado como saludo");
     } catch (error) {
       console.error("Error updating question:", error);
     }
@@ -137,7 +136,6 @@ export default function Editor() {
       await axios.put(`${API}/questions/${questionId}`, {
         [field]: value
       });
-      // Update local state for immediate feedback
       setQuestions(prev => prev.map(q => 
         q.id === questionId ? { ...q, [field]: value } : q
       ));
@@ -150,19 +148,28 @@ export default function Editor() {
     try {
       await axios.delete(`${API}/questions/${questionId}`);
       toast.success("Pregunta eliminada");
-      setExpandedId(null);
       fetchQuestions();
     } catch (error) {
       console.error("Error deleting question:", error);
     }
   };
 
-  const handleNameKeyDown = (e, questionId) => {
-    if (e.key === 'Enter') {
-      setEditingNameId(null);
+  const handleAcceptQuestion = async (question) => {
+    // Si no está corregida, copiar el texto original como corregido
+    if (!question.corrected_text) {
+      await handleUpdateQuestion(question.id, "corrected_text", question.original_text);
+    }
+    await handleUpdateQuestion(question.id, "is_corrected", true);
+    toast.success("Pregunta aceptada");
+  };
+
+  const handleKeyDown = (e, callback) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      callback();
     }
     if (e.key === 'Escape') {
-      setEditingNameId(null);
+      callback();
     }
   };
 
@@ -252,7 +259,7 @@ export default function Editor() {
         </div>
       </div>
 
-      {/* Questions List - Full Width Cards */}
+      {/* Questions List */}
       <div className="space-y-4">
         {loading ? (
           <div className="py-16 text-center">
@@ -274,213 +281,164 @@ export default function Editor() {
             <Card 
               key={question.id}
               className={`bg-card border rounded-sm transition-all ${
-                question.is_greeting ? "opacity-60 border-yellow-500/30" : 
-                question.is_duplicate ? "opacity-60 border-red-500/30" : 
+                question.is_greeting ? "opacity-50 border-yellow-500/50 bg-yellow-500/5" : 
+                question.is_duplicate ? "opacity-50 border-red-500/50 bg-red-500/5" : 
                 "border-border hover:border-foreground/20"
-              } ${expandedId === question.id ? "ring-2 ring-primary/20" : ""}`}
+              }`}
               data-testid={`question-card-${question.id}`}
             >
-              {/* Question Header - Always Visible */}
-              <div className="p-5">
-                <div className="flex items-start gap-4">
+              <CardContent className="p-5">
+                {/* Header Row: Number + Username + Name + Badges + Actions */}
+                <div className="flex items-center gap-3 mb-4">
                   {/* Number */}
-                  <div className="w-10 h-10 rounded-full bg-primary/10 text-primary flex items-center justify-center font-bold flex-shrink-0">
+                  <div className="w-9 h-9 rounded-full bg-primary/10 text-primary flex items-center justify-center font-bold text-sm flex-shrink-0">
                     {index + 1}
                   </div>
                   
-                  {/* Main Content */}
-                  <div className="flex-1 min-w-0">
-                    {/* User Info Row - EDITABLE NAME */}
-                    <div className="flex items-center gap-3 mb-3">
-                      <span className="font-mono text-xs text-muted-foreground bg-secondary/50 px-2 py-1 rounded">
-                        {question.youtube_username}
-                      </span>
-                      <span className="text-muted-foreground">→</span>
-                      
-                      {/* Editable Name Field */}
-                      {editingNameId === question.id ? (
-                        <Input
-                          value={question.real_name || ""}
-                          onChange={(e) => handleUpdateQuestion(question.id, "real_name", e.target.value)}
-                          onBlur={() => setEditingNameId(null)}
-                          onKeyDown={(e) => handleNameKeyDown(e, question.id)}
-                          className="h-8 w-48 rounded-sm text-sm font-medium"
-                          placeholder="Nombre para mostrar"
-                          autoFocus
-                          data-testid={`name-input-${question.id}`}
-                        />
-                      ) : (
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setEditingNameId(question.id);
-                          }}
-                          className="flex items-center gap-1.5 px-2 py-1 rounded hover:bg-secondary/50 transition-colors group"
-                          data-testid={`name-edit-button-${question.id}`}
-                        >
-                          <span className="font-medium">
-                            {question.real_name || "Sin nombre"}
-                          </span>
-                          <Pencil className="w-3 h-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
-                        </button>
-                      )}
-                      
-                      {/* Badges */}
-                      <div className="flex gap-2 ml-auto">
-                        {question.is_corrected && (
-                          <Badge variant="secondary" className="text-xs">
-                            <Check className="w-3 h-3 mr-1" />
-                            Corregido
-                          </Badge>
-                        )}
-                        {question.is_greeting && (
-                          <Badge variant="outline" className="text-xs text-yellow-600 border-yellow-500">
-                            Saludo
-                          </Badge>
-                        )}
-                        {question.is_duplicate && (
-                          <Badge variant="destructive" className="text-xs">
-                            Duplicado
-                          </Badge>
-                        )}
-                      </div>
-                    </div>
-                    
-                    {/* Question Text Preview - Clickable to expand */}
-                    <div 
-                      onClick={() => setExpandedId(expandedId === question.id ? null : question.id)}
-                      className="cursor-pointer"
-                    >
-                      <p className={`text-base leading-relaxed ${expandedId === question.id ? "" : "line-clamp-2"}`}>
-                        {question.corrected_text || question.original_text}
-                      </p>
-                    </div>
-                  </div>
+                  {/* Username */}
+                  <span className="font-mono text-xs text-muted-foreground bg-secondary/50 px-2 py-1 rounded flex-shrink-0">
+                    {question.youtube_username}
+                  </span>
                   
-                  {/* Expand Icon */}
-                  <div 
-                    className="flex-shrink-0 text-muted-foreground cursor-pointer p-2 hover:bg-secondary/50 rounded"
-                    onClick={() => setExpandedId(expandedId === question.id ? null : question.id)}
-                  >
-                    {expandedId === question.id ? (
-                      <ChevronUp className="w-5 h-5" />
-                    ) : (
-                      <ChevronDown className="w-5 h-5" />
+                  <span className="text-muted-foreground flex-shrink-0">→</span>
+                  
+                  {/* Editable Name */}
+                  {editingNameId === question.id ? (
+                    <Input
+                      value={question.real_name || ""}
+                      onChange={(e) => handleUpdateQuestion(question.id, "real_name", e.target.value)}
+                      onBlur={() => setEditingNameId(null)}
+                      onKeyDown={(e) => handleKeyDown(e, () => setEditingNameId(null))}
+                      className="h-8 w-48 rounded-sm text-sm font-medium"
+                      placeholder="Nombre para mostrar"
+                      autoFocus
+                      data-testid={`name-input-${question.id}`}
+                    />
+                  ) : (
+                    <button
+                      onClick={() => setEditingNameId(question.id)}
+                      className="flex items-center gap-1.5 px-2 py-1 rounded hover:bg-secondary/50 transition-colors group flex-shrink-0"
+                      data-testid={`name-edit-button-${question.id}`}
+                    >
+                      <span className="font-medium text-sm">
+                        {question.real_name || "Sin nombre"}
+                      </span>
+                      <Pencil className="w-3 h-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
+                    </button>
+                  )}
+                  
+                  {/* Badges */}
+                  <div className="flex gap-2 ml-auto flex-shrink-0">
+                    {question.is_corrected && (
+                      <Badge variant="secondary" className="text-xs bg-green-100 text-green-700 border-green-300">
+                        <Check className="w-3 h-3 mr-1" />
+                        Corregido
+                      </Badge>
+                    )}
+                    {question.is_greeting && (
+                      <Badge variant="outline" className="text-xs text-yellow-700 border-yellow-500 bg-yellow-50">
+                        Saludo
+                      </Badge>
+                    )}
+                    {question.is_duplicate && (
+                      <Badge variant="destructive" className="text-xs">
+                        Duplicado
+                      </Badge>
                     )}
                   </div>
                 </div>
-              </div>
-              
-              {/* Expanded Editor */}
-              {expandedId === question.id && (
-                <div className="px-5 pb-6 pt-2 border-t border-border bg-secondary/20">
-                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                    {/* Left Column - Original */}
-                    <div className="space-y-4">
-                      {/* Original Text */}
-                      <div>
-                        <label className="text-xs font-bold uppercase tracking-wide text-muted-foreground block mb-2">
-                          Texto original
-                        </label>
-                        <Textarea
-                          value={question.original_text}
-                          onChange={(e) => handleUpdateQuestion(question.id, "original_text", e.target.value)}
-                          className="rounded-sm font-mono text-sm min-h-[200px] leading-relaxed"
-                          data-testid="original-text-textarea"
-                        />
-                      </div>
-                    </div>
-                    
-                    {/* Right Column - Corrected */}
-                    <div className="space-y-4">
-                      {/* Corrected Text */}
-                      <div>
-                        <div className="flex items-center justify-between mb-2">
-                          <label className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
-                            Texto corregido
-                          </label>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleCorrectSingle(question.id);
-                            }}
-                            disabled={correctingId === question.id}
-                            className="rounded-sm text-xs"
-                            data-testid="correct-single-button"
-                          >
-                            {correctingId === question.id ? (
-                              <Loader2 className="w-3 h-3 animate-spin mr-1" />
-                            ) : (
-                              <Wand2 className="w-3 h-3 mr-1" />
-                            )}
-                            Corregir con IA
-                          </Button>
-                        </div>
-                        <Textarea
-                          value={question.corrected_text || ""}
-                          onChange={(e) => handleUpdateQuestion(question.id, "corrected_text", e.target.value)}
-                          placeholder="El texto corregido aparecerá aquí o escríbelo manualmente..."
-                          className="rounded-sm text-base min-h-[200px] leading-relaxed"
-                          data-testid="corrected-text-textarea"
-                        />
-                      </div>
-                    </div>
-                  </div>
-                  
-                  {/* Action Buttons */}
-                  <div className="flex items-center gap-3 pt-4 mt-4 border-t border-border">
-                    <Button
-                      variant={question.is_greeting ? "secondary" : "outline"}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleToggleGreeting(question);
-                      }}
-                      className="rounded-sm uppercase tracking-wide text-xs"
-                      data-testid="toggle-greeting-button"
-                    >
-                      {question.is_greeting ? (
-                        <>
-                          <Check className="w-4 h-4 mr-2" />
-                          Es saludo
-                        </>
-                      ) : (
-                        <>
-                          <AlertTriangle className="w-4 h-4 mr-2" />
-                          Marcar saludo
-                        </>
+                
+                {/* Question Text - Full height, auto-resize */}
+                <div className="mb-4">
+                  {editingTextId === question.id ? (
+                    <Textarea
+                      value={question.corrected_text || question.original_text}
+                      onChange={(e) => handleUpdateQuestion(
+                        question.id, 
+                        question.corrected_text ? "corrected_text" : "original_text", 
+                        e.target.value
                       )}
-                    </Button>
-                    
-                    <div className="flex-1" />
-                    
-                    <Button
-                      variant="ghost"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setExpandedId(null);
-                      }}
-                      className="rounded-sm text-xs"
+                      onBlur={() => setEditingTextId(null)}
+                      className="rounded-sm text-base leading-relaxed min-h-[100px] w-full"
+                      autoFocus
+                      data-testid={`text-textarea-${question.id}`}
+                    />
+                  ) : (
+                    <div 
+                      onClick={() => setEditingTextId(question.id)}
+                      className="cursor-text p-3 rounded-sm bg-secondary/30 hover:bg-secondary/50 transition-colors"
                     >
-                      Cerrar
-                    </Button>
-                    
-                    <Button
-                      variant="destructive"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleDeleteQuestion(question.id);
-                      }}
-                      className="rounded-sm uppercase tracking-wide text-xs"
-                      data-testid="delete-question-button"
-                    >
-                      <Trash2 className="w-4 h-4 mr-2" />
-                      Eliminar
-                    </Button>
-                  </div>
+                      <p className="text-base leading-relaxed whitespace-pre-wrap">
+                        {question.corrected_text || question.original_text}
+                      </p>
+                    </div>
+                  )}
                 </div>
-              )}
+                
+                {/* Action Buttons - Always visible */}
+                <div className="flex items-center gap-2 pt-3 border-t border-border">
+                  {/* Corregir con IA */}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleCorrectSingle(question.id)}
+                    disabled={correctingId === question.id}
+                    className="rounded-sm text-xs"
+                    data-testid={`correct-btn-${question.id}`}
+                  >
+                    {correctingId === question.id ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Wand2 className="w-3.5 h-3.5" />
+                    )}
+                    <span className="ml-1.5 hidden sm:inline">Corregir IA</span>
+                  </Button>
+                  
+                  {/* Aceptar */}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleAcceptQuestion(question)}
+                    className="rounded-sm text-xs text-green-600 border-green-300 hover:bg-green-50 hover:text-green-700"
+                    data-testid={`accept-btn-${question.id}`}
+                  >
+                    <CheckCircle className="w-3.5 h-3.5" />
+                    <span className="ml-1.5 hidden sm:inline">Aceptar</span>
+                  </Button>
+                  
+                  {/* Marcar/Desmarcar Saludo */}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleToggleGreeting(question)}
+                    className={`rounded-sm text-xs ${
+                      question.is_greeting 
+                        ? "text-yellow-700 border-yellow-500 bg-yellow-50" 
+                        : "text-muted-foreground"
+                    }`}
+                    data-testid={`greeting-btn-${question.id}`}
+                  >
+                    <AlertTriangle className="w-3.5 h-3.5" />
+                    <span className="ml-1.5 hidden sm:inline">
+                      {question.is_greeting ? "Es saludo" : "Saludo"}
+                    </span>
+                  </Button>
+                  
+                  <div className="flex-1" />
+                  
+                  {/* Eliminar */}
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => handleDeleteQuestion(question.id)}
+                    className="rounded-sm text-xs text-destructive hover:text-destructive hover:bg-destructive/10"
+                    data-testid={`delete-btn-${question.id}`}
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span className="ml-1.5 hidden sm:inline">Eliminar</span>
+                  </Button>
+                </div>
+              </CardContent>
             </Card>
           ))
         )}

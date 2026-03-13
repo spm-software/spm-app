@@ -489,7 +489,7 @@ export default function Configuracion() {
               </div>
 
               <p className="text-xs text-muted-foreground">
-                Nota: Los usuarios registrados (mapeo @username → nombre real) nunca se eliminan automáticamente.
+                Nota: Los usuarios registrados (@username → nombre real) <strong>nunca se eliminan</strong>. Se conservan para futuras importaciones.
               </p>
             </div>
           </CardContent>
