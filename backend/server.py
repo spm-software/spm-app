@@ -807,6 +807,116 @@ async def get_stats():
         "recent_questions": recent_questions
     }
 
+# ----- CLEANUP -----
+
+@api_router.get("/cleanup/stats")
+async def get_cleanup_stats():
+    """Get statistics for cleanup options"""
+    now = datetime.now(timezone.utc)
+    
+    # Count questions by age
+    stats = {}
+    periods = [
+        ("7_days", 7),
+        ("15_days", 15),
+        ("30_days", 30),
+        ("60_days", 60),
+        ("90_days", 90),
+    ]
+    
+    for name, days in periods:
+        cutoff = (now - timedelta(days=days)).isoformat()
+        count = await db.questions.count_documents({
+            "created_at": {"$lt": cutoff}
+        })
+        batch_count = await db.import_batches.count_documents({
+            "created_at": {"$lt": cutoff}
+        })
+        stats[name] = {"questions": count, "batches": batch_count}
+    
+    # Total counts
+    stats["total_questions"] = await db.questions.count_documents({})
+    stats["total_batches"] = await db.import_batches.count_documents({})
+    stats["total_programs"] = await db.programs.count_documents({})
+    stats["total_users"] = await db.user_mappings.count_documents({})
+    
+    return stats
+
+@api_router.delete("/cleanup/questions")
+async def cleanup_old_questions(days: int = Query(..., ge=1, le=365)):
+    """Delete questions older than specified days"""
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    
+    # Get affected batch IDs
+    old_questions = await db.questions.find(
+        {"created_at": {"$lt": cutoff}},
+        {"import_batch_id": 1, "_id": 0}
+    ).to_list(10000)
+    
+    affected_batch_ids = set(q.get("import_batch_id") for q in old_questions if q.get("import_batch_id"))
+    
+    # Delete old questions
+    result = await db.questions.delete_many({"created_at": {"$lt": cutoff}})
+    deleted_questions = result.deleted_count
+    
+    # Delete programs for affected batches that now have no questions
+    deleted_programs = 0
+    for batch_id in affected_batch_ids:
+        remaining = await db.questions.count_documents({"import_batch_id": batch_id})
+        if remaining == 0:
+            prog_result = await db.programs.delete_many({"batch_id": batch_id})
+            deleted_programs += prog_result.deleted_count
+    
+    return {
+        "deleted_questions": deleted_questions,
+        "deleted_programs": deleted_programs,
+        "cutoff_date": cutoff
+    }
+
+@api_router.delete("/cleanup/batches")
+async def cleanup_old_batches(days: int = Query(..., ge=1, le=365)):
+    """Delete batches and their questions older than specified days"""
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    
+    # Find old batches
+    old_batches = await db.import_batches.find(
+        {"created_at": {"$lt": cutoff}},
+        {"id": 1, "_id": 0}
+    ).to_list(1000)
+    
+    batch_ids = [b["id"] for b in old_batches]
+    
+    # Delete questions for these batches
+    questions_result = await db.questions.delete_many({"import_batch_id": {"$in": batch_ids}})
+    
+    # Delete programs for these batches
+    programs_result = await db.programs.delete_many({"batch_id": {"$in": batch_ids}})
+    
+    # Delete the batches
+    batches_result = await db.import_batches.delete_many({"created_at": {"$lt": cutoff}})
+    
+    return {
+        "deleted_batches": batches_result.deleted_count,
+        "deleted_questions": questions_result.deleted_count,
+        "deleted_programs": programs_result.deleted_count,
+        "cutoff_date": cutoff
+    }
+
+@api_router.delete("/cleanup/all")
+async def cleanup_all_data():
+    """Delete ALL data from the database (use with caution)"""
+    questions = await db.questions.delete_many({})
+    programs = await db.programs.delete_many({})
+    batches = await db.import_batches.delete_many({})
+    # Keep user mappings as they are reusable
+    
+    return {
+        "deleted_questions": questions.deleted_count,
+        "deleted_programs": programs.deleted_count,
+        "deleted_batches": batches.deleted_count,
+        "message": "Todos los datos eliminados (usuarios conservados)"
+    }
+
 # Include the router in the main app
 app.include_router(api_router)
 
