@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import axios from "axios";
 import { toast } from "sonner";
 import { Card, CardContent } from "@/components/ui/card";
@@ -22,18 +22,128 @@ import {
   Search,
   MessageSquare,
   Pencil,
-  X,
   CheckCircle
 } from "lucide-react";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
+// Componente separado para editar nombre - evita re-renders
+const EditableName = ({ question, onSave }) => {
+  const [isEditing, setIsEditing] = useState(false);
+  const [localName, setLocalName] = useState(question.real_name || "");
+  const inputRef = useRef(null);
+
+  useEffect(() => {
+    setLocalName(question.real_name || "");
+  }, [question.real_name]);
+
+  useEffect(() => {
+    if (isEditing && inputRef.current) {
+      inputRef.current.focus();
+      inputRef.current.select();
+    }
+  }, [isEditing]);
+
+  const handleSave = () => {
+    if (localName !== question.real_name) {
+      onSave(question.id, "real_name", localName);
+    }
+    setIsEditing(false);
+  };
+
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      handleSave();
+    }
+    if (e.key === 'Escape') {
+      setLocalName(question.real_name || "");
+      setIsEditing(false);
+    }
+  };
+
+  if (isEditing) {
+    return (
+      <Input
+        ref={inputRef}
+        value={localName}
+        onChange={(e) => setLocalName(e.target.value)}
+        onBlur={handleSave}
+        onKeyDown={handleKeyDown}
+        className="h-8 w-48 rounded-sm text-sm font-medium"
+        placeholder="Nombre para mostrar"
+        data-testid={`name-input-${question.id}`}
+      />
+    );
+  }
+
+  return (
+    <button
+      onClick={() => setIsEditing(true)}
+      className="flex items-center gap-1.5 px-2 py-1 rounded hover:bg-secondary/50 transition-colors group flex-shrink-0"
+      data-testid={`name-edit-button-${question.id}`}
+    >
+      <span className="font-medium text-sm">
+        {question.real_name || "Sin nombre"}
+      </span>
+      <Pencil className="w-3 h-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
+    </button>
+  );
+};
+
+// Componente separado para editar texto
+const EditableText = ({ question, onSave }) => {
+  const [isEditing, setIsEditing] = useState(false);
+  const [localText, setLocalText] = useState(question.corrected_text || question.original_text);
+  const textareaRef = useRef(null);
+
+  useEffect(() => {
+    setLocalText(question.corrected_text || question.original_text);
+  }, [question.corrected_text, question.original_text]);
+
+  useEffect(() => {
+    if (isEditing && textareaRef.current) {
+      textareaRef.current.focus();
+    }
+  }, [isEditing]);
+
+  const handleSave = () => {
+    const field = question.corrected_text ? "corrected_text" : "original_text";
+    if (localText !== (question.corrected_text || question.original_text)) {
+      onSave(question.id, field, localText);
+    }
+    setIsEditing(false);
+  };
+
+  if (isEditing) {
+    return (
+      <Textarea
+        ref={textareaRef}
+        value={localText}
+        onChange={(e) => setLocalText(e.target.value)}
+        onBlur={handleSave}
+        className="rounded-sm text-base leading-relaxed min-h-[100px] w-full"
+        data-testid={`text-textarea-${question.id}`}
+      />
+    );
+  }
+
+  return (
+    <div 
+      onClick={() => setIsEditing(true)}
+      className="cursor-text p-3 rounded-sm bg-secondary/30 hover:bg-secondary/50 transition-colors"
+    >
+      <p className="text-base leading-relaxed whitespace-pre-wrap">
+        {question.corrected_text || question.original_text}
+      </p>
+    </div>
+  );
+};
+
 export default function Editor() {
   const [batches, setBatches] = useState([]);
   const [selectedBatch, setSelectedBatch] = useState("");
   const [questions, setQuestions] = useState([]);
-  const [editingNameId, setEditingNameId] = useState(null);
-  const [editingTextId, setEditingTextId] = useState(null);
   const [loading, setLoading] = useState(false);
   const [correcting, setCorrecting] = useState(false);
   const [correctingId, setCorrectingId] = useState(null);
@@ -124,7 +234,10 @@ export default function Editor() {
       await axios.put(`${API}/questions/${question.id}`, {
         is_greeting: !question.is_greeting
       });
-      fetchQuestions();
+      // Update local state
+      setQuestions(prev => prev.map(q => 
+        q.id === question.id ? { ...q, is_greeting: !q.is_greeting } : q
+      ));
       toast.success(question.is_greeting ? "Desmarcado como saludo" : "Marcado como saludo");
     } catch (error) {
       console.error("Error updating question:", error);
@@ -136,40 +249,39 @@ export default function Editor() {
       await axios.put(`${API}/questions/${questionId}`, {
         [field]: value
       });
+      // Update local state
       setQuestions(prev => prev.map(q => 
         q.id === questionId ? { ...q, [field]: value } : q
       ));
     } catch (error) {
       console.error("Error updating question:", error);
+      toast.error("Error al guardar");
     }
   };
 
   const handleDeleteQuestion = async (questionId) => {
     try {
       await axios.delete(`${API}/questions/${questionId}`);
+      setQuestions(prev => prev.filter(q => q.id !== questionId));
       toast.success("Pregunta eliminada");
-      fetchQuestions();
     } catch (error) {
       console.error("Error deleting question:", error);
     }
   };
 
   const handleAcceptQuestion = async (question) => {
-    // Si no está corregida, copiar el texto original como corregido
-    if (!question.corrected_text) {
-      await handleUpdateQuestion(question.id, "corrected_text", question.original_text);
-    }
-    await handleUpdateQuestion(question.id, "is_corrected", true);
-    toast.success("Pregunta aceptada");
-  };
-
-  const handleKeyDown = (e, callback) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      callback();
-    }
-    if (e.key === 'Escape') {
-      callback();
+    try {
+      const updates = { is_corrected: true };
+      if (!question.corrected_text) {
+        updates.corrected_text = question.original_text;
+      }
+      await axios.put(`${API}/questions/${question.id}`, updates);
+      setQuestions(prev => prev.map(q => 
+        q.id === question.id ? { ...q, ...updates } : q
+      ));
+      toast.success("Pregunta aceptada");
+    } catch (error) {
+      console.error("Error accepting question:", error);
     }
   };
 
@@ -288,46 +400,20 @@ export default function Editor() {
               data-testid={`question-card-${question.id}`}
             >
               <CardContent className="p-5">
-                {/* Header Row: Number + Username + Name + Badges + Actions */}
+                {/* Header Row */}
                 <div className="flex items-center gap-3 mb-4">
-                  {/* Number */}
                   <div className="w-9 h-9 rounded-full bg-primary/10 text-primary flex items-center justify-center font-bold text-sm flex-shrink-0">
                     {index + 1}
                   </div>
                   
-                  {/* Username */}
                   <span className="font-mono text-xs text-muted-foreground bg-secondary/50 px-2 py-1 rounded flex-shrink-0">
                     {question.youtube_username}
                   </span>
                   
                   <span className="text-muted-foreground flex-shrink-0">→</span>
                   
-                  {/* Editable Name */}
-                  {editingNameId === question.id ? (
-                    <Input
-                      value={question.real_name || ""}
-                      onChange={(e) => handleUpdateQuestion(question.id, "real_name", e.target.value)}
-                      onBlur={() => setEditingNameId(null)}
-                      onKeyDown={(e) => handleKeyDown(e, () => setEditingNameId(null))}
-                      className="h-8 w-48 rounded-sm text-sm font-medium"
-                      placeholder="Nombre para mostrar"
-                      autoFocus
-                      data-testid={`name-input-${question.id}`}
-                    />
-                  ) : (
-                    <button
-                      onClick={() => setEditingNameId(question.id)}
-                      className="flex items-center gap-1.5 px-2 py-1 rounded hover:bg-secondary/50 transition-colors group flex-shrink-0"
-                      data-testid={`name-edit-button-${question.id}`}
-                    >
-                      <span className="font-medium text-sm">
-                        {question.real_name || "Sin nombre"}
-                      </span>
-                      <Pencil className="w-3 h-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
-                    </button>
-                  )}
+                  <EditableName question={question} onSave={handleUpdateQuestion} />
                   
-                  {/* Badges */}
                   <div className="flex gap-2 ml-auto flex-shrink-0">
                     {question.is_corrected && (
                       <Badge variant="secondary" className="text-xs bg-green-100 text-green-700 border-green-300">
@@ -348,36 +434,13 @@ export default function Editor() {
                   </div>
                 </div>
                 
-                {/* Question Text - Full height, auto-resize */}
+                {/* Question Text */}
                 <div className="mb-4">
-                  {editingTextId === question.id ? (
-                    <Textarea
-                      value={question.corrected_text || question.original_text}
-                      onChange={(e) => handleUpdateQuestion(
-                        question.id, 
-                        question.corrected_text ? "corrected_text" : "original_text", 
-                        e.target.value
-                      )}
-                      onBlur={() => setEditingTextId(null)}
-                      className="rounded-sm text-base leading-relaxed min-h-[100px] w-full"
-                      autoFocus
-                      data-testid={`text-textarea-${question.id}`}
-                    />
-                  ) : (
-                    <div 
-                      onClick={() => setEditingTextId(question.id)}
-                      className="cursor-text p-3 rounded-sm bg-secondary/30 hover:bg-secondary/50 transition-colors"
-                    >
-                      <p className="text-base leading-relaxed whitespace-pre-wrap">
-                        {question.corrected_text || question.original_text}
-                      </p>
-                    </div>
-                  )}
+                  <EditableText question={question} onSave={handleUpdateQuestion} />
                 </div>
                 
-                {/* Action Buttons - Always visible */}
+                {/* Action Buttons */}
                 <div className="flex items-center gap-2 pt-3 border-t border-border">
-                  {/* Corregir con IA */}
                   <Button
                     variant="outline"
                     size="sm"
@@ -394,7 +457,6 @@ export default function Editor() {
                     <span className="ml-1.5 hidden sm:inline">Corregir IA</span>
                   </Button>
                   
-                  {/* Aceptar */}
                   <Button
                     variant="outline"
                     size="sm"
@@ -406,7 +468,6 @@ export default function Editor() {
                     <span className="ml-1.5 hidden sm:inline">Aceptar</span>
                   </Button>
                   
-                  {/* Marcar/Desmarcar Saludo */}
                   <Button
                     variant="outline"
                     size="sm"
@@ -426,7 +487,6 @@ export default function Editor() {
                   
                   <div className="flex-1" />
                   
-                  {/* Eliminar */}
                   <Button
                     variant="ghost"
                     size="sm"
