@@ -166,6 +166,34 @@ async def extract_display_name(youtube_username: str) -> str:
         return ' '.join(word.capitalize() for word in name_parts.split())
     return clean_name
 
+def clean_youtube_metadata(text: str) -> str:
+    """Remove YouTube metadata like timestamps from comment text"""
+    # Patterns to remove:
+    # • Hace X minuto/s, hora/s, día/s, semana/s, mes/es, año/s
+    # • X minutes/hours/days/weeks/months/years ago
+    
+    # Spanish time units (longer words first to avoid partial matches)
+    spanish_units = r'(minutos?|horas?|días?|semanas?|meses|mes|años?)'
+    # English time units  
+    english_units = r'(minutes?|hours?|days?|weeks?|months?|years?)'
+    
+    patterns = [
+        rf'•\s*Hace\s+\d+\s+{spanish_units}\s*',
+        rf'•\s*\d+\s+{english_units}\s+ago\s*',
+        rf'^\s*Hace\s+\d+\s+{spanish_units}\s*',
+        rf'^\s*\d+\s+{english_units}\s+ago\s*',
+    ]
+    
+    cleaned = text
+    for pattern in patterns:
+        cleaned = re.sub(pattern, '', cleaned, flags=re.IGNORECASE | re.MULTILINE)
+    
+    # Clean up extra whitespace and newlines at the start
+    cleaned = re.sub(r'^\s*\n', '', cleaned)
+    cleaned = cleaned.strip()
+    
+    return cleaned
+
 def parse_comments(raw_text: str) -> List[Dict[str, str]]:
     """Parse raw text into individual comments with usernames or real names
     
@@ -194,9 +222,10 @@ def parse_comments(raw_text: str) -> List[Dict[str, str]]:
         if username_match:
             # Save previous comment
             if current_identifier and current_text:
+                clean_text = clean_youtube_metadata('\n'.join(current_text).strip())
                 comments.append({
                     "youtube_username": current_identifier if current_is_username else f"@{current_identifier.lower().replace(' ', '_')}",
-                    "original_text": '\n'.join(current_text).strip(),
+                    "original_text": clean_text,
                     "real_name": None if current_is_username else current_identifier
                 })
             current_identifier = username_match.group(1)
@@ -206,9 +235,10 @@ def parse_comments(raw_text: str) -> List[Dict[str, str]]:
         elif realname_match:
             # Save previous comment
             if current_identifier and current_text:
+                clean_text = clean_youtube_metadata('\n'.join(current_text).strip())
                 comments.append({
                     "youtube_username": current_identifier if current_is_username else f"@{current_identifier.lower().replace(' ', '_')}",
-                    "original_text": '\n'.join(current_text).strip(),
+                    "original_text": clean_text,
                     "real_name": None if current_is_username else current_identifier
                 })
             current_identifier = realname_match.group(1).strip()
@@ -220,9 +250,10 @@ def parse_comments(raw_text: str) -> List[Dict[str, str]]:
     
     # Save last comment
     if current_identifier and current_text:
+        clean_text = clean_youtube_metadata('\n'.join(current_text).strip())
         comments.append({
             "youtube_username": current_identifier if current_is_username else f"@{current_identifier.lower().replace(' ', '_')}",
-            "original_text": '\n'.join(current_text).strip(),
+            "original_text": clean_text,
             "real_name": None if current_is_username else current_identifier
         })
     
