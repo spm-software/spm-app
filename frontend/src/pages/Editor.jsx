@@ -156,141 +156,149 @@ const DuplicatesModal = ({ open, onClose, duplicates, onDelete, onKeep, currentB
   if (!duplicates || duplicates.length === 0) return null;
 
   const formatBatchInfo = (question, type) => {
-    if (type === "in_batch") {
+    if (type === "in_batch" || type === "ai_same_batch") {
       return currentBatchName || "Importación actual";
     }
-    // For historical duplicates
     if (question.batch_name) {
       return question.batch_name;
     }
     if (question.batch_date) {
-      return `Importación del ${new Date(question.batch_date).toLocaleDateString('es-ES', {
+      return new Date(question.batch_date).toLocaleDateString('es-ES', {
         day: 'numeric',
         month: 'long',
         year: 'numeric'
-      })}`;
+      });
     }
     return "Importación anterior";
   };
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className="max-w-4xl max-h-[80vh] overflow-hidden flex flex-col">
-        <DialogHeader>
-          <DialogTitle className="font-heading text-xl uppercase tracking-tight flex items-center gap-2">
-            <Copy className="w-5 h-5 text-primary" />
-            DUPLICADOS ENCONTRADOS ({duplicates.length})
+      <DialogContent className="max-w-5xl max-h-[90vh] overflow-hidden flex flex-col">
+        <DialogHeader className="pb-4 border-b">
+          <DialogTitle className="font-heading text-2xl uppercase tracking-tight flex items-center gap-3">
+            <Copy className="w-6 h-6 text-red-500" />
+            COMPARAR DUPLICADOS
+            <Badge variant="destructive" className="text-base px-3 py-1">{duplicates.length}</Badge>
           </DialogTitle>
+          <p className="text-sm text-muted-foreground mt-2">
+            Elige qué pregunta conservar. Ambas son del <strong>mismo usuario</strong>.
+          </p>
         </DialogHeader>
         
-        <div className="flex-1 overflow-y-auto space-y-6 pr-2">
+        <div className="flex-1 overflow-y-auto py-4">
           {duplicates.map((dup, index) => (
-            <div key={index} className="border border-border rounded-sm p-4 bg-card">
-              {/* Header with location info */}
-              <div className="flex flex-wrap items-center gap-2 mb-4">
-                <Badge variant={dup.type === "ai_detected" || dup.type === "ai_same_batch" ? "default" : (dup.type === "in_history" ? "destructive" : "secondary")}>
-                  {dup.type === "ai_detected" ? "IA: En historial" : 
-                   dup.type === "ai_same_batch" ? "IA: Mismo lote" :
-                   (dup.type === "in_history" ? "Duplicado en historial" : "Duplicado en este lote")}
+            <div key={index} className="mb-8 last:mb-0">
+              {/* User header */}
+              <div className="flex items-center gap-3 mb-4 pb-2 border-b-2 border-primary">
+                <div className="w-10 h-10 rounded-full bg-primary text-primary-foreground flex items-center justify-center font-bold">
+                  {index + 1}
+                </div>
+                <div>
+                  <p className="font-bold text-lg">{dup.new_question.real_name || dup.new_question.username}</p>
+                  <p className="text-xs text-muted-foreground font-mono">{dup.new_question.username}</p>
+                </div>
+                <Badge variant={dup.type === "ai_detected" || dup.type === "ai_same_batch" ? "default" : "destructive"} className="ml-auto">
+                  {dup.type === "ai_detected" || dup.type === "ai_same_batch" ? "Detectado por IA" : `${dup.similarity}% similar`}
                 </Badge>
-                {dup.type !== "ai_detected" && dup.type !== "ai_same_batch" && (
-                  <Badge variant="outline">{dup.similarity}% similar</Badge>
-                )}
               </div>
               
-              {/* Comparison */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {/* New question */}
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2">
-                    <p className="text-xs font-bold uppercase tracking-wide text-primary">
-                      Nueva pregunta
-                    </p>
-                    <Badge variant="outline" className="text-xs bg-primary/10">
-                      {currentBatchName || "Importación actual"}
+              {/* Side by side comparison */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                {/* Question A */}
+                <div className="relative">
+                  <div className="absolute -top-3 left-4 bg-white px-2">
+                    <Badge variant="outline" className="text-xs font-bold bg-blue-50 text-blue-700 border-blue-300">
+                      PREGUNTA A - {formatBatchInfo(dup.new_question, dup.type)}
                     </Badge>
                   </div>
-                  <div className="p-3 bg-primary/5 border border-primary/20 rounded-sm">
-                    <div className="flex items-center gap-2 mb-2">
-                      <span className="font-mono text-xs text-muted-foreground">
-                        {dup.new_question.username}
-                      </span>
-                      {dup.new_question.real_name && (
-                        <span className="text-xs font-medium">
-                          → {dup.new_question.real_name}
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-sm leading-relaxed">
+                  <div className="border-2 border-blue-300 rounded-lg p-5 pt-6 bg-blue-50/30 min-h-[200px]">
+                    <p className="text-base leading-relaxed whitespace-pre-wrap">
                       {dup.new_question.text}
                     </p>
                   </div>
+                  <div className="mt-3 flex justify-center">
+                    <Button
+                      variant="default"
+                      size="lg"
+                      onClick={() => {
+                        onDelete(dup.original_question.id);
+                        onClose();
+                      }}
+                      className="rounded-full px-8 bg-blue-600 hover:bg-blue-700"
+                    >
+                      <Check className="w-5 h-5 mr-2" />
+                      CONSERVAR ESTA
+                    </Button>
+                  </div>
                 </div>
                 
-                {/* Original question */}
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2">
-                    <p className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
-                      Pregunta existente
-                    </p>
-                    <Badge variant="outline" className="text-xs">
-                      {formatBatchInfo(dup.original_question, dup.type)}
+                {/* Question B */}
+                <div className="relative">
+                  <div className="absolute -top-3 left-4 bg-white px-2">
+                    <Badge variant="outline" className="text-xs font-bold bg-amber-50 text-amber-700 border-amber-300">
+                      PREGUNTA B - {formatBatchInfo(dup.original_question, dup.type)}
                     </Badge>
                   </div>
-                  <div className="p-3 bg-secondary/50 border border-border rounded-sm">
-                    <div className="flex items-center gap-2 mb-2">
-                      <span className="font-mono text-xs text-muted-foreground">
-                        {dup.original_question.username}
-                      </span>
-                      {dup.original_question.real_name && (
-                        <span className="text-xs font-medium">
-                          → {dup.original_question.real_name}
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-sm leading-relaxed">
+                  <div className="border-2 border-amber-300 rounded-lg p-5 pt-6 bg-amber-50/30 min-h-[200px]">
+                    <p className="text-base leading-relaxed whitespace-pre-wrap">
                       {dup.original_question.text}
                     </p>
+                  </div>
+                  <div className="mt-3 flex justify-center">
+                    <Button
+                      variant="default"
+                      size="lg"
+                      onClick={() => {
+                        onDelete(dup.new_question.id);
+                        onClose();
+                      }}
+                      className="rounded-full px-8 bg-amber-600 hover:bg-amber-700"
+                    >
+                      <Check className="w-5 h-5 mr-2" />
+                      CONSERVAR ESTA
+                    </Button>
                   </div>
                 </div>
               </div>
               
-              {/* Actions */}
-              <div className="flex items-center gap-3 mt-4 pt-4 border-t border-border">
-                <Button
-                  variant="destructive"
-                  size="sm"
-                  onClick={() => onDelete(dup.new_question.id)}
-                  className="rounded-sm text-xs"
-                >
-                  <Trash2 className="w-3.5 h-3.5 mr-1" />
-                  Eliminar nueva
-                </Button>
+              {/* Alternative actions */}
+              <div className="flex justify-center gap-4 mt-4 pt-4 border-t border-dashed">
                 <Button
                   variant="outline"
                   size="sm"
                   onClick={() => onKeep(dup.new_question.id)}
-                  className="rounded-sm text-xs"
+                  className="rounded-sm text-xs text-muted-foreground"
                 >
-                  <Check className="w-3.5 h-3.5 mr-1" />
-                  Mantener ambas
+                  Mantener ambas (no son duplicados)
                 </Button>
                 <Button
                   variant="ghost"
                   size="sm"
-                  onClick={() => onDelete(dup.original_question.id)}
-                  className="rounded-sm text-xs text-muted-foreground"
+                  onClick={() => {
+                    onDelete(dup.new_question.id);
+                    onDelete(dup.original_question.id);
+                    onClose();
+                  }}
+                  className="rounded-sm text-xs text-red-500 hover:text-red-700 hover:bg-red-50"
                 >
                   <Trash2 className="w-3.5 h-3.5 mr-1" />
-                  Eliminar original
+                  Eliminar ambas
                 </Button>
               </div>
+              
+              {index < duplicates.length - 1 && (
+                <div className="border-b-4 border-dotted border-muted mt-8" />
+              )}
             </div>
           ))}
         </div>
         
-        <div className="pt-4 border-t border-border flex justify-end">
-          <Button onClick={onClose} className="rounded-sm">
+        <div className="pt-4 border-t flex justify-between items-center">
+          <p className="text-sm text-muted-foreground">
+            {duplicates.length} par{duplicates.length > 1 ? 'es' : ''} de duplicados por revisar
+          </p>
+          <Button onClick={onClose} variant="outline" className="rounded-sm">
             Cerrar
           </Button>
         </div>
@@ -625,6 +633,61 @@ export default function Editor() {
     }
   };
 
+  const handleViewDuplicate = async (question) => {
+    // First check if we already have this duplicate in memory
+    const existingDup = duplicates.find(d => 
+      d.new_question.id === question.id || d.original_question.id === question.id
+    );
+    
+    if (existingDup) {
+      setDuplicates([existingDup]);
+      setShowDuplicatesModal(true);
+      return;
+    }
+    
+    // If not, search for the duplicate
+    if (question.duplicate_of) {
+      // Find the original question
+      try {
+        const response = await axios.get(`${API}/questions/search?q=${encodeURIComponent(question.real_name || '')}`);
+        const originalQ = response.data.results.find(q => q.id === question.duplicate_of);
+        
+        if (originalQ) {
+          // Get batch info
+          const batchResponse = await axios.get(`${API}/batches`);
+          const batch = batchResponse.data.find(b => b.id === originalQ.import_batch_id);
+          
+          setDuplicates([{
+            new_question: {
+              id: question.id,
+              username: question.youtube_username,
+              real_name: question.real_name,
+              text: question.corrected_text || question.original_text
+            },
+            original_question: {
+              id: originalQ.id,
+              username: originalQ.youtube_username,
+              real_name: originalQ.real_name,
+              text: originalQ.corrected_text || originalQ.original_text,
+              batch_name: batch?.name,
+              batch_date: batch?.created_at
+            },
+            type: "ai_detected",
+            similarity: 100
+          }]);
+          setShowDuplicatesModal(true);
+        } else {
+          toast.error("No se pudo encontrar la pregunta duplicada original");
+        }
+      } catch (error) {
+        console.error("Error finding duplicate:", error);
+        toast.error("Error al buscar el duplicado");
+      }
+    } else {
+      toast.info("Ejecuta 'DUPLICADOS CON IA' para encontrar la pregunta original");
+    }
+  };
+
   const handleToggleGreeting = async (question) => {
     try {
       await axios.put(`${API}/questions/${question.id}`, {
@@ -928,14 +991,7 @@ export default function Editor() {
                       <Badge 
                         variant="destructive" 
                         className="text-xs cursor-pointer hover:bg-red-700"
-                        onClick={() => {
-                          // Find and show the duplicate info
-                          const dup = duplicates.find(d => d.new_question.id === question.id || d.original_question.id === question.id);
-                          if (dup) {
-                            setDuplicates([dup]);
-                            setShowDuplicatesModal(true);
-                          }
-                        }}
+                        onClick={() => handleViewDuplicate(question)}
                         title="Ver pregunta duplicada"
                       >
                         Duplicado - Click para comparar
