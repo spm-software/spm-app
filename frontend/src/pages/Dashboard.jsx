@@ -46,6 +46,8 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [editingDateId, setEditingDateId] = useState(null);
   const [editingDateValue, setEditingDateValue] = useState("");
+  const [editingNameId, setEditingNameId] = useState(null);
+  const [editingNameValue, setEditingNameValue] = useState("");
 
   useEffect(() => {
     fetchData();
@@ -101,6 +103,30 @@ export default function Dashboard() {
   const handleCancelEdit = () => {
     setEditingDateId(null);
     setEditingDateValue("");
+  };
+
+  const handleEditName = (batch) => {
+    setEditingNameValue(batch.name || "");
+    setEditingNameId(batch.id);
+  };
+
+  const handleSaveName = async (batchId) => {
+    try {
+      await axios.put(`${API}/batches/${batchId}`, {
+        name: editingNameValue
+      });
+      toast.success("Nombre actualizado");
+      setEditingNameId(null);
+      fetchData();
+    } catch (error) {
+      console.error("Error updating name:", error);
+      toast.error("Error al actualizar nombre");
+    }
+  };
+
+  const handleCancelNameEdit = () => {
+    setEditingNameId(null);
+    setEditingNameValue("");
   };
 
   const handleGoToEditor = (batchId) => {
@@ -225,7 +251,53 @@ export default function Dashboard() {
                 data-testid={`batch-card-${batch.id}`}
               >
                 <CardContent className="p-5">
-                  {/* Batch Header */}
+                  {/* Batch Header - Name */}
+                  <div className="mb-2">
+                    {editingNameId === batch.id ? (
+                      <div className="flex items-center gap-2">
+                        <Input
+                          type="text"
+                          value={editingNameValue}
+                          onChange={(e) => setEditingNameValue(e.target.value)}
+                          placeholder="Nombre de la importación..."
+                          className="h-8 flex-1 rounded-sm text-sm"
+                          autoFocus
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') handleSaveName(batch.id);
+                            if (e.key === 'Escape') handleCancelNameEdit();
+                          }}
+                        />
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleSaveName(batch.id)}
+                          className="h-8 w-8 p-0 text-green-600"
+                        >
+                          <Check className="w-4 h-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={handleCancelNameEdit}
+                          className="h-8 w-8 p-0 text-muted-foreground"
+                        >
+                          <X className="w-4 h-4" />
+                        </Button>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => handleEditName(batch)}
+                        className="group/name flex items-center gap-2 hover:bg-secondary/50 rounded px-1 -ml-1 transition-colors w-full text-left"
+                      >
+                        <p className="font-heading text-lg font-bold truncate">
+                          {batch.name || "Sin nombre"}
+                        </p>
+                        <Pencil className="w-3 h-3 text-muted-foreground opacity-0 group-hover/name:opacity-100 transition-opacity flex-shrink-0" />
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Batch Date */}
                   <div className="flex items-start justify-between mb-4">
                     <div>
                       {editingDateId === batch.id ? (
@@ -258,7 +330,7 @@ export default function Dashboard() {
                           onClick={() => handleEditDate(batch)}
                           className="group/date flex items-center gap-2 hover:bg-secondary/50 rounded px-1 -ml-1 transition-colors"
                         >
-                          <p className="font-heading text-lg font-bold">
+                          <p className="text-sm text-muted-foreground">
                             {new Date(batch.created_at).toLocaleDateString('es-ES', {
                               day: 'numeric',
                               month: 'long',
@@ -268,7 +340,7 @@ export default function Dashboard() {
                           <Pencil className="w-3 h-3 text-muted-foreground opacity-0 group-hover/date:opacity-100 transition-opacity" />
                         </button>
                       )}
-                      <p className="text-xs text-muted-foreground font-mono">
+                      <p className="text-xs text-muted-foreground font-mono mt-1">
                         {batch.id.slice(0, 8)}...
                       </p>
                     </div>

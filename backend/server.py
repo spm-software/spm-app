@@ -95,6 +95,7 @@ class ProgramCreate(BaseModel):
 class ImportBatch(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    name: Optional[str] = None  # Custom name for the batch
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     question_count: int = 0
     is_distributed: bool = False
@@ -1032,12 +1033,16 @@ async def delete_batch(batch_id: str):
     return {"message": "Lote eliminado"}
 
 class BatchUpdate(BaseModel):
+    name: Optional[str] = None
     created_at: Optional[str] = None
 
 @api_router.put("/batches/{batch_id}")
 async def update_batch(batch_id: str, update: BatchUpdate):
-    """Update batch details like date"""
+    """Update batch details like name and date"""
     update_data = {}
+    
+    if update.name is not None:
+        update_data['name'] = update.name if update.name.strip() else None
     
     if update.created_at:
         # Parse the date string and convert to ISO format
