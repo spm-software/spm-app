@@ -151,8 +151,26 @@ const EditableText = ({ question, onSave }) => {
 };
 
 // Modal de duplicados
-const DuplicatesModal = ({ open, onClose, duplicates, onDelete, onKeep }) => {
+const DuplicatesModal = ({ open, onClose, duplicates, onDelete, onKeep, currentBatchName }) => {
   if (!duplicates || duplicates.length === 0) return null;
+
+  const formatBatchInfo = (question, type) => {
+    if (type === "in_batch") {
+      return currentBatchName || "Importación actual";
+    }
+    // For historical duplicates
+    if (question.batch_name) {
+      return question.batch_name;
+    }
+    if (question.batch_date) {
+      return `Importación del ${new Date(question.batch_date).toLocaleDateString('es-ES', {
+        day: 'numeric',
+        month: 'long',
+        year: 'numeric'
+      })}`;
+    }
+    return "Importación anterior";
+  };
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
@@ -167,10 +185,10 @@ const DuplicatesModal = ({ open, onClose, duplicates, onDelete, onKeep }) => {
         <div className="flex-1 overflow-y-auto space-y-6 pr-2">
           {duplicates.map((dup, index) => (
             <div key={index} className="border border-border rounded-sm p-4 bg-card">
-              {/* Header */}
-              <div className="flex items-center gap-2 mb-4">
+              {/* Header with location info */}
+              <div className="flex flex-wrap items-center gap-2 mb-4">
                 <Badge variant={dup.type === "in_history" ? "destructive" : "secondary"}>
-                  {dup.type === "in_history" ? "En historial" : "En este lote"}
+                  {dup.type === "in_history" ? "Duplicado en historial" : "Duplicado en este lote"}
                 </Badge>
                 <Badge variant="outline">{dup.similarity}% similar</Badge>
               </div>
@@ -179,9 +197,14 @@ const DuplicatesModal = ({ open, onClose, duplicates, onDelete, onKeep }) => {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {/* New question */}
                 <div className="space-y-2">
-                  <p className="text-xs font-bold uppercase tracking-wide text-primary">
-                    Nueva pregunta (importada ahora)
-                  </p>
+                  <div className="flex items-center gap-2">
+                    <p className="text-xs font-bold uppercase tracking-wide text-primary">
+                      Nueva pregunta
+                    </p>
+                    <Badge variant="outline" className="text-xs bg-primary/10">
+                      {currentBatchName || "Importación actual"}
+                    </Badge>
+                  </div>
                   <div className="p-3 bg-primary/5 border border-primary/20 rounded-sm">
                     <div className="flex items-center gap-2 mb-2">
                       <span className="font-mono text-xs text-muted-foreground">
@@ -201,9 +224,14 @@ const DuplicatesModal = ({ open, onClose, duplicates, onDelete, onKeep }) => {
                 
                 {/* Original question */}
                 <div className="space-y-2">
-                  <p className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
-                    Pregunta original {dup.type === "in_history" && "(anterior)"}
-                  </p>
+                  <div className="flex items-center gap-2">
+                    <p className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
+                      Pregunta existente
+                    </p>
+                    <Badge variant="outline" className="text-xs">
+                      {formatBatchInfo(dup.original_question, dup.type)}
+                    </Badge>
+                  </div>
                   <div className="p-3 bg-secondary/50 border border-border rounded-sm">
                     <div className="flex items-center gap-2 mb-2">
                       <span className="font-mono text-xs text-muted-foreground">
@@ -218,11 +246,6 @@ const DuplicatesModal = ({ open, onClose, duplicates, onDelete, onKeep }) => {
                     <p className="text-sm leading-relaxed">
                       {dup.original_question.text}
                     </p>
-                    {dup.original_question.created_at && (
-                      <p className="text-xs text-muted-foreground mt-2">
-                        Fecha: {new Date(dup.original_question.created_at).toLocaleDateString('es-ES')}
-                      </p>
-                    )}
                   </div>
                 </div>
               </div>
@@ -927,6 +950,10 @@ export default function Editor() {
         duplicates={duplicates}
         onDelete={handleDeleteQuestion}
         onKeep={handleKeepBoth}
+        currentBatchName={batches.find(b => b.id === selectedBatch)?.name || 
+          (batches.find(b => b.id === selectedBatch)?.created_at ? 
+            `Importación del ${new Date(batches.find(b => b.id === selectedBatch).created_at).toLocaleDateString('es-ES', { day: 'numeric', month: 'long' })}` : 
+            'Importación actual')}
       />
 
       <SearchModal
