@@ -418,6 +418,7 @@ export default function Editor() {
   const [duplicates, setDuplicates] = useState([]);
   const [showDuplicatesModal, setShowDuplicatesModal] = useState(false);
   const [showSearchModal, setShowSearchModal] = useState(false);
+  const initialBatchLoaded = useRef(false);
 
   useEffect(() => {
     fetchBatches();
@@ -434,13 +435,16 @@ export default function Editor() {
       const response = await axios.get(`${API}/batches`);
       setBatches(response.data);
       
-      // Check if there's a selected batch from Dashboard
-      const storedBatch = sessionStorage.getItem('selectedBatch');
-      if (storedBatch && response.data.some(b => b.id === storedBatch)) {
-        setSelectedBatch(storedBatch);
-        sessionStorage.removeItem('selectedBatch');
-      } else if (response.data.length > 0) {
-        setSelectedBatch(response.data[0].id);
+      // Check if there's a selected batch from Dashboard (only on first load)
+      if (!initialBatchLoaded.current) {
+        initialBatchLoaded.current = true;
+        const storedBatch = sessionStorage.getItem('selectedBatch');
+        if (storedBatch && response.data.some(b => b.id === storedBatch)) {
+          setSelectedBatch(storedBatch);
+          sessionStorage.removeItem('selectedBatch');
+        } else if (response.data.length > 0 && !selectedBatch) {
+          setSelectedBatch(response.data[0].id);
+        }
       }
     } catch (error) {
       console.error("Error fetching batches:", error);
