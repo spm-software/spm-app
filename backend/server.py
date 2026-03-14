@@ -553,6 +553,128 @@ Aplica estas preferencias fijas del estilo SPM:
         logger.error(f"Error correcting text: {e}")
         return text
 
+
+async def check_duplicates_with_ai(questions_to_check: List[Dict], history_questions: List[Dict]) -> List[Dict]:
+    """Use AI to find semantic duplicates between new questions and history"""
+    from emergentintegrations.llm.chat import LlmChat, UserMessage
+    
+    duplicates_found = []
+    
+    try:
+        api_key = os.environ.get('EMERGENT_LLM_KEY')
+        if not api_key:
+            logger.warning("No EMERGENT_LLM_KEY found for duplicate check")
+            return duplicates_found
+        
+        # Group questions by user for more efficient comparison
+        history_by_user = {}
+        for hq in history_questions:
+            user = normalize_text(hq.get("real_name", "") or hq.get("youtube_username", ""))
+            if user not in history_by_user:
+                history_by_user[user] = []
+            history_by_user[user].append(hq)
+        
+        for new_q in questions_to_check:
+            new_user = normalize_text(new_q.get("real_name", "") or new_q.get("youtube_username", ""))
+            new_text = new_q.get("corrected_text") or new_q.get("original_text", "")
+            
+            # Get questions from same user in history
+            user_history = history_by_user.get(new_user, [])
+            
+            if not user_history:
+                continue
+            
+            # Prepare the comparison prompt
+            history_list = "\n".join([
+                f"{i+1}. {(hq.get('corrected_text') or hq.get('original_text', ''))[:250]}"
+                for i, hq in enumerate(user_history[:15])
+            ])
+            
+            chat = LlmChat(
+                api_key=api_key,
+                session_id=f"duplicate-check-{uuid.uuid4()}",
+                system_message="""Eres un detector de preguntas duplicadas para un programa de YouTube cristiano.
+Tu tarea es identificar si una NUEVA pregunta ya fue hecha antes por el MISMO usuario.
+
+Dos preguntas son DUPLICADAS si:
+- Preguntan sobre el MISMO tema específico (ej: ambas sobre "la parábola del sembrador")
+- Buscan la MISMA información o explicación
+- Son variaciones o reformulaciones de la misma duda
+
+NO son duplicadas si:
+- Solo comparten palabras comunes pero preguntan cosas diferentes
+- Son del mismo tema general pero preguntas específicas diferentes
+- Una es más amplia y otra más específica sobre aspectos distintos
+
+Responde SOLO con los números de las preguntas duplicadas separados por comas, o "NINGUNA" si no hay duplicados.
+Ejemplo: "1, 3" o "NINGUNA"
+"""
+            )
+            
+            chat.with_model("openai", "gpt-5.2")
+            
+            user_prompt = f"""NUEVA PREGUNTA de {new_q.get('real_name', 'Usuario')}:
+"{new_text}"
+
+PREGUNTAS ANTERIORES del mismo usuario:
+{history_list}
+
+¿Cuáles de las preguntas anteriores son duplicadas de la nueva? Responde SOLO números o NINGUNA."""
+            
+            user_message = UserMessage(text=user_prompt)
+            response = await chat.send_message(user_message)
+            response = response.strip().upper() if response else ""
+            
+            if response and response != "NINGUNA":
+                # Parse the response to get duplicate numbers
+                try:
+                    numbers = [int(n.strip()) for n in response.replace(".", ",").split(",") if n.strip().isdigit()]
+                    for num in numbers:
+                        if 1 <= num <= len(user_history):
+                            hist_q = user_history[num - 1]
+                            # Get batch info
+                            hist_batch = None
+                            if hist_q.get("import_batch_id"):
+                                hist_batch = await db.import_batches.find_one(
+                                    {"id": hist_q["import_batch_id"]},
+                                    {"_id": 0, "name": 1, "created_at": 1}
+                                )
+                            
+                            duplicates_found.append({
+                                "new_question": {
+                                    "id": new_q["id"],
+                                    "username": new_q.get("youtube_username"),
+                                    "real_name": new_q.get("real_name"),
+                                    "text": new_text,
+                                    "created_at": new_q.get("created_at")
+                                },
+                                "original_question": {
+                                    "id": hist_q["id"],
+                                    "username": hist_q.get("youtube_username"),
+                                    "real_name": hist_q.get("real_name"),
+                                    "text": hist_q.get("corrected_text") or hist_q.get("original_text"),
+                                    "created_at": hist_q.get("created_at"),
+                                    "batch_id": hist_q.get("import_batch_id"),
+                                    "batch_name": hist_batch.get("name") if hist_batch else None,
+                                    "batch_date": hist_batch.get("created_at") if hist_batch else None
+                                },
+                                "similarity": 100,
+                                "type": "ai_detected"
+                            })
+                            
+                            # Mark as duplicate in DB
+                            await db.questions.update_one(
+                                {"id": new_q["id"]},
+                                {"$set": {"is_duplicate": True, "duplicate_of": hist_q["id"]}}
+                            )
+                except Exception as parse_error:
+                    logger.error(f"Error parsing AI response: {parse_error}")
+                    
+    except Exception as e:
+        logger.error(f"Error in AI duplicate check: {e}")
+    
+    return duplicates_found
+
 # ==================== API ROUTES ====================
 
 @api_router.get("/")
@@ -959,6 +1081,40 @@ async def check_duplicates(batch_id: str):
                         break
     
     return {"duplicates_count": len(duplicates_found), "duplicates": duplicates_found}
+
+
+@api_router.post("/questions/check-duplicates-ai/{batch_id}")
+async def check_duplicates_ai(batch_id: str):
+    """Check for duplicate questions using AI semantic comparison.
+    Compares questions from same users across all batches."""
+    
+    # Get questions from current batch
+    questions = await db.questions.find(
+        {"import_batch_id": batch_id, "is_greeting": {"$ne": True}},
+        {"_id": 0}
+    ).to_list(500)
+    
+    if not questions:
+        return {"duplicates_count": 0, "duplicates": [], "message": "No questions in batch"}
+    
+    # Get ALL history questions (excluding current batch)
+    history_questions = await db.questions.find(
+        {
+            "is_greeting": {"$ne": True},
+            "import_batch_id": {"$ne": batch_id}
+        },
+        {"_id": 0}
+    ).to_list(10000)
+    
+    # Use AI to find duplicates
+    duplicates = await check_duplicates_with_ai(questions, history_questions)
+    
+    return {
+        "duplicates_count": len(duplicates),
+        "duplicates": duplicates,
+        "questions_checked": len(questions),
+        "history_checked": len(history_questions)
+    }
 
 @api_router.put("/questions/{question_id}/clear-duplicate")
 async def clear_duplicate_flag(question_id: str):

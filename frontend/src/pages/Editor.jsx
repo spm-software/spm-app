@@ -32,7 +32,8 @@ import {
   Copy,
   X,
   ArrowRight,
-  Users
+  Users,
+  Sparkles
 } from "lucide-react";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -187,10 +188,12 @@ const DuplicatesModal = ({ open, onClose, duplicates, onDelete, onKeep, currentB
             <div key={index} className="border border-border rounded-sm p-4 bg-card">
               {/* Header with location info */}
               <div className="flex flex-wrap items-center gap-2 mb-4">
-                <Badge variant={dup.type === "in_history" ? "destructive" : "secondary"}>
-                  {dup.type === "in_history" ? "Duplicado en historial" : "Duplicado en este lote"}
+                <Badge variant={dup.type === "ai_detected" ? "default" : (dup.type === "in_history" ? "destructive" : "secondary")}>
+                  {dup.type === "ai_detected" ? "Detectado por IA" : (dup.type === "in_history" ? "Duplicado en historial" : "Duplicado en este lote")}
                 </Badge>
-                <Badge variant="outline">{dup.similarity}% similar</Badge>
+                {dup.type !== "ai_detected" && (
+                  <Badge variant="outline">{dup.similarity}% similar</Badge>
+                )}
               </div>
               
               {/* Comparison */}
@@ -592,6 +595,29 @@ export default function Editor() {
     }
   };
 
+  const handleCheckDuplicatesAI = async () => {
+    setCheckingDuplicates(true);
+    toast.info("Buscando duplicados con IA... esto puede tardar unos segundos");
+    try {
+      const response = await axios.post(`${API}/questions/check-duplicates-ai/${selectedBatch}`, {}, {
+        timeout: 120000 // 2 minutes timeout for AI processing
+      });
+      setDuplicates(response.data.duplicates);
+      if (response.data.duplicates.length > 0) {
+        setShowDuplicatesModal(true);
+        toast.success(`${response.data.duplicates_count} duplicados encontrados con IA`);
+      } else {
+        toast.success("No se encontraron duplicados semánticos");
+      }
+      fetchQuestions();
+    } catch (error) {
+      console.error("Error checking duplicates with AI:", error);
+      toast.error("Error al buscar duplicados con IA");
+    } finally {
+      setCheckingDuplicates(false);
+    }
+  };
+
   const handleToggleGreeting = async (question) => {
     try {
       await axios.put(`${API}/questions/${question.id}`, {
@@ -750,7 +776,23 @@ export default function Editor() {
           ) : (
             <Search className="w-4 h-4 mr-2" />
           )}
-          Buscar duplicados
+          Duplicados (rápido)
+        </Button>
+
+        <Button
+          variant="default"
+          onClick={handleCheckDuplicatesAI}
+          disabled={checkingDuplicates || questions.length === 0}
+          size="lg"
+          className="rounded-sm uppercase tracking-wide text-xs bg-primary"
+          data-testid="check-duplicates-ai-button"
+        >
+          {checkingDuplicates ? (
+            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+          ) : (
+            <Sparkles className="w-4 h-4 mr-2" />
+          )}
+          Duplicados con IA
         </Button>
 
         {duplicates.length > 0 && (
