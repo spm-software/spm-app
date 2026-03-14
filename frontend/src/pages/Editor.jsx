@@ -568,10 +568,14 @@ export default function Editor() {
   };
 
   const handleUpdateNames = async () => {
+    const scrollY = window.scrollY;
     try {
       const response = await axios.post(`${API}/questions/update-names/${selectedBatch}`);
       toast.success(`${response.data.updated_count} nombres actualizados`);
-      fetchQuestions();
+      await fetchQuestions();
+      requestAnimationFrame(() => {
+        window.scrollTo(0, scrollY);
+      });
     } catch (error) {
       console.error("Error updating names:", error);
       toast.error("Error al actualizar nombres");
@@ -579,13 +583,17 @@ export default function Editor() {
   };
 
   const handleCorrectSingle = async (questionId) => {
+    const scrollY = window.scrollY;
     setCorrectingId(questionId);
     try {
       await axios.post(`${API}/questions/correct`, {
         question_ids: [questionId]
       });
       toast.success("Pregunta corregida");
-      fetchQuestions();
+      await fetchQuestions();
+      requestAnimationFrame(() => {
+        window.scrollTo(0, scrollY);
+      });
     } catch (error) {
       console.error("Error correcting:", error);
       toast.error("Error al corregir pregunta");
