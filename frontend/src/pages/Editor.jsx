@@ -31,7 +31,8 @@ import {
   CheckCircle,
   Copy,
   X,
-  ArrowRight
+  ArrowRight,
+  Users
 } from "lucide-react";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -321,13 +322,24 @@ export default function Editor() {
     setCorrecting(true);
     try {
       const response = await axios.post(`${API}/questions/correct-all/${selectedBatch}`);
-      toast.success(`${response.data.corrected_count} preguntas corregidas`);
+      toast.success(`${response.data.corrected_count} preguntas corregidas (nombres actualizados)`);
       fetchQuestions();
     } catch (error) {
       console.error("Error correcting:", error);
       toast.error("Error al corregir preguntas");
     } finally {
       setCorrecting(false);
+    }
+  };
+
+  const handleUpdateNames = async () => {
+    try {
+      const response = await axios.post(`${API}/questions/update-names/${selectedBatch}`);
+      toast.success(`${response.data.updated_count} nombres actualizados`);
+      fetchQuestions();
+    } catch (error) {
+      console.error("Error updating names:", error);
+      toast.error("Error al actualizar nombres");
     }
   };
 
@@ -516,6 +528,18 @@ export default function Editor() {
             Ver {duplicates.length} duplicados
           </Button>
         )}
+
+        <Button
+          variant="outline"
+          onClick={handleUpdateNames}
+          disabled={questions.length === 0}
+          size="lg"
+          className="rounded-sm uppercase tracking-wide text-xs"
+          data-testid="update-names-button"
+        >
+          <Users className="w-4 h-4 mr-2" />
+          Actualizar nombres
+        </Button>
 
         <div className="flex-1" />
         

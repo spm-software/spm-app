@@ -538,6 +538,14 @@ async def correct_questions(data: CorrectionRequest):
     for qid in data.question_ids:
         question = await db.questions.find_one({"id": qid}, {"_id": 0})
         if question:
+            # First, update real_name from user mappings if available
+            stored_name = await get_real_name(question.get("youtube_username", ""))
+            if stored_name and stored_name != question.get("real_name"):
+                await db.questions.update_one(
+                    {"id": qid},
+                    {"$set": {"real_name": stored_name}}
+                )
+            
             text_to_correct = question.get("original_text", "")
             corrected_text = await correct_text_with_ai(text_to_correct, settings.llm_provider)
             
@@ -545,7 +553,7 @@ async def correct_questions(data: CorrectionRequest):
                 {"id": qid},
                 {"$set": {"corrected_text": corrected_text, "is_corrected": True}}
             )
-            corrected.append({"id": qid, "corrected_text": corrected_text})
+            corrected.append({"id": qid, "corrected_text": corrected_text, "real_name": stored_name})
     
     return {"corrected": corrected}
 
@@ -561,6 +569,14 @@ async def correct_all_questions(batch_id: str):
     corrected = []
     
     for question in questions:
+        # First, update real_name from user mappings if available
+        stored_name = await get_real_name(question.get("youtube_username", ""))
+        if stored_name:
+            await db.questions.update_one(
+                {"id": question["id"]},
+                {"$set": {"real_name": stored_name}}
+            )
+        
         if not question.get("is_corrected"):
             text_to_correct = question.get("original_text", "")
             corrected_text = await correct_text_with_ai(text_to_correct, settings.llm_provider)
@@ -681,6 +697,26 @@ async def clear_duplicate_flag(question_id: str):
         {"$set": {"is_duplicate": False, "duplicate_of": None}}
     )
     return {"message": "Duplicate flag cleared"}
+
+@api_router.post("/questions/update-names/{batch_id}")
+async def update_names_from_mappings(batch_id: str):
+    """Update all question names from stored user mappings"""
+    questions = await db.questions.find(
+        {"import_batch_id": batch_id},
+        {"_id": 0}
+    ).to_list(500)
+    
+    updated = 0
+    for question in questions:
+        stored_name = await get_real_name(question.get("youtube_username", ""))
+        if stored_name and stored_name != question.get("real_name"):
+            await db.questions.update_one(
+                {"id": question["id"]},
+                {"$set": {"real_name": stored_name}}
+            )
+            updated += 1
+    
+    return {"updated_count": updated}
 
 # ----- PROGRAMS -----
 
