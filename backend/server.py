@@ -1031,6 +1031,33 @@ async def delete_batch(batch_id: str):
     
     return {"message": "Lote eliminado"}
 
+class BatchUpdate(BaseModel):
+    created_at: Optional[str] = None
+
+@api_router.put("/batches/{batch_id}")
+async def update_batch(batch_id: str, update: BatchUpdate):
+    """Update batch details like date"""
+    update_data = {}
+    
+    if update.created_at:
+        # Parse the date string and convert to ISO format
+        try:
+            parsed_date = datetime.fromisoformat(update.created_at.replace('Z', '+00:00'))
+            update_data['created_at'] = parsed_date.isoformat()
+        except:
+            update_data['created_at'] = update.created_at
+    
+    if update_data:
+        result = await db.import_batches.update_one(
+            {"id": batch_id},
+            {"$set": update_data}
+        )
+        if result.matched_count == 0:
+            raise HTTPException(status_code=404, detail="Lote no encontrado")
+    
+    batch = await db.import_batches.find_one({"id": batch_id}, {"_id": 0})
+    return batch
+
 # ----- STATS -----
 
 @api_router.get("/stats")

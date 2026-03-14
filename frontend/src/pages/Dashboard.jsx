@@ -4,6 +4,7 @@ import axios from "axios";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 import { 
   MessageSquare, 
   Users, 
@@ -13,7 +14,10 @@ import {
   Trash2,
   Edit3,
   Layers,
-  Download
+  Download,
+  Pencil,
+  Check,
+  X
 } from "lucide-react";
 import {
   AlertDialog,
@@ -40,6 +44,8 @@ export default function Dashboard() {
   });
   const [batches, setBatches] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [editingDateId, setEditingDateId] = useState(null);
+  const [editingDateValue, setEditingDateValue] = useState("");
 
   useEffect(() => {
     fetchData();
@@ -69,6 +75,32 @@ export default function Dashboard() {
       console.error("Error deleting batch:", error);
       toast.error("Error al eliminar lote");
     }
+  };
+
+  const handleEditDate = (batch) => {
+    // Format date for input type="date"
+    const date = new Date(batch.created_at);
+    setEditingDateValue(date.toISOString().split('T')[0]);
+    setEditingDateId(batch.id);
+  };
+
+  const handleSaveDate = async (batchId) => {
+    try {
+      await axios.put(`${API}/batches/${batchId}`, {
+        created_at: new Date(editingDateValue).toISOString()
+      });
+      toast.success("Fecha actualizada");
+      setEditingDateId(null);
+      fetchData();
+    } catch (error) {
+      console.error("Error updating date:", error);
+      toast.error("Error al actualizar fecha");
+    }
+  };
+
+  const handleCancelEdit = () => {
+    setEditingDateId(null);
+    setEditingDateValue("");
   };
 
   const handleGoToEditor = (batchId) => {
@@ -196,13 +228,46 @@ export default function Dashboard() {
                   {/* Batch Header */}
                   <div className="flex items-start justify-between mb-4">
                     <div>
-                      <p className="font-heading text-lg font-bold">
-                        {new Date(batch.created_at).toLocaleDateString('es-ES', {
-                          day: 'numeric',
-                          month: 'long',
-                          year: 'numeric'
-                        })}
-                      </p>
+                      {editingDateId === batch.id ? (
+                        <div className="flex items-center gap-2">
+                          <Input
+                            type="date"
+                            value={editingDateValue}
+                            onChange={(e) => setEditingDateValue(e.target.value)}
+                            className="h-8 w-40 rounded-sm text-sm"
+                          />
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleSaveDate(batch.id)}
+                            className="h-8 w-8 p-0 text-green-600"
+                          >
+                            <Check className="w-4 h-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={handleCancelEdit}
+                            className="h-8 w-8 p-0 text-muted-foreground"
+                          >
+                            <X className="w-4 h-4" />
+                          </Button>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => handleEditDate(batch)}
+                          className="group/date flex items-center gap-2 hover:bg-secondary/50 rounded px-1 -ml-1 transition-colors"
+                        >
+                          <p className="font-heading text-lg font-bold">
+                            {new Date(batch.created_at).toLocaleDateString('es-ES', {
+                              day: 'numeric',
+                              month: 'long',
+                              year: 'numeric'
+                            })}
+                          </p>
+                          <Pencil className="w-3 h-3 text-muted-foreground opacity-0 group-hover/date:opacity-100 transition-opacity" />
+                        </button>
+                      )}
                       <p className="text-xs text-muted-foreground font-mono">
                         {batch.id.slice(0, 8)}...
                       </p>
