@@ -152,16 +152,20 @@ const EditableText = ({ question, onSave }) => {
 };
 
 // Modal de duplicados
-const DuplicatesModal = ({ open, onClose, duplicates, onDelete, onKeep, currentBatchName }) => {
+const DuplicatesModal = ({ open, onClose, duplicates, onDelete, onKeep, currentBatchName, batches }) => {
   if (!duplicates || duplicates.length === 0) return null;
 
-  const formatBatchInfo = (question, type) => {
-    if (type === "in_batch" || type === "ai_same_batch") {
+  const formatBatchInfo = (question, type, isNewQuestion = false) => {
+    // For new question, use current batch info
+    if (isNewQuestion) {
       return currentBatchName || "Importación actual";
     }
+    
+    // For original question, get the batch info
     if (question.batch_name) {
       return question.batch_name;
     }
+    
     if (question.batch_date) {
       return new Date(question.batch_date).toLocaleDateString('es-ES', {
         day: 'numeric',
@@ -169,7 +173,25 @@ const DuplicatesModal = ({ open, onClose, duplicates, onDelete, onKeep, currentB
         year: 'numeric'
       });
     }
-    return "Importación anterior";
+    
+    // Try to find batch in the batches list
+    if (question.batch_id && batches) {
+      const batch = batches.find(b => b.id === question.batch_id);
+      if (batch) {
+        return batch.name || new Date(batch.created_at).toLocaleDateString('es-ES', {
+          day: 'numeric',
+          month: 'long',
+          year: 'numeric'
+        });
+      }
+    }
+    
+    // Last resort - show batch_id shortened
+    if (question.batch_id) {
+      return `Lote ${question.batch_id.slice(0, 8)}...`;
+    }
+    
+    return "Desconocido";
   };
 
   return (
@@ -209,7 +231,7 @@ const DuplicatesModal = ({ open, onClose, duplicates, onDelete, onKeep, currentB
                 <div className="relative">
                   <div className="absolute -top-3 left-4 bg-white px-2">
                     <Badge variant="outline" className="text-xs font-bold bg-blue-50 text-blue-700 border-blue-300">
-                      PREGUNTA A - {formatBatchInfo(dup.new_question, dup.type)}
+                      PREGUNTA A - {formatBatchInfo(dup.new_question, dup.type, true)}
                     </Badge>
                   </div>
                   <div className="border-2 border-blue-300 rounded-lg p-5 pt-6 bg-blue-50/30 min-h-[200px]">
@@ -237,7 +259,7 @@ const DuplicatesModal = ({ open, onClose, duplicates, onDelete, onKeep, currentB
                 <div className="relative">
                   <div className="absolute -top-3 left-4 bg-white px-2">
                     <Badge variant="outline" className="text-xs font-bold bg-amber-50 text-amber-700 border-amber-300">
-                      PREGUNTA B - {formatBatchInfo(dup.original_question, dup.type)}
+                      PREGUNTA B - {formatBatchInfo(dup.original_question, dup.type, false)}
                     </Badge>
                   </div>
                   <div className="border-2 border-amber-300 rounded-lg p-5 pt-6 bg-amber-50/30 min-h-[200px]">
@@ -1119,9 +1141,10 @@ export default function Editor() {
         duplicates={duplicates}
         onDelete={handleDeleteQuestion}
         onKeep={handleKeepBoth}
+        batches={batches}
         currentBatchName={batches.find(b => b.id === selectedBatch)?.name || 
           (batches.find(b => b.id === selectedBatch)?.created_at ? 
-            `Importación del ${new Date(batches.find(b => b.id === selectedBatch).created_at).toLocaleDateString('es-ES', { day: 'numeric', month: 'long' })}` : 
+            new Date(batches.find(b => b.id === selectedBatch).created_at).toLocaleDateString('es-ES', { day: 'numeric', month: 'long', year: 'numeric' }) : 
             'Importación actual')}
       />
 
