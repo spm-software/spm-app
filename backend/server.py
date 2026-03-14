@@ -554,11 +554,19 @@ Aplica estas preferencias fijas del estilo SPM:
         return text
 
 
-async def check_duplicates_with_ai(questions_to_check: List[Dict], history_questions: List[Dict]) -> List[Dict]:
-    """Use AI to find semantic duplicates between new questions and history"""
+async def check_duplicates_with_ai(questions_to_check: List[Dict], all_questions: List[Dict], current_batch_id: str) -> List[Dict]:
+    """Use AI to find semantic duplicates from the SAME USER.
+    
+    Checks:
+    1. Within the current batch (same user, different questions)
+    2. Against all historical batches (same user)
+    
+    Only flags duplicates from the SAME user - different users asking similar questions is NOT a duplicate.
+    """
     from emergentintegrations.llm.chat import LlmChat, UserMessage
     
     duplicates_found = []
+    processed_pairs = set()  # To avoid checking the same pair twice
     
     try:
         api_key = os.environ.get('EMERGENT_LLM_KEY')
@@ -566,28 +574,42 @@ async def check_duplicates_with_ai(questions_to_check: List[Dict], history_quest
             logger.warning("No EMERGENT_LLM_KEY found for duplicate check")
             return duplicates_found
         
-        # Group questions by user for more efficient comparison
-        history_by_user = {}
-        for hq in history_questions:
-            user = normalize_text(hq.get("real_name", "") or hq.get("youtube_username", ""))
-            if user not in history_by_user:
-                history_by_user[user] = []
-            history_by_user[user].append(hq)
+        # Group ALL questions by normalized user name
+        questions_by_user = {}
+        for q in all_questions:
+            user = normalize_text(q.get("real_name", "") or q.get("youtube_username", ""))
+            if user not in questions_by_user:
+                questions_by_user[user] = []
+            questions_by_user[user].append(q)
         
+        # Only process users who have more than one question total
+        users_with_multiple = {user: qs for user, qs in questions_by_user.items() if len(qs) > 1}
+        logger.info(f"Users with multiple questions: {len(users_with_multiple)}")
+        
+        # For each question in the current batch, check if the user has multiple questions
+        questions_to_process = []
         for new_q in questions_to_check:
             new_user = normalize_text(new_q.get("real_name", "") or new_q.get("youtube_username", ""))
+            if new_user in users_with_multiple:
+                questions_to_process.append(new_q)
+        
+        logger.info(f"Questions to process with AI: {len(questions_to_process)}")
+        
+        for new_q in questions_to_process:
+            new_user = normalize_text(new_q.get("real_name", "") or new_q.get("youtube_username", ""))
             new_text = new_q.get("corrected_text") or new_q.get("original_text", "")
+            new_id = new_q["id"]
             
-            # Get questions from same user in history
-            user_history = history_by_user.get(new_user, [])
+            # Get ALL questions from this same user (excluding the current question)
+            user_questions = [q for q in questions_by_user.get(new_user, []) if q["id"] != new_id]
             
-            if not user_history:
+            if not user_questions:
                 continue
             
-            # Prepare the comparison prompt
+            # Prepare the comparison prompt with all questions from this user
             history_list = "\n".join([
                 f"{i+1}. {(hq.get('corrected_text') or hq.get('original_text', ''))[:250]}"
-                for i, hq in enumerate(user_history[:15])
+                for i, hq in enumerate(user_questions[:20])  # Limit to 20 for API efficiency
             ])
             
             chat = LlmChat(
@@ -616,7 +638,7 @@ Ejemplo: "1, 3" o "NINGUNA"
             user_prompt = f"""NUEVA PREGUNTA de {new_q.get('real_name', 'Usuario')}:
 "{new_text}"
 
-PREGUNTAS ANTERIORES del mismo usuario:
+OTRAS PREGUNTAS DEL MISMO USUARIO:
 {history_list}
 
 ¿Cuáles de las preguntas anteriores son duplicadas de la nueva? Responde SOLO números o NINGUNA."""
@@ -630,8 +652,18 @@ PREGUNTAS ANTERIORES del mismo usuario:
                 try:
                     numbers = [int(n.strip()) for n in response.replace(".", ",").split(",") if n.strip().isdigit()]
                     for num in numbers:
-                        if 1 <= num <= len(user_history):
-                            hist_q = user_history[num - 1]
+                        if 1 <= num <= len(user_questions):
+                            hist_q = user_questions[num - 1]
+                            
+                            # Avoid duplicate pairs
+                            pair_key = tuple(sorted([new_id, hist_q["id"]]))
+                            if pair_key in processed_pairs:
+                                continue
+                            processed_pairs.add(pair_key)
+                            
+                            # Determine if it's in same batch or history
+                            is_same_batch = hist_q.get("import_batch_id") == current_batch_id
+                            
                             # Get batch info
                             hist_batch = None
                             if hist_q.get("import_batch_id"):
@@ -659,7 +691,7 @@ PREGUNTAS ANTERIORES del mismo usuario:
                                     "batch_date": hist_batch.get("created_at") if hist_batch else None
                                 },
                                 "similarity": 100,
-                                "type": "ai_detected"
+                                "type": "ai_same_batch" if is_same_batch else "ai_detected"
                             })
                             
                             # Mark as duplicate in DB
@@ -1086,7 +1118,13 @@ async def check_duplicates(batch_id: str):
 @api_router.post("/questions/check-duplicates-ai/{batch_id}")
 async def check_duplicates_ai(batch_id: str):
     """Check for duplicate questions using AI semantic comparison.
-    Compares questions from same users across all batches."""
+    
+    Only compares questions from the SAME USER:
+    - Within the current batch
+    - Against all historical batches
+    
+    Different users asking similar questions is NOT considered a duplicate.
+    """
     
     # Get questions from current batch
     questions = await db.questions.find(
@@ -1097,23 +1135,20 @@ async def check_duplicates_ai(batch_id: str):
     if not questions:
         return {"duplicates_count": 0, "duplicates": [], "message": "No questions in batch"}
     
-    # Get ALL history questions (excluding current batch)
-    history_questions = await db.questions.find(
-        {
-            "is_greeting": {"$ne": True},
-            "import_batch_id": {"$ne": batch_id}
-        },
+    # Get ALL questions (including current batch for within-batch comparison)
+    all_questions = await db.questions.find(
+        {"is_greeting": {"$ne": True}},
         {"_id": 0}
     ).to_list(10000)
     
-    # Use AI to find duplicates
-    duplicates = await check_duplicates_with_ai(questions, history_questions)
+    # Use AI to find duplicates (same user only)
+    duplicates = await check_duplicates_with_ai(questions, all_questions, batch_id)
     
     return {
         "duplicates_count": len(duplicates),
         "duplicates": duplicates,
         "questions_checked": len(questions),
-        "history_checked": len(history_questions)
+        "total_questions": len(all_questions)
     }
 
 @api_router.put("/questions/{question_id}/clear-duplicate")

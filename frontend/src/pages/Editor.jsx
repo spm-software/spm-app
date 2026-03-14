@@ -188,10 +188,12 @@ const DuplicatesModal = ({ open, onClose, duplicates, onDelete, onKeep, currentB
             <div key={index} className="border border-border rounded-sm p-4 bg-card">
               {/* Header with location info */}
               <div className="flex flex-wrap items-center gap-2 mb-4">
-                <Badge variant={dup.type === "ai_detected" ? "default" : (dup.type === "in_history" ? "destructive" : "secondary")}>
-                  {dup.type === "ai_detected" ? "Detectado por IA" : (dup.type === "in_history" ? "Duplicado en historial" : "Duplicado en este lote")}
+                <Badge variant={dup.type === "ai_detected" || dup.type === "ai_same_batch" ? "default" : (dup.type === "in_history" ? "destructive" : "secondary")}>
+                  {dup.type === "ai_detected" ? "IA: En historial" : 
+                   dup.type === "ai_same_batch" ? "IA: Mismo lote" :
+                   (dup.type === "in_history" ? "Duplicado en historial" : "Duplicado en este lote")}
                 </Badge>
-                {dup.type !== "ai_detected" && (
+                {dup.type !== "ai_detected" && dup.type !== "ai_same_batch" && (
                   <Badge variant="outline">{dup.similarity}% similar</Badge>
                 )}
               </div>
@@ -597,22 +599,26 @@ export default function Editor() {
 
   const handleCheckDuplicatesAI = async () => {
     setCheckingDuplicates(true);
-    toast.info("Buscando duplicados con IA... esto puede tardar unos segundos");
+    toast.info("Buscando duplicados con IA... esto puede tardar hasta 1 minuto", { duration: 10000 });
     try {
       const response = await axios.post(`${API}/questions/check-duplicates-ai/${selectedBatch}`, {}, {
-        timeout: 120000 // 2 minutes timeout for AI processing
+        timeout: 180000 // 3 minutes timeout for AI processing
       });
       setDuplicates(response.data.duplicates);
       if (response.data.duplicates.length > 0) {
         setShowDuplicatesModal(true);
-        toast.success(`${response.data.duplicates_count} duplicados encontrados con IA`);
+        toast.success(`${response.data.duplicates_count} duplicados del mismo usuario encontrados`);
       } else {
-        toast.success("No se encontraron duplicados semánticos");
+        toast.success("No se encontraron duplicados del mismo usuario");
       }
       fetchQuestions();
     } catch (error) {
       console.error("Error checking duplicates with AI:", error);
-      toast.error("Error al buscar duplicados con IA");
+      if (error.code === 'ECONNABORTED') {
+        toast.error("La búsqueda tardó demasiado. Intenta con menos preguntas.");
+      } else {
+        toast.error("Error al buscar duplicados con IA");
+      }
     } finally {
       setCheckingDuplicates(false);
     }
