@@ -277,6 +277,7 @@ export default function Editor() {
   const [questions, setQuestions] = useState([]);
   const [loading, setLoading] = useState(false);
   const [correcting, setCorrecting] = useState(false);
+  const [correctingProgress, setCorrectingProgress] = useState({ current: 0, total: 0 });
   const [correctingId, setCorrectingId] = useState(null);
   const [checkingDuplicates, setCheckingDuplicates] = useState(false);
   const [duplicates, setDuplicates] = useState([]);
@@ -326,15 +327,58 @@ export default function Editor() {
 
   const handleCorrectAll = async () => {
     setCorrecting(true);
+    setCorrectingProgress({ current: 0, total: 0 });
+    
     try {
-      const response = await axios.post(`${API}/questions/correct-all/${selectedBatch}`);
-      toast.success(`${response.data.corrected_count} preguntas corregidas (nombres actualizados)`);
+      // First, get the list of questions to correct
+      const initResponse = await axios.post(`${API}/questions/correct-all/${selectedBatch}`);
+      const questionIds = initResponse.data.question_ids;
+      const total = questionIds.length;
+      
+      if (total === 0) {
+        toast.info("No hay preguntas pendientes de corregir");
+        setCorrecting(false);
+        fetchQuestions();
+        return;
+      }
+      
+      setCorrectingProgress({ current: 0, total });
+      
+      // Process in batches of 5
+      const batchSize = 5;
+      let correctedCount = 0;
+      let errorCount = 0;
+      
+      for (let i = 0; i < questionIds.length; i += batchSize) {
+        const batch = questionIds.slice(i, i + batchSize);
+        
+        try {
+          const response = await axios.post(`${API}/questions/correct-batch`, {
+            question_ids: batch
+          });
+          correctedCount += response.data.corrected.length;
+          errorCount += response.data.errors.length;
+        } catch (error) {
+          console.error("Error in batch:", error);
+          errorCount += batch.length;
+        }
+        
+        setCorrectingProgress({ current: Math.min(i + batchSize, total), total });
+      }
+      
+      if (errorCount > 0) {
+        toast.warning(`${correctedCount} corregidas, ${errorCount} errores`);
+      } else {
+        toast.success(`${correctedCount} preguntas corregidas`);
+      }
+      
       fetchQuestions();
     } catch (error) {
       console.error("Error correcting:", error);
-      toast.error("Error al corregir preguntas");
+      toast.error("Error al iniciar corrección");
     } finally {
       setCorrecting(false);
+      setCorrectingProgress({ current: 0, total: 0 });
     }
   };
 
@@ -496,16 +540,39 @@ export default function Editor() {
           onClick={handleCorrectAll}
           disabled={correcting || questions.length === 0}
           size="lg"
-          className="rounded-sm uppercase tracking-wide text-xs"
+          className="rounded-sm uppercase tracking-wide text-xs min-w-[200px]"
           data-testid="correct-all-button"
         >
           {correcting ? (
-            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+            <>
+              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+              {correctingProgress.total > 0 
+                ? `Corrigiendo ${correctingProgress.current}/${correctingProgress.total}...`
+                : "Iniciando..."
+              }
+            </>
           ) : (
-            <Wand2 className="w-4 h-4 mr-2" />
+            <>
+              <Wand2 className="w-4 h-4 mr-2" />
+              Corregir todo con IA
+            </>
           )}
-          Corregir todo con IA
         </Button>
+        
+        {/* Progress bar */}
+        {correcting && correctingProgress.total > 0 && (
+          <div className="flex-1 max-w-xs">
+            <div className="h-2 bg-secondary rounded-full overflow-hidden">
+              <div 
+                className="h-full bg-primary transition-all duration-300"
+                style={{ width: `${(correctingProgress.current / correctingProgress.total) * 100}%` }}
+              />
+            </div>
+            <p className="text-xs text-muted-foreground mt-1">
+              {Math.round((correctingProgress.current / correctingProgress.total) * 100)}% completado
+            </p>
+          </div>
+        )}
         
         <Button
           variant="outline"

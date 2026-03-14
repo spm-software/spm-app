@@ -598,35 +598,61 @@ async def correct_questions(data: CorrectionRequest):
 
 @api_router.post("/questions/correct-all/{batch_id}")
 async def correct_all_questions(batch_id: str):
-    """Correct all questions in a batch"""
+    """Get list of questions to correct (does not correct them, just returns IDs)"""
     questions = await db.questions.find(
-        {"import_batch_id": batch_id, "is_greeting": {"$ne": True}},
-        {"_id": 0}
+        {
+            "import_batch_id": batch_id, 
+            "is_greeting": {"$ne": True},
+            "is_corrected": {"$ne": True}
+        },
+        {"_id": 0, "id": 1, "youtube_username": 1}
     ).to_list(500)
     
-    settings = await get_settings()
-    corrected = []
-    
+    # Update real names from mappings for all questions
     for question in questions:
-        # First, update real_name from user mappings if available
         stored_name = await get_real_name(question.get("youtube_username", ""))
         if stored_name:
             await db.questions.update_one(
                 {"id": question["id"]},
                 {"$set": {"real_name": stored_name}}
             )
-        
-        if not question.get("is_corrected"):
-            text_to_correct = question.get("original_text", "")
-            corrected_text = await correct_text_with_ai(text_to_correct, settings.llm_provider)
-            
-            await db.questions.update_one(
-                {"id": question["id"]},
-                {"$set": {"corrected_text": corrected_text, "is_corrected": True}}
-            )
-            corrected.append({"id": question["id"], "corrected_text": corrected_text})
     
-    return {"corrected_count": len(corrected), "corrected": corrected}
+    return {
+        "total_to_correct": len(questions),
+        "question_ids": [q["id"] for q in questions]
+    }
+
+@api_router.post("/questions/correct-batch")
+async def correct_batch_questions(data: CorrectionRequest):
+    """Correct a small batch of questions (for progress tracking)"""
+    settings = await get_settings()
+    corrected = []
+    errors = []
+    
+    for qid in data.question_ids:
+        try:
+            question = await db.questions.find_one({"id": qid}, {"_id": 0})
+            if question and not question.get("is_corrected"):
+                # Update real_name from user mappings if available
+                stored_name = await get_real_name(question.get("youtube_username", ""))
+                if stored_name and stored_name != question.get("real_name"):
+                    await db.questions.update_one(
+                        {"id": qid},
+                        {"$set": {"real_name": stored_name}}
+                    )
+                
+                text_to_correct = question.get("original_text", "")
+                corrected_text = await correct_text_with_ai(text_to_correct, settings.llm_provider)
+                
+                await db.questions.update_one(
+                    {"id": qid},
+                    {"$set": {"corrected_text": corrected_text, "is_corrected": True}}
+                )
+                corrected.append({"id": qid, "corrected_text": corrected_text})
+        except Exception as e:
+            errors.append({"id": qid, "error": str(e)})
+    
+    return {"corrected": corrected, "errors": errors}
 
 # ----- DUPLICATES -----
 
