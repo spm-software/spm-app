@@ -226,9 +226,12 @@ def parse_comments(raw_text: str) -> List[Dict[str, str]]:
     """Parse raw text into individual comments with usernames or real names
     
     Supported formats:
-    - @username Texto del comentario
-    - Nombre Real: Texto del comentario
-    - Nombre Real - Texto del comentario
+    1. @username Texto del comentario
+    2. Nombre Real: Texto del comentario
+    3. Nombre Real - Texto del comentario
+    4. Nombre Real (solo en línea)
+       Texto del comentario en la siguiente línea
+       (separados por línea en blanco del siguiente)
     """
     comments = []
     lines = raw_text.strip().split('\n')
@@ -237,6 +240,31 @@ def parse_comments(raw_text: str) -> List[Dict[str, str]]:
     current_is_username = False
     current_text = []
     
+    # First, try to detect if this is Format 4 (name alone on line, then text, separated by blank lines)
+    # Check if we have a pattern of: Name line, text lines, blank line, Name line, text lines...
+    blank_line_indices = [i for i, line in enumerate(lines) if not line.strip()]
+    
+    # Heuristic: if there are many blank lines and text doesn't have @ or : patterns, use Format 4
+    has_at_usernames = any(re.match(r'^@[\w\-\.]+', line.strip()) for line in lines if line.strip())
+    
+    # More strict check for "Name: text" format - name should be short (< 40 chars) and not start with common words
+    common_starts = ['tengo', 'sobre', 'cuando', 'como', 'que', 'cual', 'donde', 'por', 'si', 'en', 'de', 'la', 'el', 'un', 'una', 'mi', 'me']
+    def is_name_colon_format(line):
+        match = re.match(r'^([A-ZÁÉÍÓÚÑ][a-záéíóúñA-ZÁÉÍÓÚÑ\s\.]+?):\s', line.strip())
+        if match:
+            name_part = match.group(1).strip().lower()
+            # Name should be short and not start with common words
+            if len(name_part) < 40 and not any(name_part.startswith(w) for w in common_starts):
+                return True
+        return False
+    
+    has_colon_names = any(is_name_colon_format(line) for line in lines if line.strip())
+    
+    if not has_at_usernames and not has_colon_names and len(blank_line_indices) > 2:
+        # Use Format 4: Name on one line, text on next lines, separated by blank lines
+        return parse_comments_format4(raw_text)
+    
+    # Original parsing logic for formats 1, 2, 3
     for line in lines:
         line = line.strip()
         if not line:
@@ -284,6 +312,56 @@ def parse_comments(raw_text: str) -> List[Dict[str, str]]:
             "original_text": clean_text,
             "real_name": None if current_is_username else current_identifier
         })
+    
+    return comments
+
+def parse_comments_format4(raw_text: str) -> List[Dict[str, str]]:
+    """Parse format where name is alone on a line, followed by question text, 
+    separated by blank lines from the next entry.
+    
+    Example:
+    Adolfo Vargas Jiménez
+    ¿Dios tiene ira? Ya que en varias ocasiones...
+    
+    Rodrigo Peñuela
+    En la parábola del sembrador dice que...
+    """
+    comments = []
+    
+    # Split by double newlines (blank line separators)
+    blocks = re.split(r'\n\s*\n', raw_text.strip())
+    
+    for block in blocks:
+        block = block.strip()
+        if not block:
+            continue
+        
+        lines = block.split('\n')
+        if len(lines) >= 1:
+            # First line is the name
+            name = lines[0].strip()
+            
+            # Skip if name looks like a question or is too long (probably not a name)
+            if '?' in name or len(name) > 80 or name.startswith('¿'):
+                continue
+            
+            # Rest is the question text
+            if len(lines) > 1:
+                text = '\n'.join(lines[1:]).strip()
+            else:
+                # Name only, no text - skip
+                continue
+            
+            if text:
+                clean_text = clean_youtube_metadata(text)
+                # Generate a username from the name
+                username = '@' + re.sub(r'[^a-záéíóúñA-ZÁÉÍÓÚÑ0-9]', '', name.lower().replace(' ', ''))
+                
+                comments.append({
+                    "youtube_username": username,
+                    "original_text": clean_text,
+                    "real_name": name
+                })
     
     return comments
 
