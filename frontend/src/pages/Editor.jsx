@@ -296,7 +296,13 @@ export default function Editor() {
     try {
       const response = await axios.get(`${API}/batches`);
       setBatches(response.data);
-      if (response.data.length > 0) {
+      
+      // Check if there's a selected batch from Dashboard
+      const storedBatch = sessionStorage.getItem('selectedBatch');
+      if (storedBatch && response.data.some(b => b.id === storedBatch)) {
+        setSelectedBatch(storedBatch);
+        sessionStorage.removeItem('selectedBatch');
+      } else if (response.data.length > 0) {
         setSelectedBatch(response.data[0].id);
       }
     } catch (error) {

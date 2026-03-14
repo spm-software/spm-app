@@ -47,7 +47,12 @@ export default function Exportar() {
     try {
       const response = await axios.get(`${API}/batches`);
       setBatches(response.data);
-      if (response.data.length > 0) {
+      
+      const storedBatch = sessionStorage.getItem('selectedBatch');
+      if (storedBatch && response.data.some(b => b.id === storedBatch)) {
+        setSelectedBatch(storedBatch);
+        sessionStorage.removeItem('selectedBatch');
+      } else if (response.data.length > 0) {
         setSelectedBatch(response.data[0].id);
       }
     } catch (error) {

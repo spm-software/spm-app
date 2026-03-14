@@ -1,11 +1,37 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { MessageSquare, Users, Inbox, Calendar } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { 
+  MessageSquare, 
+  Users, 
+  Inbox, 
+  Calendar,
+  ChevronRight,
+  Trash2,
+  Edit3,
+  Layers,
+  Download
+} from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
+import { toast } from "sonner";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
 export default function Dashboard() {
+  const navigate = useNavigate();
   const [stats, setStats] = useState({
     total_questions: 0,
     total_users: 0,
@@ -26,12 +52,39 @@ export default function Dashboard() {
         axios.get(`${API}/batches`)
       ]);
       setStats(statsRes.data);
-      setBatches(batchesRes.data.slice(0, 5));
+      setBatches(batchesRes.data);
     } catch (error) {
       console.error("Error fetching dashboard data:", error);
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleDeleteBatch = async (batchId) => {
+    try {
+      await axios.delete(`${API}/batches/${batchId}`);
+      toast.success("Lote eliminado");
+      fetchData();
+    } catch (error) {
+      console.error("Error deleting batch:", error);
+      toast.error("Error al eliminar lote");
+    }
+  };
+
+  const handleGoToEditor = (batchId) => {
+    // Store selected batch in sessionStorage and navigate
+    sessionStorage.setItem('selectedBatch', batchId);
+    navigate('/editor');
+  };
+
+  const handleGoToDistribuir = (batchId) => {
+    sessionStorage.setItem('selectedBatch', batchId);
+    navigate('/distribuir');
+  };
+
+  const handleGoToExportar = (batchId) => {
+    sessionStorage.setItem('selectedBatch', batchId);
+    navigate('/exportar');
   };
 
   const statCards = [
@@ -88,7 +141,7 @@ export default function Dashboard() {
         </p>
       </div>
 
-      {/* Stats Grid - Bento Style */}
+      {/* Stats Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-12 stagger-children">
         {statCards.map((stat, index) => (
           <Card 
@@ -112,77 +165,168 @@ export default function Dashboard() {
         ))}
       </div>
 
-      {/* Recent Batches */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-        <Card className="bg-card border border-border rounded-sm">
-          <CardHeader>
-            <CardTitle className="font-heading text-xl uppercase tracking-tight">
-              LOTES RECIENTES
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            {batches.length === 0 ? (
-              <p className="text-muted-foreground text-sm">
+      {/* Batches Section */}
+      <div className="mb-8">
+        <h2 className="font-heading text-2xl font-bold tracking-tight mb-6">
+          IMPORTACIONES
+        </h2>
+        
+        {batches.length === 0 ? (
+          <Card className="bg-card border border-border rounded-sm">
+            <CardContent className="py-12 text-center">
+              <Inbox className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
+              <h3 className="font-heading text-xl mb-2">SIN IMPORTACIONES</h3>
+              <p className="text-muted-foreground text-sm mb-4">
                 No hay lotes importados. Ve a "Importar" para comenzar.
               </p>
-            ) : (
-              <div className="space-y-3">
-                {batches.map((batch) => (
-                  <div 
-                    key={batch.id}
-                    className="flex items-center justify-between p-4 bg-secondary/50 rounded-sm"
-                    data-testid={`batch-item-${batch.id}`}
-                  >
+              <Button onClick={() => navigate('/importar')} className="rounded-sm">
+                Ir a Importar
+              </Button>
+            </CardContent>
+          </Card>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {batches.map((batch) => (
+              <Card 
+                key={batch.id}
+                className="bg-card border border-border rounded-sm hover:border-primary/50 transition-all group"
+                data-testid={`batch-card-${batch.id}`}
+              >
+                <CardContent className="p-5">
+                  {/* Batch Header */}
+                  <div className="flex items-start justify-between mb-4">
                     <div>
-                      <p className="font-mono text-sm">{batch.id.slice(0, 8)}...</p>
-                      <p className="text-xs text-muted-foreground">
-                        {new Date(batch.created_at).toLocaleDateString('es-ES')}
+                      <p className="font-heading text-lg font-bold">
+                        {new Date(batch.created_at).toLocaleDateString('es-ES', {
+                          day: 'numeric',
+                          month: 'long',
+                          year: 'numeric'
+                        })}
+                      </p>
+                      <p className="text-xs text-muted-foreground font-mono">
+                        {batch.id.slice(0, 8)}...
                       </p>
                     </div>
-                    <div className="text-right">
-                      <p className="font-bold">{batch.question_count}</p>
-                      <p className="text-xs text-muted-foreground">preguntas</p>
-                    </div>
+                    <Badge variant="secondary" className="text-sm">
+                      {batch.question_count} preguntas
+                    </Badge>
                   </div>
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
 
-        {/* Quick Actions */}
-        <Card className="bg-card border border-border rounded-sm">
-          <CardHeader>
-            <CardTitle className="font-heading text-xl uppercase tracking-tight">
-              FLUJO DE TRABAJO
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-4">
-              {[
-                { step: 1, title: "Importar comentarios", desc: "Pega los comentarios de YouTube" },
-                { step: 2, title: "Corregir con IA", desc: "Corrección gramatical automática" },
-                { step: 3, title: "Detectar duplicados", desc: "Encuentra preguntas repetidas" },
-                { step: 4, title: "Distribuir en programas", desc: "Organiza en 4-5 programas" },
-                { step: 5, title: "Exportar TXT", desc: "Genera el archivo final" },
-              ].map((item) => (
-                <div 
-                  key={item.step}
-                  className="flex items-start gap-4 p-3 rounded-sm hover:bg-secondary/50 transition-colors"
-                >
-                  <div className="w-8 h-8 rounded-full bg-primary text-primary-foreground flex items-center justify-center font-bold text-sm flex-shrink-0">
-                    {item.step}
+                  {/* Status */}
+                  <div className="flex items-center gap-2 mb-4">
+                    {batch.is_distributed ? (
+                      <Badge variant="outline" className="text-xs text-green-600 border-green-500">
+                        Distribuido
+                      </Badge>
+                    ) : (
+                      <Badge variant="outline" className="text-xs text-yellow-600 border-yellow-500">
+                        Sin distribuir
+                      </Badge>
+                    )}
+                    {batch.num_programs && (
+                      <Badge variant="outline" className="text-xs">
+                        {batch.num_programs} programas
+                      </Badge>
+                    )}
                   </div>
-                  <div>
-                    <p className="font-medium text-sm">{item.title}</p>
-                    <p className="text-xs text-muted-foreground">{item.desc}</p>
+
+                  {/* Action Buttons */}
+                  <div className="flex items-center gap-2 pt-4 border-t border-border">
+                    <Button
+                      variant="default"
+                      size="sm"
+                      onClick={() => handleGoToEditor(batch.id)}
+                      className="rounded-sm text-xs flex-1"
+                    >
+                      <Edit3 className="w-3.5 h-3.5 mr-1" />
+                      Editar
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleGoToDistribuir(batch.id)}
+                      className="rounded-sm text-xs"
+                    >
+                      <Layers className="w-3.5 h-3.5" />
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleGoToExportar(batch.id)}
+                      className="rounded-sm text-xs"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                    </Button>
+                    <AlertDialog>
+                      <AlertDialogTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="rounded-sm text-xs text-destructive hover:text-destructive hover:bg-destructive/10"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </Button>
+                      </AlertDialogTrigger>
+                      <AlertDialogContent>
+                        <AlertDialogHeader>
+                          <AlertDialogTitle>¿Eliminar este lote?</AlertDialogTitle>
+                          <AlertDialogDescription>
+                            Se eliminarán todas las preguntas y programas asociados a este lote.
+                            Esta acción no se puede deshacer.
+                          </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                          <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                          <AlertDialogAction 
+                            onClick={() => handleDeleteBatch(batch.id)}
+                            className="bg-destructive hover:bg-destructive/90"
+                          >
+                            Eliminar
+                          </AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
                   </div>
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        )}
       </div>
+
+      {/* Quick Workflow */}
+      <Card className="bg-card border border-border rounded-sm">
+        <CardHeader>
+          <CardTitle className="font-heading text-xl uppercase tracking-tight">
+            FLUJO DE TRABAJO
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-wrap gap-4">
+            {[
+              { step: 1, title: "Importar", desc: "Pega comentarios", path: "/importar" },
+              { step: 2, title: "Editar", desc: "Corrige con IA", path: "/editor" },
+              { step: 3, title: "Distribuir", desc: "Organiza en programas", path: "/distribuir" },
+              { step: 4, title: "Exportar", desc: "Genera TXT", path: "/exportar" },
+            ].map((item) => (
+              <button
+                key={item.step}
+                onClick={() => navigate(item.path)}
+                className="flex items-center gap-3 p-4 rounded-sm hover:bg-secondary/50 transition-colors flex-1 min-w-[200px] text-left"
+              >
+                <div className="w-10 h-10 rounded-full bg-primary text-primary-foreground flex items-center justify-center font-bold flex-shrink-0">
+                  {item.step}
+                </div>
+                <div>
+                  <p className="font-medium">{item.title}</p>
+                  <p className="text-xs text-muted-foreground">{item.desc}</p>
+                </div>
+                <ChevronRight className="w-5 h-5 text-muted-foreground ml-auto" />
+              </button>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
     </div>
   );
 }
