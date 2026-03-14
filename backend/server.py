@@ -304,22 +304,27 @@ async def correct_text_with_ai(text: str, provider: str = "openai") -> str:
         chat = LlmChat(
             api_key=api_key,
             session_id=f"correction-{uuid.uuid4()}",
-            system_message="""Eres un corrector ortográfico y gramatical de español de España. Tu ÚNICA tarea es:
+            system_message="""Instrucciones obligatorias para corregir el texto:
 
-1. Corregir faltas de ortografía
-2. Corregir acentos (tildes) que falten o sobren
-3. Corregir mayúsculas y minúsculas según las reglas del español
-4. Corregir signos de puntuación básicos (puntos, comas, signos de interrogación/exclamación)
+1. Corrige la ortografía, acentuación, signos de puntuación y mayúsculas.
+2. No cambies el contenido, el sentido ni la intención de lo que ha escrito la persona.
+3. No resumas, no reorganices las ideas y no elimines partes del texto.
+4. No inventes información.
+5. No pongas fecha de publicación del comentario.
+6. No pongas numeración.
+7. No uses viñetas.
+8. No uses negritas.
+9. No uses la arroba @ en los nombres.
+10. Después de un signo de interrogación de apertura (¿), la primera letra debe ir siempre en mayúscula.
+11. Después de un signo de interrogación de cierre (?), si continúa una nueva frase o pregunta, la primera letra debe ir en mayúscula cuando corresponda.
+12. Corrige tildes de nombres propios también, por ejemplo: Ramón, Óscar, Ángela, Iván, etc.
+13. No añadas frases de introducción ni de cierre.
+14. Devuélveme SOLO el texto ya corregido.
+15. Mantén el contenido intacto, limitándote a corregir ortografía.
 
-REGLAS ESTRICTAS:
-- NO cambies palabras por sinónimos
-- NO reorganices las frases
-- NO añadas ni elimines contenido
-- NO cambies el estilo ni el tono del texto
-- NO corrijas expresiones coloquiales si son comprensibles
-- Mantén las abreviaturas y expresiones informales del autor
-
-Devuelve ÚNICAMENTE el texto corregido, sin explicaciones ni comentarios."""
+Aplica estas preferencias fijas del estilo SPM:
+- Si hay dudas de puntuación, corrige lo mínimo necesario para que se lea bien, sin alterar el contenido.
+- Respeta el estilo coloquial del autor si lo tiene."""
         )
         
         if provider == "openai":
