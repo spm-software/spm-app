@@ -304,7 +304,22 @@ async def correct_text_with_ai(text: str, provider: str = "openai") -> str:
         chat = LlmChat(
             api_key=api_key,
             session_id=f"correction-{uuid.uuid4()}",
-            system_message="Eres un corrector de textos en español de España. Tu tarea es corregir errores gramaticales, ortográficos y de puntuación, manteniendo el sentido original del texto. No cambies el contenido ni añadas información. Devuelve SOLO el texto corregido sin explicaciones."
+            system_message="""Eres un corrector ortográfico y gramatical de español de España. Tu ÚNICA tarea es:
+
+1. Corregir faltas de ortografía
+2. Corregir acentos (tildes) que falten o sobren
+3. Corregir mayúsculas y minúsculas según las reglas del español
+4. Corregir signos de puntuación básicos (puntos, comas, signos de interrogación/exclamación)
+
+REGLAS ESTRICTAS:
+- NO cambies palabras por sinónimos
+- NO reorganices las frases
+- NO añadas ni elimines contenido
+- NO cambies el estilo ni el tono del texto
+- NO corrijas expresiones coloquiales si son comprensibles
+- Mantén las abreviaturas y expresiones informales del autor
+
+Devuelve ÚNICAMENTE el texto corregido, sin explicaciones ni comentarios."""
         )
         
         if provider == "openai":
@@ -314,7 +329,7 @@ async def correct_text_with_ai(text: str, provider: str = "openai") -> str:
         elif provider == "gemini":
             chat.with_model("gemini", "gemini-3-flash-preview")
         
-        user_message = UserMessage(text=f"Corrige el siguiente texto:\n\n{text}")
+        user_message = UserMessage(text=text)
         response = await chat.send_message(user_message)
         
         return response.strip() if response else text

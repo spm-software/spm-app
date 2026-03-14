@@ -6,8 +6,7 @@ import {
   Layers, 
   Users, 
   Settings, 
-  Download,
-  Youtube
+  Download
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -29,15 +28,17 @@ export default function Layout() {
         {/* Logo */}
         <div className="p-6 border-b border-border">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-sm bg-primary flex items-center justify-center">
-              <Youtube className="w-6 h-6 text-primary-foreground" strokeWidth={1.5} />
-            </div>
+            <img 
+              src="https://customer-assets.emergentagent.com/job_youtube-qna-manager/artifacts/369twhb0_Logo%20SPM.jpg" 
+              alt="Samuel Pérez Millos"
+              className="w-12 h-12 rounded-full object-cover"
+            />
             <div>
-              <h1 className="font-heading text-lg font-bold tracking-tight">
+              <h1 className="font-heading text-base font-bold tracking-tight leading-tight">
                 GESTOR Q&A
               </h1>
-              <p className="text-xs text-muted-foreground uppercase tracking-wider">
-                YouTube
+              <p className="text-xs text-muted-foreground">
+                Samuel Pérez Millos
               </p>
             </div>
           </div>
