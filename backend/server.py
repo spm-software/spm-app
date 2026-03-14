@@ -136,6 +136,20 @@ def serialize_datetime(obj):
         return obj.isoformat()
     return obj
 
+def normalize_text(text: str) -> str:
+    """Normalize text for comparison: lowercase and remove accents"""
+    import unicodedata
+    if not text:
+        return ""
+    # Convert to lowercase
+    text = text.lower()
+    # Remove accents using unicode normalization
+    # NFD decomposes characters (á -> a + combining accent)
+    # Then we filter out the combining characters
+    normalized = unicodedata.normalize('NFD', text)
+    without_accents = ''.join(c for c in normalized if unicodedata.category(c) != 'Mn')
+    return without_accents
+
 def deserialize_datetime(obj):
     """Convert ISO string back to datetime"""
     if isinstance(obj, str):
@@ -659,26 +673,27 @@ async def correct_batch_questions(data: CorrectionRequest):
 
 @api_router.post("/questions/check-duplicates/{batch_id}")
 async def check_duplicates(batch_id: str):
-    """Check for duplicate questions in batch and history, return detailed comparison"""
+    """Check for duplicate questions in batch and ALL history, accent and case insensitive"""
     questions = await db.questions.find(
         {"import_batch_id": batch_id, "is_greeting": {"$ne": True}},
         {"_id": 0}
     ).to_list(500)
     
     duplicates_found = []
-    texts_in_batch = {}
+    texts_in_batch = {}  # normalized_text -> question_id
     
     for q in questions:
-        text = (q.get("corrected_text") or q.get("original_text", "")).lower().strip()
-        text_words = set(text.split())
+        text = q.get("corrected_text") or q.get("original_text", "")
+        text_normalized = normalize_text(text)
+        text_words = set(text_normalized.split())
         
         # Check within batch
         found_in_batch = False
-        for existing_text, existing_id in texts_in_batch.items():
-            existing_words = set(existing_text.split())
+        for existing_norm, existing_id in texts_in_batch.items():
+            existing_words = set(existing_norm.split())
             if text_words and existing_words:
                 overlap = len(text_words & existing_words) / max(len(text_words), len(existing_words))
-                if overlap > 0.7 or text == existing_text:
+                if overlap > 0.6 or text_normalized == existing_norm:  # Lowered threshold to 60%
                     # Get original question details
                     original_q = await db.questions.find_one({"id": existing_id}, {"_id": 0})
                     duplicates_found.append({
@@ -707,27 +722,34 @@ async def check_duplicates(batch_id: str):
                     break
         
         if not found_in_batch:
-            texts_in_batch[text] = q["id"]
+            texts_in_batch[text_normalized] = q["id"]
             
-            # Check in history (last 60 days, excluding current batch)
-            cutoff = (datetime.now(timezone.utc) - timedelta(days=60)).isoformat()
+            # Check in ALL history (no date limit), excluding current batch
             history_questions = await db.questions.find(
                 {
-                    "created_at": {"$gte": cutoff},
                     "is_greeting": {"$ne": True},
                     "import_batch_id": {"$ne": batch_id},
                     "id": {"$ne": q["id"]}
                 },
                 {"_id": 0}
-            ).to_list(2000)
+            ).to_list(5000)
             
             for hist_q in history_questions:
-                hist_text = (hist_q.get("corrected_text") or hist_q.get("original_text", "")).lower().strip()
-                hist_words = set(hist_text.split())
+                hist_text = hist_q.get("corrected_text") or hist_q.get("original_text", "")
+                hist_normalized = normalize_text(hist_text)
+                hist_words = set(hist_normalized.split())
                 
                 if text_words and hist_words:
                     overlap = len(text_words & hist_words) / max(len(text_words), len(hist_words))
-                    if overlap > 0.7 or text == hist_text:
+                    if overlap > 0.6 or text_normalized == hist_normalized:  # Lowered threshold to 60%
+                        # Get batch info for the historical question
+                        hist_batch = None
+                        if hist_q.get("import_batch_id"):
+                            hist_batch = await db.import_batches.find_one(
+                                {"id": hist_q["import_batch_id"]},
+                                {"_id": 0, "name": 1, "created_at": 1}
+                            )
+                        
                         duplicates_found.append({
                             "new_question": {
                                 "id": q["id"],
@@ -742,7 +764,9 @@ async def check_duplicates(batch_id: str):
                                 "real_name": hist_q.get("real_name"),
                                 "text": hist_q.get("corrected_text") or hist_q.get("original_text"),
                                 "created_at": hist_q.get("created_at"),
-                                "batch_id": hist_q.get("import_batch_id")
+                                "batch_id": hist_q.get("import_batch_id"),
+                                "batch_name": hist_batch.get("name") if hist_batch else None,
+                                "batch_date": hist_batch.get("created_at") if hist_batch else None
                             },
                             "similarity": round(overlap * 100),
                             "type": "in_history"
@@ -786,34 +810,48 @@ async def update_names_from_mappings(batch_id: str):
 
 @api_router.get("/questions/search")
 async def search_all_questions(q: str = Query(..., min_length=2)):
-    """Search all questions in the system by text"""
-    # Search in both original_text and corrected_text
-    search_regex = {"$regex": q, "$options": "i"}
+    """Search all questions in the system by text - case and accent insensitive"""
+    # Normalize the search query
+    search_normalized = normalize_text(q)
     
-    questions = await db.questions.find(
-        {
-            "$or": [
-                {"original_text": search_regex},
-                {"corrected_text": search_regex},
-                {"real_name": search_regex},
-                {"youtube_username": search_regex}
-            ],
-            "is_greeting": {"$ne": True}
-        },
+    # Get all questions (we'll filter in Python for accent-insensitive search)
+    all_questions = await db.questions.find(
+        {"is_greeting": {"$ne": True}},
         {"_id": 0}
-    ).sort("created_at", -1).to_list(100)
+    ).sort("created_at", -1).to_list(5000)
+    
+    # Filter questions that match the normalized search
+    results = []
+    for question in all_questions:
+        # Normalize all searchable fields
+        original_norm = normalize_text(question.get("original_text", ""))
+        corrected_norm = normalize_text(question.get("corrected_text", ""))
+        name_norm = normalize_text(question.get("real_name", ""))
+        username_norm = normalize_text(question.get("youtube_username", ""))
+        
+        # Check if search term is in any field
+        if (search_normalized in original_norm or 
+            search_normalized in corrected_norm or 
+            search_normalized in name_norm or 
+            search_normalized in username_norm):
+            results.append(question)
+            
+        # Limit results
+        if len(results) >= 100:
+            break
     
     # Add batch info to each question
-    for q in questions:
+    for q in results:
         if q.get("import_batch_id"):
             batch = await db.import_batches.find_one(
                 {"id": q["import_batch_id"]},
-                {"_id": 0, "created_at": 1}
+                {"_id": 0, "created_at": 1, "name": 1}
             )
             if batch:
                 q["batch_date"] = batch.get("created_at")
+                q["batch_name"] = batch.get("name")
     
-    return {"results": questions, "count": len(questions)}
+    return {"results": results, "count": len(results)}
 
 # ----- PROGRAMS -----
 
