@@ -572,7 +572,7 @@ async def correct_all_questions(batch_id: str):
 
 @api_router.post("/questions/check-duplicates/{batch_id}")
 async def check_duplicates(batch_id: str):
-    """Check for duplicate questions in batch and history"""
+    """Check for duplicate questions in batch and history, return detailed comparison"""
     questions = await db.questions.find(
         {"import_batch_id": batch_id, "is_greeting": {"$ne": True}},
         {"_id": 0}
@@ -583,35 +583,99 @@ async def check_duplicates(batch_id: str):
     
     for q in questions:
         text = (q.get("corrected_text") or q.get("original_text", "")).lower().strip()
+        text_words = set(text.split())
         
         # Check within batch
-        if text in texts_in_batch:
-            await db.questions.update_one(
-                {"id": q["id"]},
-                {"$set": {"is_duplicate": True, "duplicate_of": texts_in_batch[text]}}
-            )
-            duplicates_found.append({
-                "question_id": q["id"],
-                "duplicate_of": texts_in_batch[text],
-                "type": "in_batch"
-            })
-        else:
+        found_in_batch = False
+        for existing_text, existing_id in texts_in_batch.items():
+            existing_words = set(existing_text.split())
+            if text_words and existing_words:
+                overlap = len(text_words & existing_words) / max(len(text_words), len(existing_words))
+                if overlap > 0.7 or text == existing_text:
+                    # Get original question details
+                    original_q = await db.questions.find_one({"id": existing_id}, {"_id": 0})
+                    duplicates_found.append({
+                        "new_question": {
+                            "id": q["id"],
+                            "username": q.get("youtube_username"),
+                            "real_name": q.get("real_name"),
+                            "text": q.get("corrected_text") or q.get("original_text"),
+                            "created_at": q.get("created_at")
+                        },
+                        "original_question": {
+                            "id": original_q["id"],
+                            "username": original_q.get("youtube_username"),
+                            "real_name": original_q.get("real_name"),
+                            "text": original_q.get("corrected_text") or original_q.get("original_text"),
+                            "created_at": original_q.get("created_at")
+                        },
+                        "similarity": round(overlap * 100),
+                        "type": "in_batch"
+                    })
+                    await db.questions.update_one(
+                        {"id": q["id"]},
+                        {"$set": {"is_duplicate": True, "duplicate_of": existing_id}}
+                    )
+                    found_in_batch = True
+                    break
+        
+        if not found_in_batch:
             texts_in_batch[text] = q["id"]
             
-            # Check in history
-            history_dup = await check_duplicate_in_history(text, q["id"])
-            if history_dup:
-                await db.questions.update_one(
-                    {"id": q["id"]},
-                    {"$set": {"is_duplicate": True, "duplicate_of": history_dup["id"]}}
-                )
-                duplicates_found.append({
-                    "question_id": q["id"],
-                    "duplicate_of": history_dup["id"],
-                    "type": "in_history"
-                })
+            # Check in history (last 60 days, excluding current batch)
+            cutoff = (datetime.now(timezone.utc) - timedelta(days=60)).isoformat()
+            history_questions = await db.questions.find(
+                {
+                    "created_at": {"$gte": cutoff},
+                    "is_greeting": {"$ne": True},
+                    "import_batch_id": {"$ne": batch_id},
+                    "id": {"$ne": q["id"]}
+                },
+                {"_id": 0}
+            ).to_list(2000)
+            
+            for hist_q in history_questions:
+                hist_text = (hist_q.get("corrected_text") or hist_q.get("original_text", "")).lower().strip()
+                hist_words = set(hist_text.split())
+                
+                if text_words and hist_words:
+                    overlap = len(text_words & hist_words) / max(len(text_words), len(hist_words))
+                    if overlap > 0.7 or text == hist_text:
+                        duplicates_found.append({
+                            "new_question": {
+                                "id": q["id"],
+                                "username": q.get("youtube_username"),
+                                "real_name": q.get("real_name"),
+                                "text": q.get("corrected_text") or q.get("original_text"),
+                                "created_at": q.get("created_at")
+                            },
+                            "original_question": {
+                                "id": hist_q["id"],
+                                "username": hist_q.get("youtube_username"),
+                                "real_name": hist_q.get("real_name"),
+                                "text": hist_q.get("corrected_text") or hist_q.get("original_text"),
+                                "created_at": hist_q.get("created_at"),
+                                "batch_id": hist_q.get("import_batch_id")
+                            },
+                            "similarity": round(overlap * 100),
+                            "type": "in_history"
+                        })
+                        await db.questions.update_one(
+                            {"id": q["id"]},
+                            {"$set": {"is_duplicate": True, "duplicate_of": hist_q["id"]}}
+                        )
+                        break
     
     return {"duplicates_count": len(duplicates_found), "duplicates": duplicates_found}
+
+@api_router.put("/questions/{question_id}/clear-duplicate")
+async def clear_duplicate_flag(question_id: str):
+    """Remove duplicate flag from a question"""
+    await db.questions.update_one(
+        {"id": question_id},
+        {"$set": {"is_duplicate": False, "duplicate_of": None}}
+    )
+    return {"message": "Duplicate flag cleared"}
 
 # ----- PROGRAMS -----
 

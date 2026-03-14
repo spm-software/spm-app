@@ -13,6 +13,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { 
   Wand2, 
   Check, 
@@ -22,12 +28,15 @@ import {
   Search,
   MessageSquare,
   Pencil,
-  CheckCircle
+  CheckCircle,
+  Copy,
+  X,
+  ArrowRight
 } from "lucide-react";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
-// Componente separado para editar nombre - evita re-renders
+// Componente separado para editar nombre
 const EditableName = ({ question, onSave }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [localName, setLocalName] = useState(question.real_name || "");
@@ -140,6 +149,127 @@ const EditableText = ({ question, onSave }) => {
   );
 };
 
+// Modal de duplicados
+const DuplicatesModal = ({ open, onClose, duplicates, onDelete, onKeep }) => {
+  if (!duplicates || duplicates.length === 0) return null;
+
+  return (
+    <Dialog open={open} onOpenChange={onClose}>
+      <DialogContent className="max-w-4xl max-h-[80vh] overflow-hidden flex flex-col">
+        <DialogHeader>
+          <DialogTitle className="font-heading text-xl uppercase tracking-tight flex items-center gap-2">
+            <Copy className="w-5 h-5 text-primary" />
+            DUPLICADOS ENCONTRADOS ({duplicates.length})
+          </DialogTitle>
+        </DialogHeader>
+        
+        <div className="flex-1 overflow-y-auto space-y-6 pr-2">
+          {duplicates.map((dup, index) => (
+            <div key={index} className="border border-border rounded-sm p-4 bg-card">
+              {/* Header */}
+              <div className="flex items-center gap-2 mb-4">
+                <Badge variant={dup.type === "in_history" ? "destructive" : "secondary"}>
+                  {dup.type === "in_history" ? "En historial" : "En este lote"}
+                </Badge>
+                <Badge variant="outline">{dup.similarity}% similar</Badge>
+              </div>
+              
+              {/* Comparison */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* New question */}
+                <div className="space-y-2">
+                  <p className="text-xs font-bold uppercase tracking-wide text-primary">
+                    Nueva pregunta (importada ahora)
+                  </p>
+                  <div className="p-3 bg-primary/5 border border-primary/20 rounded-sm">
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className="font-mono text-xs text-muted-foreground">
+                        {dup.new_question.username}
+                      </span>
+                      {dup.new_question.real_name && (
+                        <span className="text-xs font-medium">
+                          → {dup.new_question.real_name}
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-sm leading-relaxed">
+                      {dup.new_question.text}
+                    </p>
+                  </div>
+                </div>
+                
+                {/* Original question */}
+                <div className="space-y-2">
+                  <p className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
+                    Pregunta original {dup.type === "in_history" && "(anterior)"}
+                  </p>
+                  <div className="p-3 bg-secondary/50 border border-border rounded-sm">
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className="font-mono text-xs text-muted-foreground">
+                        {dup.original_question.username}
+                      </span>
+                      {dup.original_question.real_name && (
+                        <span className="text-xs font-medium">
+                          → {dup.original_question.real_name}
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-sm leading-relaxed">
+                      {dup.original_question.text}
+                    </p>
+                    {dup.original_question.created_at && (
+                      <p className="text-xs text-muted-foreground mt-2">
+                        Fecha: {new Date(dup.original_question.created_at).toLocaleDateString('es-ES')}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </div>
+              
+              {/* Actions */}
+              <div className="flex items-center gap-3 mt-4 pt-4 border-t border-border">
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  onClick={() => onDelete(dup.new_question.id)}
+                  className="rounded-sm text-xs"
+                >
+                  <Trash2 className="w-3.5 h-3.5 mr-1" />
+                  Eliminar nueva
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => onKeep(dup.new_question.id)}
+                  className="rounded-sm text-xs"
+                >
+                  <Check className="w-3.5 h-3.5 mr-1" />
+                  Mantener ambas
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => onDelete(dup.original_question.id)}
+                  className="rounded-sm text-xs text-muted-foreground"
+                >
+                  <Trash2 className="w-3.5 h-3.5 mr-1" />
+                  Eliminar original
+                </Button>
+              </div>
+            </div>
+          ))}
+        </div>
+        
+        <div className="pt-4 border-t border-border flex justify-end">
+          <Button onClick={onClose} className="rounded-sm">
+            Cerrar
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+};
+
 export default function Editor() {
   const [batches, setBatches] = useState([]);
   const [selectedBatch, setSelectedBatch] = useState("");
@@ -148,6 +278,8 @@ export default function Editor() {
   const [correcting, setCorrecting] = useState(false);
   const [correctingId, setCorrectingId] = useState(null);
   const [checkingDuplicates, setCheckingDuplicates] = useState(false);
+  const [duplicates, setDuplicates] = useState([]);
+  const [showDuplicatesModal, setShowDuplicatesModal] = useState(false);
 
   useEffect(() => {
     fetchBatches();
@@ -219,7 +351,13 @@ export default function Editor() {
     setCheckingDuplicates(true);
     try {
       const response = await axios.post(`${API}/questions/check-duplicates/${selectedBatch}`);
-      toast.success(`${response.data.duplicates_count} duplicados encontrados`);
+      setDuplicates(response.data.duplicates);
+      if (response.data.duplicates.length > 0) {
+        setShowDuplicatesModal(true);
+        toast.info(`${response.data.duplicates_count} duplicados encontrados`);
+      } else {
+        toast.success("No se encontraron duplicados");
+      }
       fetchQuestions();
     } catch (error) {
       console.error("Error checking duplicates:", error);
@@ -234,7 +372,6 @@ export default function Editor() {
       await axios.put(`${API}/questions/${question.id}`, {
         is_greeting: !question.is_greeting
       });
-      // Update local state
       setQuestions(prev => prev.map(q => 
         q.id === question.id ? { ...q, is_greeting: !q.is_greeting } : q
       ));
@@ -249,7 +386,6 @@ export default function Editor() {
       await axios.put(`${API}/questions/${questionId}`, {
         [field]: value
       });
-      // Update local state
       setQuestions(prev => prev.map(q => 
         q.id === questionId ? { ...q, [field]: value } : q
       ));
@@ -260,20 +396,32 @@ export default function Editor() {
   };
 
   const handleDeleteQuestion = async (questionId) => {
-    // Guardar posición del scroll antes de eliminar
     const scrollY = window.scrollY;
-    
     try {
       await axios.delete(`${API}/questions/${questionId}`);
       setQuestions(prev => prev.filter(q => q.id !== questionId));
+      setDuplicates(prev => prev.filter(d => 
+        d.new_question.id !== questionId && d.original_question.id !== questionId
+      ));
       toast.success("Pregunta eliminada");
-      
-      // Restaurar posición del scroll después de un breve delay para que React actualice
       requestAnimationFrame(() => {
         window.scrollTo(0, scrollY);
       });
     } catch (error) {
       console.error("Error deleting question:", error);
+    }
+  };
+
+  const handleKeepBoth = async (questionId) => {
+    try {
+      await axios.put(`${API}/questions/${questionId}/clear-duplicate`);
+      setQuestions(prev => prev.map(q => 
+        q.id === questionId ? { ...q, is_duplicate: false, duplicate_of: null } : q
+      ));
+      setDuplicates(prev => prev.filter(d => d.new_question.id !== questionId));
+      toast.success("Pregunta mantenida");
+    } catch (error) {
+      console.error("Error clearing duplicate:", error);
     }
   };
 
@@ -356,6 +504,18 @@ export default function Editor() {
           )}
           Buscar duplicados
         </Button>
+
+        {duplicates.length > 0 && (
+          <Button
+            variant="secondary"
+            onClick={() => setShowDuplicatesModal(true)}
+            size="lg"
+            className="rounded-sm uppercase tracking-wide text-xs"
+          >
+            <Copy className="w-4 h-4 mr-2" />
+            Ver {duplicates.length} duplicados
+          </Button>
+        )}
 
         <div className="flex-1" />
         
@@ -511,6 +671,15 @@ export default function Editor() {
           ))
         )}
       </div>
+
+      {/* Duplicates Modal */}
+      <DuplicatesModal
+        open={showDuplicatesModal}
+        onClose={() => setShowDuplicatesModal(false)}
+        duplicates={duplicates}
+        onDelete={handleDeleteQuestion}
+        onKeep={handleKeepBoth}
+      />
     </div>
   );
 }
