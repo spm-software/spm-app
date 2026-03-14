@@ -248,19 +248,28 @@ def parse_comments(raw_text: str) -> List[Dict[str, str]]:
     has_at_usernames = any(re.match(r'^@[\w\-\.]+', line.strip()) for line in lines if line.strip())
     
     # More strict check for "Name: text" format - name should be short (< 40 chars) and not start with common words
-    common_starts = ['tengo', 'sobre', 'cuando', 'como', 'que', 'cual', 'donde', 'por', 'si', 'en', 'de', 'la', 'el', 'un', 'una', 'mi', 'me']
+    # Also, the name should not contain words that are typically part of sentences
+    common_starts = ['tengo', 'sobre', 'cuando', 'como', 'que', 'cual', 'donde', 'por', 'si', 'en', 'de', 'la', 'el', 'un', 'una', 'mi', 'me', 'pregunta', 'jesucristo', 'dios', 'pastor', 'estimado', 'querido']
     def is_name_colon_format(line):
         match = re.match(r'^([A-ZÁÉÍÓÚÑ][a-záéíóúñA-ZÁÉÍÓÚÑ\s\.]+?):\s', line.strip())
         if match:
             name_part = match.group(1).strip().lower()
-            # Name should be short and not start with common words
-            if len(name_part) < 40 and not any(name_part.startswith(w) for w in common_starts):
+            # Name should be short (typically 1-4 words, under 40 chars)
+            # and not start with common sentence words
+            word_count = len(name_part.split())
+            if (len(name_part) < 40 and 
+                word_count <= 4 and
+                not any(name_part.startswith(w) for w in common_starts)):
                 return True
         return False
     
     has_colon_names = any(is_name_colon_format(line) for line in lines if line.strip())
     
-    if not has_at_usernames and not has_colon_names and len(blank_line_indices) > 2:
+    # Additional check: if we have many blank lines (more than 10% of total lines), 
+    # it's likely Format 4 even if some lines have colons
+    blank_ratio = len(blank_line_indices) / len(lines) if lines else 0
+    
+    if not has_at_usernames and (not has_colon_names or blank_ratio > 0.2) and len(blank_line_indices) > 10:
         # Use Format 4: Name on one line, text on next lines, separated by blank lines
         return parse_comments_format4(raw_text)
     
@@ -330,6 +339,9 @@ def parse_comments_format4(raw_text: str) -> List[Dict[str, str]]:
     """
     comments = []
     
+    # Remove separator lines like ---
+    raw_text = re.sub(r'^-{3,}$', '', raw_text, flags=re.MULTILINE)
+    
     # Split by one or more blank lines (handles both single and double blank lines)
     blocks = re.split(r'\n\s*\n+', raw_text.strip())
     
@@ -345,17 +357,31 @@ def parse_comments_format4(raw_text: str) -> List[Dict[str, str]]:
         # First line should be the name
         first_line = lines[0].strip()
         
-        # Skip if first line looks like a question (starts with ¿ or has ? early) or is too long
-        if first_line.startswith('¿') or len(first_line) > 100:
+        # Skip empty first lines
+        if not first_line:
             continue
         
-        # Check if first line looks like a name (not too long, no question marks, capitalized)
-        # Names are typically under 50 chars and don't have question marks
-        if '?' in first_line or len(first_line) > 60:
-            continue
-            
-        # Name should start with a capital letter or be a short phrase
-        if not first_line[0].isupper() and not first_line[0].isdigit():
+        # Skip if first line looks like a question or is too long
+        # A name typically: starts with capital, is short (< 50 chars), has no ? or ¿
+        is_likely_name = (
+            len(first_line) < 50 and 
+            '?' not in first_line and 
+            not first_line.startswith('¿') and
+            not first_line.startswith('•') and
+            first_line[0].isupper() and
+            # Names usually have 1-5 words
+            len(first_line.split()) <= 6 and
+            # Names don't typically start with common Spanish sentence starters
+            not any(first_line.lower().startswith(w) for w in [
+                'el ', 'la ', 'los ', 'las ', 'un ', 'una ', 'que ', 'si ', 'no ', 
+                'por ', 'para ', 'con ', 'en ', 'es ', 'son ', 'pero ', 'porque ',
+                'cuando ', 'como ', 'donde ', 'cual ', 'esto ', 'esta ', 'ese ', 
+                'esa ', 'mi ', 'mis ', 'su ', 'sus ', 'yo ', 'he ', 'se ', 'me ',
+                'muchos ', 'gracias ', 'bendiciones', 'pastor,', 'dios '
+            ])
+        )
+        
+        if not is_likely_name:
             continue
         
         name = first_line
