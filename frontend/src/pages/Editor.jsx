@@ -271,6 +271,141 @@ const DuplicatesModal = ({ open, onClose, duplicates, onDelete, onKeep }) => {
   );
 };
 
+// Modal de búsqueda global
+const SearchModal = ({ open, onClose }) => {
+  const [searchTerm, setSearchTerm] = useState("");
+  const [results, setResults] = useState([]);
+  const [searching, setSearching] = useState(false);
+  const [hasSearched, setHasSearched] = useState(false);
+
+  const handleSearch = async () => {
+    if (searchTerm.length < 2) {
+      toast.error("Escribe al menos 2 caracteres");
+      return;
+    }
+    
+    setSearching(true);
+    setHasSearched(true);
+    try {
+      const response = await axios.get(`${process.env.REACT_APP_BACKEND_URL}/api/questions/search`, {
+        params: { q: searchTerm }
+      });
+      setResults(response.data.results);
+    } catch (error) {
+      console.error("Error searching:", error);
+      toast.error("Error al buscar");
+    } finally {
+      setSearching(false);
+    }
+  };
+
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter') {
+      handleSearch();
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onClose}>
+      <DialogContent className="max-w-4xl max-h-[85vh] overflow-hidden flex flex-col">
+        <DialogHeader>
+          <DialogTitle className="font-heading text-xl uppercase tracking-tight flex items-center gap-2">
+            <Search className="w-5 h-5 text-primary" />
+            BUSCAR EN TODAS LAS PREGUNTAS
+          </DialogTitle>
+        </DialogHeader>
+        
+        {/* Search Input */}
+        <div className="flex gap-2 py-4">
+          <Input
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder="Buscar por texto, nombre de usuario..."
+            className="flex-1 rounded-sm"
+            autoFocus
+          />
+          <Button 
+            onClick={handleSearch} 
+            disabled={searching || searchTerm.length < 2}
+            className="rounded-sm"
+          >
+            {searching ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <Search className="w-4 h-4" />
+            )}
+          </Button>
+        </div>
+        
+        {/* Results */}
+        <div className="flex-1 overflow-y-auto space-y-3 pr-2">
+          {searching ? (
+            <div className="py-12 text-center">
+              <Loader2 className="w-8 h-8 animate-spin mx-auto mb-4" />
+              <p className="text-muted-foreground">Buscando...</p>
+            </div>
+          ) : hasSearched && results.length === 0 ? (
+            <div className="py-12 text-center">
+              <Search className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
+              <p className="text-muted-foreground">No se encontraron resultados para "{searchTerm}"</p>
+            </div>
+          ) : results.length > 0 ? (
+            <>
+              <p className="text-sm text-muted-foreground mb-4">
+                {results.length} resultado{results.length !== 1 ? 's' : ''} encontrado{results.length !== 1 ? 's' : ''}
+              </p>
+              {results.map((result) => (
+                <div 
+                  key={result.id}
+                  className="border border-border rounded-sm p-4 bg-card hover:border-primary/30 transition-colors"
+                >
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="font-mono text-xs text-muted-foreground bg-secondary/50 px-2 py-1 rounded">
+                      {result.youtube_username}
+                    </span>
+                    {result.real_name && (
+                      <>
+                        <span className="text-muted-foreground">→</span>
+                        <span className="text-sm font-medium">{result.real_name}</span>
+                      </>
+                    )}
+                    <div className="ml-auto flex items-center gap-2">
+                      {result.batch_date && (
+                        <Badge variant="outline" className="text-xs">
+                          {new Date(result.batch_date).toLocaleDateString('es-ES')}
+                        </Badge>
+                      )}
+                      {result.is_duplicate && (
+                        <Badge variant="destructive" className="text-xs">Duplicado</Badge>
+                      )}
+                    </div>
+                  </div>
+                  <p className="text-sm leading-relaxed whitespace-pre-wrap">
+                    {result.corrected_text || result.original_text}
+                  </p>
+                </div>
+              ))}
+            </>
+          ) : (
+            <div className="py-12 text-center">
+              <Search className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
+              <p className="text-muted-foreground">Escribe un término y pulsa buscar</p>
+              <p className="text-xs text-muted-foreground mt-2">Busca en todas las preguntas del sistema</p>
+            </div>
+          )}
+        </div>
+        
+        <div className="pt-4 border-t border-border flex justify-end">
+          <Button variant="outline" onClick={onClose} className="rounded-sm">
+            Cerrar
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+};
+
 export default function Editor() {
   const [batches, setBatches] = useState([]);
   const [selectedBatch, setSelectedBatch] = useState("");
@@ -282,6 +417,7 @@ export default function Editor() {
   const [checkingDuplicates, setCheckingDuplicates] = useState(false);
   const [duplicates, setDuplicates] = useState([]);
   const [showDuplicatesModal, setShowDuplicatesModal] = useState(false);
+  const [showSearchModal, setShowSearchModal] = useState(false);
 
   useEffect(() => {
     fetchBatches();
@@ -604,6 +740,17 @@ export default function Editor() {
 
         <Button
           variant="outline"
+          onClick={() => setShowSearchModal(true)}
+          size="lg"
+          className="rounded-sm uppercase tracking-wide text-xs"
+          data-testid="search-all-button"
+        >
+          <Search className="w-4 h-4 mr-2" />
+          Buscar en todo
+        </Button>
+
+        <Button
+          variant="outline"
           onClick={handleUpdateNames}
           disabled={questions.length === 0}
           size="lg"
@@ -776,6 +923,11 @@ export default function Editor() {
         duplicates={duplicates}
         onDelete={handleDeleteQuestion}
         onKeep={handleKeepBoth}
+      />
+
+      <SearchModal
+        open={showSearchModal}
+        onClose={() => setShowSearchModal(false)}
       />
     </div>
   );

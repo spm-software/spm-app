@@ -783,6 +783,37 @@ async def update_names_from_mappings(batch_id: str):
     
     return {"updated_count": updated}
 
+@api_router.get("/questions/search")
+async def search_all_questions(q: str = Query(..., min_length=2)):
+    """Search all questions in the system by text"""
+    # Search in both original_text and corrected_text
+    search_regex = {"$regex": q, "$options": "i"}
+    
+    questions = await db.questions.find(
+        {
+            "$or": [
+                {"original_text": search_regex},
+                {"corrected_text": search_regex},
+                {"real_name": search_regex},
+                {"youtube_username": search_regex}
+            ],
+            "is_greeting": {"$ne": True}
+        },
+        {"_id": 0}
+    ).sort("created_at", -1).to_list(100)
+    
+    # Add batch info to each question
+    for q in questions:
+        if q.get("import_batch_id"):
+            batch = await db.import_batches.find_one(
+                {"id": q["import_batch_id"]},
+                {"_id": 0, "created_at": 1}
+            )
+            if batch:
+                q["batch_date"] = batch.get("created_at")
+    
+    return {"results": questions, "count": len(questions)}
+
 # ----- PROGRAMS -----
 
 @api_router.get("/programs", response_model=List[Program])
