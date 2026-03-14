@@ -316,20 +316,22 @@ def parse_comments(raw_text: str) -> List[Dict[str, str]]:
     return comments
 
 def parse_comments_format4(raw_text: str) -> List[Dict[str, str]]:
-    """Parse format where name is alone on a line, followed by question text, 
-    separated by blank lines from the next entry.
+    """Parse format where name is alone on a line, followed by question text on next line(s).
+    Questions are separated by one or more blank lines.
     
     Example:
-    Adolfo Vargas Jiménez
-    ¿Dios tiene ira? Ya que en varias ocasiones...
+    Fue por tu gracia
+    Muy amado pastor, hace algunos meses...
+    Agradecería mucho su orientación.
     
-    Rodrigo Peñuela
-    En la parábola del sembrador dice que...
+    
+    José Quispe Ascate
+    ¿Podemos cantar "Señor, te exaltamos"...
     """
     comments = []
     
-    # Split by double newlines (blank line separators)
-    blocks = re.split(r'\n\s*\n', raw_text.strip())
+    # Split by one or more blank lines (handles both single and double blank lines)
+    blocks = re.split(r'\n\s*\n+', raw_text.strip())
     
     for block in blocks:
         block = block.strip()
@@ -337,31 +339,44 @@ def parse_comments_format4(raw_text: str) -> List[Dict[str, str]]:
             continue
         
         lines = block.split('\n')
-        if len(lines) >= 1:
-            # First line is the name
-            name = lines[0].strip()
+        if len(lines) < 1:
+            continue
             
-            # Skip if name looks like a question or is too long (probably not a name)
-            if '?' in name or len(name) > 80 or name.startswith('¿'):
-                continue
+        # First line should be the name
+        first_line = lines[0].strip()
+        
+        # Skip if first line looks like a question (starts with ¿ or has ? early) or is too long
+        if first_line.startswith('¿') or len(first_line) > 100:
+            continue
+        
+        # Check if first line looks like a name (not too long, no question marks, capitalized)
+        # Names are typically under 50 chars and don't have question marks
+        if '?' in first_line or len(first_line) > 60:
+            continue
             
-            # Rest is the question text
-            if len(lines) > 1:
-                text = '\n'.join(lines[1:]).strip()
-            else:
-                # Name only, no text - skip
-                continue
+        # Name should start with a capital letter or be a short phrase
+        if not first_line[0].isupper() and not first_line[0].isdigit():
+            continue
+        
+        name = first_line
+        
+        # Rest is the question text
+        if len(lines) > 1:
+            text = '\n'.join(line.strip() for line in lines[1:]).strip()
+        else:
+            # Only name, no text - skip this block
+            continue
+        
+        if text:
+            clean_text = clean_youtube_metadata(text)
+            # Generate a username from the name
+            username = '@' + re.sub(r'[^a-záéíóúñA-ZÁÉÍÓÚÑ0-9]', '', name.lower().replace(' ', ''))
             
-            if text:
-                clean_text = clean_youtube_metadata(text)
-                # Generate a username from the name
-                username = '@' + re.sub(r'[^a-záéíóúñA-ZÁÉÍÓÚÑ0-9]', '', name.lower().replace(' ', ''))
-                
-                comments.append({
-                    "youtube_username": username,
-                    "original_text": clean_text,
-                    "real_name": name
-                })
+            comments.append({
+                "youtube_username": username,
+                "original_text": clean_text,
+                "real_name": name
+            })
     
     return comments
 
