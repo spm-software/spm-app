@@ -869,10 +869,34 @@ async def update_question(question_id: str, update: QuestionUpdate):
 
 @api_router.delete("/questions/{question_id}")
 async def delete_question(question_id: str):
+    # First get the question to know its batch
+    question = await db.questions.find_one({"id": question_id})
+    if not question:
+        raise HTTPException(status_code=404, detail="Pregunta no encontrada")
+    
+    batch_id = question.get("import_batch_id")
+    
+    # Delete the question
     result = await db.questions.delete_one({"id": question_id})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Pregunta no encontrada")
-    return {"message": "Pregunta eliminada"}
+    
+    # Update the batch question count
+    if batch_id:
+        # Count remaining questions in batch
+        remaining = await db.questions.count_documents({"import_batch_id": batch_id})
+        await db.import_batches.update_one(
+            {"id": batch_id},
+            {"$set": {"question_count": remaining}}
+        )
+    
+    # Also clean up any questions that reference this as duplicate_of
+    await db.questions.update_many(
+        {"duplicate_of": question_id},
+        {"$set": {"is_duplicate": False, "duplicate_of": None}}
+    )
+    
+    return {"message": "Pregunta eliminada", "remaining_in_batch": remaining if batch_id else 0}
 
 
 @api_router.get("/questions/by-id/{question_id}")

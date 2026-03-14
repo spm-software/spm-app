@@ -729,12 +729,15 @@ export default function Editor() {
       setDuplicates(prev => prev.filter(d => 
         d.new_question.id !== questionId && d.original_question.id !== questionId
       ));
+      // Update batch list to reflect new count
+      fetchBatches();
       toast.success("Pregunta eliminada");
       requestAnimationFrame(() => {
         window.scrollTo(0, scrollY);
       });
     } catch (error) {
       console.error("Error deleting question:", error);
+      toast.error("Error al eliminar pregunta");
     }
   };
 
