@@ -446,6 +446,7 @@ export default function Editor() {
   const [duplicates, setDuplicates] = useState([]);
   const [showDuplicatesModal, setShowDuplicatesModal] = useState(false);
   const [showSearchModal, setShowSearchModal] = useState(false);
+  const [showOnlyDuplicates, setShowOnlyDuplicates] = useState(false);
   const initialBatchLoaded = useRef(false);
 
   useEffect(() => {
@@ -851,12 +852,18 @@ export default function Editor() {
           )}
           {questions.filter(q => q.is_duplicate).length > 0 && (
             <button
-              onClick={() => duplicates.length > 0 ? setShowDuplicatesModal(true) : handleCheckDuplicatesAI()}
-              className="flex items-center gap-2 hover:bg-red-50 px-2 py-1 rounded transition-colors cursor-pointer"
-              title={duplicates.length > 0 ? "Ver duplicados" : "Buscar duplicados con IA"}
+              onClick={() => setShowOnlyDuplicates(!showOnlyDuplicates)}
+              className={`flex items-center gap-2 px-3 py-1 rounded transition-colors cursor-pointer border ${
+                showOnlyDuplicates 
+                  ? 'bg-red-500 text-white border-red-500' 
+                  : 'hover:bg-red-50 border-red-300'
+              }`}
+              title={showOnlyDuplicates ? "Ver todas las preguntas" : "Filtrar solo duplicados"}
             >
-              <div className="w-3 h-3 rounded-full bg-red-500" />
-              <span className="text-red-600 font-medium"><strong>{questions.filter(q => q.is_duplicate).length}</strong> duplicados</span>
+              <div className={`w-3 h-3 rounded-full ${showOnlyDuplicates ? 'bg-white' : 'bg-red-500'}`} />
+              <span className={`font-medium ${showOnlyDuplicates ? '' : 'text-red-600'}`}>
+                <strong>{questions.filter(q => q.is_duplicate).length}</strong> duplicados
+              </span>
             </button>
           )}
         </div>
@@ -880,12 +887,12 @@ export default function Editor() {
             </CardContent>
           </Card>
         ) : (
-          questions.map((question, index) => (
+          (showOnlyDuplicates ? questions.filter(q => q.is_duplicate) : questions).map((question, index) => (
             <Card 
               key={question.id}
               className={`bg-card border rounded-sm transition-all ${
                 question.is_greeting ? "opacity-50 border-yellow-500/50 bg-yellow-500/5" : 
-                question.is_duplicate ? "opacity-50 border-red-500/50 bg-red-500/5" : 
+                question.is_duplicate ? "border-red-500 bg-red-500/5" : 
                 "border-border hover:border-foreground/20"
               }`}
               data-testid={`question-card-${question.id}`}
@@ -918,8 +925,20 @@ export default function Editor() {
                       </Badge>
                     )}
                     {question.is_duplicate && (
-                      <Badge variant="destructive" className="text-xs">
-                        Duplicado
+                      <Badge 
+                        variant="destructive" 
+                        className="text-xs cursor-pointer hover:bg-red-700"
+                        onClick={() => {
+                          // Find and show the duplicate info
+                          const dup = duplicates.find(d => d.new_question.id === question.id || d.original_question.id === question.id);
+                          if (dup) {
+                            setDuplicates([dup]);
+                            setShowDuplicatesModal(true);
+                          }
+                        }}
+                        title="Ver pregunta duplicada"
+                      >
+                        Duplicado - Click para comparar
                       </Badge>
                     )}
                   </div>
