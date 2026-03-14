@@ -850,10 +850,14 @@ export default function Editor() {
             </div>
           )}
           {questions.filter(q => q.is_duplicate).length > 0 && (
-            <div className="flex items-center gap-2">
+            <button
+              onClick={() => duplicates.length > 0 ? setShowDuplicatesModal(true) : handleCheckDuplicatesAI()}
+              className="flex items-center gap-2 hover:bg-red-50 px-2 py-1 rounded transition-colors cursor-pointer"
+              title={duplicates.length > 0 ? "Ver duplicados" : "Buscar duplicados con IA"}
+            >
               <div className="w-3 h-3 rounded-full bg-red-500" />
-              <span><strong>{questions.filter(q => q.is_duplicate).length}</strong> duplicados</span>
-            </div>
+              <span className="text-red-600 font-medium"><strong>{questions.filter(q => q.is_duplicate).length}</strong> duplicados</span>
+            </button>
           )}
         </div>
       </div>
