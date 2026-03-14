@@ -326,19 +326,22 @@ def parse_comments(raw_text: str) -> List[Dict[str, str]]:
 
 def parse_comments_format4(raw_text: str) -> List[Dict[str, str]]:
     """Parse format where:
-    - Name is on its own line (after a blank line or at the start)
-    - Question text follows on subsequent lines
-    - A blank line marks the END of each question
+    - Name is on its own line
+    - Question text follows on subsequent lines  
+    - Blank lines may appear WITHIN questions (for formatting)
+    - A NEW NAME after a blank line marks the START of a new question
     
-    Simple rule: blank line = end of question, next non-blank line = new name
+    Key insight: After a blank line, check if next line is a NAME or more text.
+    Names are: short, no ?, don't start with ¿, typically 1-4 words, capitalized.
     
     Example:
-    Nombre Usuario           <- Name (start of file or after blank)
+    Nombre Usuario           <- Name
     Texto de la pregunta     <- Question text
     que puede tener          <- More question text
-    varias líneas.           <- More question text
-                             <- Blank line = END of question
-    Otro Usuario             <- New name
+                             <- Blank line (formatting within question)
+    varias líneas.           <- Still same question
+                             <- Blank line  
+    Otro Usuario             <- NEW NAME = new question starts
     Otra pregunta.           <- Question text
     """
     comments = []
@@ -348,40 +351,110 @@ def parse_comments_format4(raw_text: str) -> List[Dict[str, str]]:
     
     lines = raw_text.split('\n')
     
+    def is_likely_name(line):
+        """Check if a line looks like a person's name"""
+        line = line.strip()
+        if not line:
+            return False
+        
+        # Names are short (typically under 50 chars)
+        if len(line) > 50:
+            return False
+        
+        # Names don't have question marks
+        if '?' in line:
+            return False
+        
+        # Names don't start with question openers or bullets
+        if line.startswith('¿') or line.startswith('•') or line.startswith('-'):
+            return False
+        
+        # Names start with capital letter
+        if not line[0].isupper():
+            return False
+        
+        # Names typically have 1-5 words
+        word_count = len(line.split())
+        if word_count > 5:
+            return False
+        
+        # Names don't start with common Spanish sentence/question starters
+        lower_line = line.lower()
+        sentence_starters = [
+            'el ', 'la ', 'los ', 'las ', 'un ', 'una ', 'unos ', 'unas ',
+            'que ', 'qué ', 'si ', 'no ', 'sí ', 'por ', 'para ', 'con ', 
+            'en ', 'es ', 'son ', 'era ', 'fue ', 'pero ', 'porque ', 'ya ',
+            'cuando ', 'como ', 'cómo ', 'donde ', 'dónde ', 'cual ', 'cuál ',
+            'esto ', 'esta ', 'este ', 'ese ', 'esa ', 'eso ', 'aquel ',
+            'mi ', 'mis ', 'su ', 'sus ', 'tu ', 'tus ', 'yo ', 'él ', 'ella ',
+            'he ', 'ha ', 'se ', 'me ', 'te ', 'le ', 'lo ', 'hay ',
+            'muchos ', 'muchas ', 'algunos ', 'algunas ', 'todos ', 'todas ',
+            'gracias', 'bendiciones', 'saludos', 'hola', 'buenos', 'buenas',
+            'perdón', 'disculpe', 'estimado', 'querido', 'querida',
+            'según ', 'sobre ', 'acerca ', 'respecto ', 'durante ', 'después ',
+            'antes ', 'ahora ', 'entonces ', 'además ', 'también ', 'incluso ',
+            'creo ', 'pienso ', 'considero ', 'entiendo ', 'leo ', 'leí ',
+            'tengo ', 'tiene ', 'tienen ', 'quiero ', 'quisiera ', 'podría ',
+            'puede ', 'pueden ', 'debe ', 'deben ', 'sería ', 'serían ',
+        ]
+        if any(lower_line.startswith(starter) for starter in sentence_starters):
+            return False
+        
+        return True
+    
     current_name = None
     current_text_lines = []
-    expecting_name = True  # Start expecting a name
     
-    for i, line in enumerate(lines):
+    i = 0
+    while i < len(lines):
+        line = lines[i]
         line_stripped = line.strip()
         
         if not line_stripped:
-            # Blank line = end of current question
-            if current_name and current_text_lines:
-                text = '\n'.join(current_text_lines).strip()
-                if text:
-                    clean_text = clean_youtube_metadata(text)
-                    username = '@' + re.sub(r'[^a-záéíóúñA-ZÁÉÍÓÚÑ0-9]', '', current_name.lower().replace(' ', ''))
-                    comments.append({
-                        "youtube_username": username,
-                        "original_text": clean_text,
-                        "real_name": current_name
-                    })
-            # Reset for next question
-            current_name = None
-            current_text_lines = []
-            expecting_name = True
+            # Blank line - need to look ahead to see if next non-blank is a name
+            # Skip consecutive blank lines
+            j = i + 1
+            while j < len(lines) and not lines[j].strip():
+                j += 1
+            
+            if j < len(lines):
+                next_line = lines[j].strip()
+                if is_likely_name(next_line):
+                    # Next line is a name = end current question, start new
+                    if current_name and current_text_lines:
+                        text = '\n'.join(current_text_lines).strip()
+                        if text:
+                            clean_text = clean_youtube_metadata(text)
+                            username = '@' + re.sub(r'[^a-záéíóúñA-ZÁÉÍÓÚÑ0-9]', '', current_name.lower().replace(' ', ''))
+                            comments.append({
+                                "youtube_username": username,
+                                "original_text": clean_text,
+                                "real_name": current_name
+                            })
+                    # Start new question
+                    current_name = next_line
+                    current_text_lines = []
+                    i = j + 1  # Skip to after the name
+                    continue
+                else:
+                    # Next line is more text, blank was just formatting
+                    # Add blank line to preserve formatting if we have content
+                    if current_text_lines:
+                        current_text_lines.append('')
+            i += 1
         else:
             # Non-blank line
-            if expecting_name:
-                # This line is the name
-                current_name = line_stripped
-                expecting_name = False
+            if current_name is None:
+                # First line of file (no name yet)
+                if is_likely_name(line_stripped):
+                    current_name = line_stripped
+                # else: skip orphan text without a name
             else:
-                # This line is part of the question text
+                # Add to current question text
                 current_text_lines.append(line_stripped)
+            i += 1
     
-    # Don't forget the last question (if file doesn't end with blank line)
+    # Don't forget the last question
     if current_name and current_text_lines:
         text = '\n'.join(current_text_lines).strip()
         if text:
