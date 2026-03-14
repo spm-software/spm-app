@@ -464,6 +464,30 @@ async def create_question(data: QuestionCreate):
 async def update_question(question_id: str, update: QuestionUpdate):
     update_data = {k: v for k, v in update.model_dump().items() if v is not None}
     
+    # If updating real_name, also save to user_mappings for future use
+    if "real_name" in update_data and update_data["real_name"]:
+        question = await db.questions.find_one({"id": question_id}, {"_id": 0})
+        if question and question.get("youtube_username"):
+            # Create or update user mapping
+            existing = await db.user_mappings.find_one(
+                {"youtube_username": question["youtube_username"]},
+                {"_id": 0}
+            )
+            if existing:
+                await db.user_mappings.update_one(
+                    {"youtube_username": question["youtube_username"]},
+                    {"$set": {"real_name": update_data["real_name"], "updated_at": datetime.now(timezone.utc).isoformat()}}
+                )
+            else:
+                new_mapping = UserMapping(
+                    youtube_username=question["youtube_username"],
+                    real_name=update_data["real_name"]
+                )
+                doc = new_mapping.model_dump()
+                doc['created_at'] = serialize_datetime(doc['created_at'])
+                doc['updated_at'] = serialize_datetime(doc['updated_at'])
+                await db.user_mappings.insert_one(doc)
+    
     if update_data:
         await db.questions.update_one(
             {"id": question_id},
