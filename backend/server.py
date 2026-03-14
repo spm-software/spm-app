@@ -554,7 +554,7 @@ Aplica estas preferencias fijas del estilo SPM:
         return text
 
 
-async def check_duplicates_with_ai(questions_to_check: List[Dict], all_questions: List[Dict], current_batch_id: str) -> List[Dict]:
+async def check_duplicates_with_ai(questions_to_check: List[Dict], all_questions: List[Dict], current_batch_id: str, model: str = "gpt-5.2") -> List[Dict]:
     """Use AI to find semantic duplicates from the SAME USER.
     
     Checks:
@@ -567,6 +567,18 @@ async def check_duplicates_with_ai(questions_to_check: List[Dict], all_questions
     
     duplicates_found = []
     processed_pairs = set()  # To avoid checking the same pair twice
+    
+    # Map model names to provider/model pairs
+    model_config = {
+        "gpt-5.2": ("openai", "gpt-5.2"),
+        "gpt-4o": ("openai", "gpt-4o"),
+        "gpt-4o-mini": ("openai", "gpt-4o-mini"),
+        "claude-sonnet-4-5": ("anthropic", "claude-sonnet-4-5-20250929"),
+        "gemini-3-flash": ("gemini", "gemini-3-flash-preview"),
+    }
+    
+    provider, model_name = model_config.get(model, ("openai", "gpt-5.2"))
+    logger.info(f"Using model: {provider}/{model_name}")
     
     try:
         api_key = os.environ.get('EMERGENT_LLM_KEY')
@@ -633,7 +645,7 @@ Ejemplo: "1, 3" o "NINGUNA"
 """
             )
             
-            chat.with_model("openai", "gpt-5.2")
+            chat.with_model(provider, model_name)
             
             user_prompt = f"""NUEVA PREGUNTA de {new_q.get('real_name', 'Usuario')}:
 "{new_text}"
@@ -1183,8 +1195,12 @@ async def check_duplicates(batch_id: str):
     return {"duplicates_count": len(duplicates_found), "duplicates": duplicates_found}
 
 
+class DuplicateCheckRequest(BaseModel):
+    model: Optional[str] = "gpt-5.2"
+
+
 @api_router.post("/questions/check-duplicates-ai/{batch_id}")
-async def check_duplicates_ai(batch_id: str):
+async def check_duplicates_ai(batch_id: str, request: DuplicateCheckRequest = DuplicateCheckRequest()):
     """Check for duplicate questions using AI semantic comparison.
     
     Only compares questions from the SAME USER:
@@ -1210,13 +1226,14 @@ async def check_duplicates_ai(batch_id: str):
     ).to_list(10000)
     
     # Use AI to find duplicates (same user only)
-    duplicates = await check_duplicates_with_ai(questions, all_questions, batch_id)
+    duplicates = await check_duplicates_with_ai(questions, all_questions, batch_id, request.model)
     
     return {
         "duplicates_count": len(duplicates),
         "duplicates": duplicates,
         "questions_checked": len(questions),
-        "total_questions": len(all_questions)
+        "total_questions": len(all_questions),
+        "model_used": request.model
     }
 
 @api_router.put("/questions/{question_id}/clear-duplicate")

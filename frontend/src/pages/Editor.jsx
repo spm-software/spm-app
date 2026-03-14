@@ -455,7 +455,15 @@ export default function Editor() {
   const [showDuplicatesModal, setShowDuplicatesModal] = useState(false);
   const [showSearchModal, setShowSearchModal] = useState(false);
   const [showOnlyDuplicates, setShowOnlyDuplicates] = useState(false);
+  const [aiModel, setAiModel] = useState("gpt-5.2");
   const initialBatchLoaded = useRef(false);
+
+  const AI_MODELS = [
+    { value: "gpt-5.2", label: "GPT-5.2 (OpenAI)", provider: "openai" },
+    { value: "gpt-4o", label: "GPT-4o (OpenAI)", provider: "openai" },
+    { value: "claude-sonnet-4-5", label: "Claude Sonnet 4.5", provider: "anthropic" },
+    { value: "gemini-3-flash", label: "Gemini 3 Flash", provider: "gemini" },
+  ];
 
   useEffect(() => {
     fetchBatches();
@@ -608,17 +616,20 @@ export default function Editor() {
 
   const handleCheckDuplicatesAI = async () => {
     setCheckingDuplicates(true);
-    toast.info("Buscando duplicados con IA... esto puede tardar hasta 1 minuto", { duration: 10000 });
+    const modelLabel = AI_MODELS.find(m => m.value === aiModel)?.label || aiModel;
+    toast.info(`Buscando duplicados con ${modelLabel}... esto puede tardar hasta 1 minuto`, { duration: 10000 });
     try {
-      const response = await axios.post(`${API}/questions/check-duplicates-ai/${selectedBatch}`, {}, {
+      const response = await axios.post(`${API}/questions/check-duplicates-ai/${selectedBatch}`, {
+        model: aiModel
+      }, {
         timeout: 180000 // 3 minutes timeout for AI processing
       });
       setDuplicates(response.data.duplicates);
       if (response.data.duplicates.length > 0) {
         setShowDuplicatesModal(true);
-        toast.success(`${response.data.duplicates_count} duplicados del mismo usuario encontrados`);
+        toast.success(`${response.data.duplicates_count} duplicados encontrados con ${modelLabel}`);
       } else {
-        toast.success("No se encontraron duplicados del mismo usuario");
+        toast.success(`No se encontraron duplicados con ${modelLabel}`);
       }
       fetchQuestions();
     } catch (error) {
@@ -857,21 +868,36 @@ export default function Editor() {
           Duplicados (rápido)
         </Button>
 
-        <Button
-          variant="default"
-          onClick={handleCheckDuplicatesAI}
-          disabled={checkingDuplicates || questions.length === 0}
-          size="lg"
-          className="rounded-sm uppercase tracking-wide text-xs bg-primary"
-          data-testid="check-duplicates-ai-button"
-        >
-          {checkingDuplicates ? (
-            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-          ) : (
-            <Sparkles className="w-4 h-4 mr-2" />
-          )}
-          Duplicados con IA
-        </Button>
+        <div className="flex items-center gap-2">
+          <Select value={aiModel} onValueChange={setAiModel}>
+            <SelectTrigger className="w-[180px] h-10 rounded-sm text-xs">
+              <SelectValue placeholder="Modelo IA" />
+            </SelectTrigger>
+            <SelectContent>
+              {AI_MODELS.map(model => (
+                <SelectItem key={model.value} value={model.value} className="text-xs">
+                  {model.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          
+          <Button
+            variant="default"
+            onClick={handleCheckDuplicatesAI}
+            disabled={checkingDuplicates || questions.length === 0}
+            size="lg"
+            className="rounded-sm uppercase tracking-wide text-xs bg-primary"
+            data-testid="check-duplicates-ai-button"
+          >
+            {checkingDuplicates ? (
+              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+            ) : (
+              <Sparkles className="w-4 h-4 mr-2" />
+            )}
+            Buscar con IA
+          </Button>
+        </div>
 
         {duplicates.length > 0 && (
           <Button
