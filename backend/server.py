@@ -319,8 +319,9 @@ async def correct_text_with_ai(text: str, provider: str = "openai") -> str:
 11. Después de un signo de interrogación de cierre (?), si continúa una nueva frase o pregunta, la primera letra debe ir en mayúscula cuando corresponda.
 12. Corrige tildes de nombres propios también, por ejemplo: Ramón, Óscar, Ángela, Iván, etc.
 13. No añadas frases de introducción ni de cierre.
-14. Devuélveme SOLO el texto ya corregido.
-15. Mantén el contenido intacto, limitándote a corregir ortografía.
+14. Elimina la palabra "(editado)" si aparece en el texto.
+15. Devuélveme SOLO el texto ya corregido.
+16. Mantén el contenido intacto, limitándote a corregir ortografía.
 
 Aplica estas preferencias fijas del estilo SPM:
 - Si hay dudas de puntuación, corrige lo mínimo necesario para que se lea bien, sin alterar el contenido.
