@@ -874,6 +874,50 @@ async def delete_question(question_id: str):
         raise HTTPException(status_code=404, detail="Pregunta no encontrada")
     return {"message": "Pregunta eliminada"}
 
+
+@api_router.get("/questions/by-id/{question_id}")
+async def get_question_by_id(question_id: str):
+    """Get a single question by its ID"""
+    question = await db.questions.find_one({"id": question_id}, {"_id": 0})
+    if not question:
+        raise HTTPException(status_code=404, detail="Pregunta no encontrada")
+    
+    # Add batch info if available
+    if question.get("import_batch_id"):
+        batch = await db.import_batches.find_one(
+            {"id": question["import_batch_id"]},
+            {"_id": 0, "name": 1, "created_at": 1}
+        )
+        if batch:
+            question["batch_name"] = batch.get("name")
+            question["batch_date"] = batch.get("created_at")
+    
+    return question
+
+
+@api_router.post("/questions/clean-orphan-duplicates")
+async def clean_orphan_duplicates():
+    """Remove is_duplicate flag from questions whose original was deleted"""
+    # Find all questions marked as duplicates
+    duplicates = await db.questions.find(
+        {"is_duplicate": True, "duplicate_of": {"$ne": None}},
+        {"_id": 0, "id": 1, "duplicate_of": 1}
+    ).to_list(1000)
+    
+    cleaned = 0
+    for dup in duplicates:
+        # Check if the original question exists
+        original = await db.questions.find_one({"id": dup["duplicate_of"]})
+        if not original:
+            # Original was deleted, clean the flag
+            await db.questions.update_one(
+                {"id": dup["id"]},
+                {"$set": {"is_duplicate": False, "duplicate_of": None}}
+            )
+            cleaned += 1
+    
+    return {"cleaned": cleaned, "message": f"Se limpiaron {cleaned} duplicados huérfanos"}
+
 # ----- IMPORT -----
 
 @api_router.post("/questions/import")

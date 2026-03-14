@@ -645,45 +645,50 @@ export default function Editor() {
       return;
     }
     
-    // If not, search for the duplicate
+    // If not, fetch the duplicate directly by ID
     if (question.duplicate_of) {
-      // Find the original question
       try {
-        const response = await axios.get(`${API}/questions/search?q=${encodeURIComponent(question.real_name || '')}`);
-        const originalQ = response.data.results.find(q => q.id === question.duplicate_of);
+        const response = await axios.get(`${API}/questions/by-id/${question.duplicate_of}`);
+        const originalQ = response.data;
         
-        if (originalQ) {
-          // Get batch info
-          const batchResponse = await axios.get(`${API}/batches`);
-          const batch = batchResponse.data.find(b => b.id === originalQ.import_batch_id);
-          
-          setDuplicates([{
-            new_question: {
-              id: question.id,
-              username: question.youtube_username,
-              real_name: question.real_name,
-              text: question.corrected_text || question.original_text
-            },
-            original_question: {
-              id: originalQ.id,
-              username: originalQ.youtube_username,
-              real_name: originalQ.real_name,
-              text: originalQ.corrected_text || originalQ.original_text,
-              batch_name: batch?.name,
-              batch_date: batch?.created_at
-            },
-            type: "ai_detected",
-            similarity: 100
-          }]);
-          setShowDuplicatesModal(true);
-        } else {
-          toast.error("No se pudo encontrar la pregunta duplicada original");
-        }
+        // Get current batch info
+        const currentBatch = batches.find(b => b.id === selectedBatch);
+        
+        setDuplicates([{
+          new_question: {
+            id: question.id,
+            username: question.youtube_username,
+            real_name: question.real_name,
+            text: question.corrected_text || question.original_text
+          },
+          original_question: {
+            id: originalQ.id,
+            username: originalQ.youtube_username,
+            real_name: originalQ.real_name,
+            text: originalQ.corrected_text || originalQ.original_text,
+            batch_name: originalQ.batch_name,
+            batch_date: originalQ.batch_date
+          },
+          type: "ai_detected",
+          similarity: 100
+        }]);
+        setShowDuplicatesModal(true);
       } catch (error) {
         console.error("Error finding duplicate:", error);
-        toast.error("Error al buscar el duplicado");
+        if (error.response?.status === 404) {
+          toast.error("La pregunta original fue eliminada");
+          // Clear the duplicate flag since original no longer exists
+          await axios.put(`${API}/questions/${question.id}`, {
+            is_duplicate: false,
+            duplicate_of: null
+          });
+          fetchQuestions();
+        } else {
+          toast.error("Error al buscar el duplicado");
+        }
       }
     } else {
+      // No duplicate_of set, need to run AI check
       toast.info("Ejecuta 'DUPLICADOS CON IA' para encontrar la pregunta original");
     }
   };
