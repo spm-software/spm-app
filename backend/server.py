@@ -171,6 +171,8 @@ def clean_youtube_metadata(text: str) -> str:
     # Patterns to remove:
     # • Hace X minuto/s, hora/s, día/s, semana/s, mes/es, año/s
     # • X minutes/hours/days/weeks/months/years ago
+    # (editado)
+    # Se suscribió a tu canal...
     
     # Spanish time units (longer words first to avoid partial matches)
     spanish_units = r'(minutos?|horas?|días?|semanas?|meses|mes|años?)'
@@ -182,6 +184,17 @@ def clean_youtube_metadata(text: str) -> str:
         rf'•\s*\d+\s+{english_units}\s+ago\s*',
         rf'^\s*Hace\s+\d+\s+{spanish_units}\s*',
         rf'^\s*\d+\s+{english_units}\s+ago\s*',
+        # (editado) / (edited)
+        r'\(editado\)',
+        r'\(edited\)',
+        # Subscription messages
+        r'Se suscribió a tu canal de forma pública\s*\([^)]*\)\s*',
+        r'Se suscribió a tu canal\s*\([^)]*\)\s*',
+        r'Se suscribió a tu canal de forma pública\s*',
+        r'Se suscribió a tu canal\s*',
+        r'Miembro desde hace\s+\d+\s+{spanish_units}\s*'.format(spanish_units=spanish_units),
+        r'Suscriptor desde hace\s+\d+\s+{spanish_units}\s*'.format(spanish_units=spanish_units),
+        r'Member for\s+\d+\s+{english_units}\s*'.format(english_units=english_units),
     ]
     
     cleaned = text
@@ -320,8 +333,9 @@ async def correct_text_with_ai(text: str, provider: str = "openai") -> str:
 12. Corrige tildes de nombres propios también, por ejemplo: Ramón, Óscar, Ángela, Iván, etc.
 13. No añadas frases de introducción ni de cierre.
 14. Elimina la palabra "(editado)" si aparece en el texto.
-15. Devuélveme SOLO el texto ya corregido.
-16. Mantén el contenido intacto, limitándote a corregir ortografía.
+15. Elimina frases de YouTube como "Se suscribió a tu canal de forma pública", "Se suscribió a tu canal", "Miembro desde hace X", "Suscriptor desde hace X" y similares.
+16. Devuélveme SOLO el texto ya corregido.
+17. Mantén el contenido intacto, limitándote a corregir ortografía.
 
 Aplica estas preferencias fijas del estilo SPM:
 - Si hay dudas de puntuación, corrige lo mínimo necesario para que se lea bien, sin alterar el contenido.
