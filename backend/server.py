@@ -325,83 +325,72 @@ def parse_comments(raw_text: str) -> List[Dict[str, str]]:
     return comments
 
 def parse_comments_format4(raw_text: str) -> List[Dict[str, str]]:
-    """Parse format where name is alone on a line, followed by question text on next line(s).
-    Questions are separated by one or more blank lines.
+    """Parse format where:
+    - Name is on its own line (after a blank line or at the start)
+    - Question text follows on subsequent lines
+    - A blank line marks the END of each question
+    
+    Simple rule: blank line = end of question, next non-blank line = new name
     
     Example:
-    Fue por tu gracia
-    Muy amado pastor, hace algunos meses...
-    Agradecería mucho su orientación.
-    
-    
-    José Quispe Ascate
-    ¿Podemos cantar "Señor, te exaltamos"...
+    Nombre Usuario           <- Name (start of file or after blank)
+    Texto de la pregunta     <- Question text
+    que puede tener          <- More question text
+    varias líneas.           <- More question text
+                             <- Blank line = END of question
+    Otro Usuario             <- New name
+    Otra pregunta.           <- Question text
     """
     comments = []
     
     # Remove separator lines like ---
-    raw_text = re.sub(r'^-{3,}$', '', raw_text, flags=re.MULTILINE)
+    raw_text = re.sub(r'^-{3,}\s*$', '', raw_text, flags=re.MULTILINE)
     
-    # Split by one or more blank lines (handles both single and double blank lines)
-    blocks = re.split(r'\n\s*\n+', raw_text.strip())
+    lines = raw_text.split('\n')
     
-    for block in blocks:
-        block = block.strip()
-        if not block:
-            continue
+    current_name = None
+    current_text_lines = []
+    expecting_name = True  # Start expecting a name
+    
+    for i, line in enumerate(lines):
+        line_stripped = line.strip()
         
-        lines = block.split('\n')
-        if len(lines) < 1:
-            continue
-            
-        # First line should be the name
-        first_line = lines[0].strip()
-        
-        # Skip empty first lines
-        if not first_line:
-            continue
-        
-        # Skip if first line looks like a question or is too long
-        # A name typically: starts with capital, is short (< 50 chars), has no ? or ¿
-        is_likely_name = (
-            len(first_line) < 50 and 
-            '?' not in first_line and 
-            not first_line.startswith('¿') and
-            not first_line.startswith('•') and
-            first_line[0].isupper() and
-            # Names usually have 1-5 words
-            len(first_line.split()) <= 6 and
-            # Names don't typically start with common Spanish sentence starters
-            not any(first_line.lower().startswith(w) for w in [
-                'el ', 'la ', 'los ', 'las ', 'un ', 'una ', 'que ', 'si ', 'no ', 
-                'por ', 'para ', 'con ', 'en ', 'es ', 'son ', 'pero ', 'porque ',
-                'cuando ', 'como ', 'donde ', 'cual ', 'esto ', 'esta ', 'ese ', 
-                'esa ', 'mi ', 'mis ', 'su ', 'sus ', 'yo ', 'he ', 'se ', 'me ',
-                'muchos ', 'gracias ', 'bendiciones', 'pastor,', 'dios '
-            ])
-        )
-        
-        if not is_likely_name:
-            continue
-        
-        name = first_line
-        
-        # Rest is the question text
-        if len(lines) > 1:
-            text = '\n'.join(line.strip() for line in lines[1:]).strip()
+        if not line_stripped:
+            # Blank line = end of current question
+            if current_name and current_text_lines:
+                text = '\n'.join(current_text_lines).strip()
+                if text:
+                    clean_text = clean_youtube_metadata(text)
+                    username = '@' + re.sub(r'[^a-záéíóúñA-ZÁÉÍÓÚÑ0-9]', '', current_name.lower().replace(' ', ''))
+                    comments.append({
+                        "youtube_username": username,
+                        "original_text": clean_text,
+                        "real_name": current_name
+                    })
+            # Reset for next question
+            current_name = None
+            current_text_lines = []
+            expecting_name = True
         else:
-            # Only name, no text - skip this block
-            continue
-        
+            # Non-blank line
+            if expecting_name:
+                # This line is the name
+                current_name = line_stripped
+                expecting_name = False
+            else:
+                # This line is part of the question text
+                current_text_lines.append(line_stripped)
+    
+    # Don't forget the last question (if file doesn't end with blank line)
+    if current_name and current_text_lines:
+        text = '\n'.join(current_text_lines).strip()
         if text:
             clean_text = clean_youtube_metadata(text)
-            # Generate a username from the name
-            username = '@' + re.sub(r'[^a-záéíóúñA-ZÁÉÍÓÚÑ0-9]', '', name.lower().replace(' ', ''))
-            
+            username = '@' + re.sub(r'[^a-záéíóúñA-ZÁÉÍÓÚÑ0-9]', '', current_name.lower().replace(' ', ''))
             comments.append({
                 "youtube_username": username,
                 "original_text": clean_text,
-                "real_name": name
+                "real_name": current_name
             })
     
     return comments
