@@ -58,6 +58,7 @@ class Question(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     youtube_username: str
     real_name: Optional[str] = None
+    real_name_confirmed: bool = False  # True if the real_name was manually confirmed
     original_text: str
     corrected_text: Optional[str] = None
     is_corrected: bool = False
@@ -1066,6 +1067,21 @@ async def get_question_by_id(question_id: str):
             question["batch_date"] = batch.get("created_at")
     
     return question
+
+
+@api_router.post("/questions/{question_id}/confirm-name")
+async def confirm_question_name(question_id: str):
+    """Confirm that the real_name is correct (even if it matches username)"""
+    question = await db.questions.find_one({"id": question_id}, {"_id": 0})
+    if not question:
+        raise HTTPException(status_code=404, detail="Pregunta no encontrada")
+    
+    await db.questions.update_one(
+        {"id": question_id},
+        {"$set": {"real_name_confirmed": True}}
+    )
+    
+    return {"message": "Nombre confirmado", "real_name": question.get("real_name")}
 
 
 @api_router.post("/questions/clean-orphan-duplicates")

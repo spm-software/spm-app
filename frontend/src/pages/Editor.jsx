@@ -1155,12 +1155,22 @@ export default function Editor() {
             <div className="w-3 h-3 rounded-full bg-green-500" />
             <span><strong>{validQuestions.length}</strong> válidas</span>
           </div>
-          {questions.filter(q => !q.real_name || q.real_name.trim() === "").length > 0 && (
-            <div className="flex items-center gap-2 text-yellow-600">
-              <div className="w-3 h-3 rounded-full bg-yellow-500" />
-              <span><strong>{questions.filter(q => !q.real_name || q.real_name.trim() === "").length}</strong> sin nombre</span>
-            </div>
-          )}
+          {(() => {
+            const noNameCount = questions.filter(q => {
+              const username = (q.youtube_username || '').replace('@', '').toLowerCase();
+              const realName = (q.real_name || '').toLowerCase().trim();
+              const hasRealName = q.real_name && 
+                                  q.real_name.trim() !== '' && 
+                                  (realName !== username || q.real_name_confirmed);
+              return !hasRealName;
+            }).length;
+            return noNameCount > 0 ? (
+              <div className="flex items-center gap-2 text-yellow-600">
+                <div className="w-3 h-3 rounded-full bg-yellow-500" />
+                <span><strong>{noNameCount}</strong> sin nombre</span>
+              </div>
+            ) : null;
+          })()}
           {questions.filter(q => q.is_greeting).length > 0 && (
             <div className="flex items-center gap-2">
               <div className="w-3 h-3 rounded-full bg-gray-400" />
@@ -1228,11 +1238,34 @@ export default function Editor() {
                   <EditableName question={question} onSave={handleUpdateQuestion} />
                   
                   <div className="flex gap-2 ml-auto flex-shrink-0">
-                    {(!question.real_name || question.real_name.trim() === "") && (
-                      <Badge variant="outline" className="text-xs text-yellow-700 border-yellow-500 bg-yellow-50">
-                        Sin nombre
-                      </Badge>
-                    )}
+                    {(() => {
+                      // Check if real_name is just the username without @
+                      const username = (question.youtube_username || '').replace('@', '').toLowerCase();
+                      const realName = (question.real_name || '').toLowerCase().trim();
+                      const hasRealName = question.real_name && 
+                                          question.real_name.trim() !== '' && 
+                                          (realName !== username || question.real_name_confirmed);
+                      return !hasRealName ? (
+                        <Badge 
+                          variant="outline" 
+                          className="text-xs text-yellow-700 border-yellow-500 bg-yellow-50 cursor-pointer hover:bg-yellow-100"
+                          onClick={async () => {
+                            if (window.confirm(`¿Confirmar que "${question.real_name || question.youtube_username}" es el nombre real correcto?`)) {
+                              try {
+                                await axios.post(`${API}/questions/${question.id}/confirm-name`);
+                                toast.success("Nombre confirmado");
+                                fetchQuestions();
+                              } catch (error) {
+                                toast.error("Error al confirmar nombre");
+                              }
+                            }
+                          }}
+                          title="Click para confirmar que este nombre es correcto"
+                        >
+                          Sin nombre ✓
+                        </Badge>
+                      ) : null;
+                    })()}
                     {question.is_corrected && (
                       <Badge variant="secondary" className="text-xs bg-green-100 text-green-700 border-green-300">
                         <Check className="w-3 h-3 mr-1" />

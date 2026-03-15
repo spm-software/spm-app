@@ -305,7 +305,12 @@ export default function Distribuidor() {
                     ) : (
                       <div className="space-y-2">
                         {programQuestions.map((q, idx) => {
-                          const hasRealName = q.real_name && q.real_name.trim() !== "";
+                          // Check if real_name is just the username without @
+                          const username = (q.youtube_username || '').replace('@', '').toLowerCase();
+                          const realName = (q.real_name || '').toLowerCase().trim();
+                          const hasRealName = q.real_name && 
+                                              q.real_name.trim() !== '' && 
+                                              (realName !== username || q.real_name_confirmed);
                           return (
                             <div 
                               key={q.id}
@@ -316,7 +321,7 @@ export default function Distribuidor() {
                                   {idx + 1}
                                 </span>
                                 <span className={`text-xs font-medium truncate ${!hasRealName ? 'text-yellow-600' : ''}`}>
-                                  {hasRealName ? q.real_name : q.youtube_username}
+                                  {q.real_name || q.youtube_username}
                                 </span>
                                 {!hasRealName && (
                                   <AlertCircle className="w-3 h-3 text-yellow-500 flex-shrink-0" title="Sin nombre real registrado" />
