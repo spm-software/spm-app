@@ -279,77 +279,58 @@ def parse_comments(raw_text: str) -> List[Dict[str, str]]:
         if not line:
             continue
         
-        # Check if line starts with @username (with optional timestamp like "• hace 2 semanas")
-        username_match = re.match(r'^(@[\w\-\.]+)\s*(?:•.*)?$', line)
-        if not username_match:
-            # Also try without the timestamp requirement
-            username_match = re.match(r'^(@[\w\-\.]+)\s+(.*)', line)
-        
-        # Check if line starts with "Name:" or "Name -" format
-        # But NOT if it starts with common Spanish words that are part of sentences
-        realname_match = None
-        potential_name_match = re.match(r'^([A-ZÁÉÍÓÚÑ][a-záéíóúñA-ZÁÉÍÓÚÑ\s\.]+?)(?::|[-–—])\s*(.*)', line)
-        if potential_name_match:
-            name_part = potential_name_match.group(1).strip().lower()
-            # List of words that indicate this is part of a sentence, not a name
-            not_a_name_starters = [
-                'para ', 'por ', 'sobre ', 'según ', 'como ', 'cual ', 'cuando ', 'donde ',
-                'que ', 'si ', 'no ', 'ya ', 'pero ', 'porque ', 'aunque ', 'mientras ',
-                'después ', 'antes ', 'durante ', 'entre ', 'hacia ', 'hasta ', 'desde ',
-                'con ', 'sin ', 'bajo ', 'contra ', 'mediante ', 'según ', 'salvo ',
-                'gracias', 'bendiciones', 'saludos', 'hola', 'buenos', 'buenas',
-                'tengo ', 'creo ', 'pienso ', 'quiero ', 'quisiera ', 'podría ',
-                'pregunta', 'respuesta', 'duda', 'consulta', 'comentario',
-                'ejemplo', 'referencia', 'cita', 'versículo', 'texto', 'pasaje',
-                'es ', 'son ', 'era ', 'fue ', 'será ', 'sería ',
-                'el ', 'la ', 'los ', 'las ', 'un ', 'una ', 'unos ', 'unas ',
-                'mi ', 'tu ', 'su ', 'mis ', 'tus ', 'sus ', 'nuestro ', 'nuestra ',
-            ]
-            # Only accept as a name if:
-            # 1. It doesn't start with common sentence words
-            # 2. It's relatively short (max 4 words, max 40 chars)
-            # 3. It looks like a proper name (not too many words)
-            word_count = len(name_part.split())
-            is_likely_name = (
-                not any(name_part.startswith(starter) for starter in not_a_name_starters) and
-                len(name_part) < 40 and
-                word_count <= 4
-            )
-            if is_likely_name:
-                realname_match = potential_name_match
+        # Check if line starts with @username (this is the PRIMARY format for YouTube comments)
+        username_match = re.match(r'^(@[\w\-\.]+)', line)
         
         if username_match:
             # Save previous comment
             if current_identifier and current_text:
                 clean_text = clean_youtube_metadata('\n'.join(current_text).strip())
-                comments.append({
-                    "youtube_username": current_identifier if current_is_username else f"@{current_identifier.lower().replace(' ', '_')}",
-                    "original_text": clean_text,
-                    "real_name": None if current_is_username else current_identifier
-                })
+                if clean_text:  # Only save if there's actual text
+                    comments.append({
+                        "youtube_username": current_identifier if current_is_username else f"@{current_identifier.lower().replace(' ', '_')}",
+                        "original_text": clean_text,
+                        "real_name": None if current_is_username else current_identifier
+                    })
+            
             current_identifier = username_match.group(1)
             current_is_username = True
-            # Check if there's text after the username (not just timestamp)
-            rest = username_match.group(2).strip() if username_match.lastindex >= 2 else ""
-            # Remove timestamp patterns like "• hace 2 semanas"
-            rest = re.sub(r'^•\s*(hace\s+)?\d+\s*(minutos?|horas?|días?|semanas?|meses?|años?)\s*(\(editado\))?\s*', '', rest, flags=re.IGNORECASE)
-            current_text = [rest] if rest else []
-        elif realname_match and not current_is_username:
-            # Only use realname_match if we're not currently processing a @username comment
-            # Save previous comment
-            if current_identifier and current_text:
-                clean_text = clean_youtube_metadata('\n'.join(current_text).strip())
-                comments.append({
-                    "youtube_username": current_identifier if current_is_username else f"@{current_identifier.lower().replace(' ', '_')}",
-                    "original_text": clean_text,
-                    "real_name": None if current_is_username else current_identifier
-                })
-            current_identifier = realname_match.group(1).strip()
-            current_is_username = False
-            rest = realname_match.group(2).strip()
-            current_text = [rest] if rest else []
+            
+            # Get the rest of the line after the username
+            rest_of_line = line[len(current_identifier):].strip()
+            # Remove timestamp patterns like "• hace 2 semanas" or "(editado)"
+            rest_of_line = re.sub(r'^•\s*(hace\s+)?\d+\s*(minutos?|horas?|días?|semanas?|meses?|años?)\s*', '', rest_of_line, flags=re.IGNORECASE)
+            rest_of_line = re.sub(r'^\(editado\)\s*', '', rest_of_line, flags=re.IGNORECASE)
+            rest_of_line = rest_of_line.strip()
+            
+            current_text = [rest_of_line] if rest_of_line else []
+        
         elif current_identifier:
+            # If we have a current user, this line is part of their question
+            # (regardless of whether it contains ":" or looks like a name)
             current_text.append(line)
+        
+        else:
+            # No @username format detected, try "Name:" or "Name -" format for legacy support
+            realname_match = re.match(r'^([A-ZÁÉÍÓÚÑ][a-záéíóúñA-ZÁÉÍÓÚÑ\s\.]+?)(?::|[-–—])\s*(.*)', line)
+            if realname_match:
+                name_part = realname_match.group(1).strip().lower()
+                not_a_name_starters = [
+                    'para ', 'por ', 'sobre ', 'según ', 'como ', 'cual ', 'cuando ', 'donde ',
+                    'que ', 'si ', 'no ', 'ya ', 'pero ', 'porque ', 'aunque ', 'mientras ',
+                    'pregunta', 'respuesta', 'duda', 'consulta', 'comentario',
+                ]
+                word_count = len(name_part.split())
+                is_likely_name = (
+                    not any(name_part.startswith(starter) for starter in not_a_name_starters) and
+                    len(name_part) < 40 and
+                    word_count <= 4
+                )
+                if is_likely_name:
+                    current_identifier = realname_match.group(1).strip()
+                    current_is_username = False
+                    rest = realname_match.group(2).strip()
+                    current_text = [rest] if rest else []
     
     # Save last comment
     if current_identifier and current_text:
