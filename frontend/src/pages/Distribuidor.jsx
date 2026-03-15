@@ -103,7 +103,9 @@ export default function Distribuidor() {
   };
 
   const getQuestionsForProgram = (programId) => {
-    return questions.filter(q => q.program_id === programId);
+    return questions
+      .filter(q => q.program_id === programId)
+      .sort((a, b) => (a.order_in_program || 999) - (b.order_in_program || 999));
   };
 
   const validQuestions = questions.filter(q => !q.is_greeting && !q.is_duplicate);
