@@ -538,12 +538,14 @@ export default function Editor() {
   const [correctingProgress, setCorrectingProgress] = useState({ current: 0, total: 0 });
   const [correctingId, setCorrectingId] = useState(null);
   const [checkingDuplicates, setCheckingDuplicates] = useState(false);
+  const [duplicateProgress, setDuplicateProgress] = useState({ current: 0, total: 0, percentage: 0, duplicatesFound: 0 });
   const [duplicates, setDuplicates] = useState([]);
   const [showDuplicatesModal, setShowDuplicatesModal] = useState(false);
   const [showSearchModal, setShowSearchModal] = useState(false);
   const [showOnlyDuplicates, setShowOnlyDuplicates] = useState(false);
   const [aiModel, setAiModel] = useState("gpt-5.2");
   const initialBatchLoaded = useRef(false);
+  const pollingIntervalRef = useRef(null);
 
   const AI_MODELS = [
     { value: "gpt-5.2", label: "GPT-5.2 (OpenAI)", provider: "openai" },
@@ -551,6 +553,15 @@ export default function Editor() {
     { value: "claude-sonnet-4-5", label: "Claude Sonnet 4.5", provider: "anthropic" },
     { value: "gemini-3-flash", label: "Gemini 3 Flash", provider: "gemini" },
   ];
+
+  // Cleanup polling on unmount
+  useEffect(() => {
+    return () => {
+      if (pollingIntervalRef.current) {
+        clearInterval(pollingIntervalRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     fetchBatches();
@@ -711,31 +722,85 @@ export default function Editor() {
 
   const handleCheckDuplicatesAI = async () => {
     setCheckingDuplicates(true);
+    setDuplicateProgress({ current: 0, total: 0, percentage: 0, duplicatesFound: 0 });
     const modelLabel = AI_MODELS.find(m => m.value === aiModel)?.label || aiModel;
-    toast.info(`Buscando duplicados con ${modelLabel}... esto puede tardar hasta 1 minuto`, { duration: 10000 });
+    
     try {
-      const response = await axios.post(`${API}/questions/check-duplicates-ai/${selectedBatch}`, {
+      // Start the background task
+      const startResponse = await axios.post(`${API}/questions/check-duplicates-ai-start/${selectedBatch}`, {
         model: aiModel
-      }, {
-        timeout: 180000 // 3 minutes timeout for AI processing
       });
-      setDuplicates(response.data.duplicates);
-      if (response.data.duplicates.length > 0) {
-        setShowDuplicatesModal(true);
-        toast.success(`${response.data.duplicates_count} duplicados encontrados con ${modelLabel}`);
-      } else {
-        toast.success(`No se encontraron duplicados con ${modelLabel}`);
-      }
-      fetchQuestions();
+      
+      const taskId = startResponse.data.task_id;
+      toast.info(`Búsqueda iniciada con ${modelLabel}...`, { duration: 3000 });
+      
+      // Poll for status
+      const pollStatus = async () => {
+        try {
+          const statusResponse = await axios.get(`${API}/duplicates/status/${taskId}`);
+          const status = statusResponse.data;
+          
+          // Update progress
+          setDuplicateProgress({
+            current: status.current || 0,
+            total: status.total || 0,
+            percentage: status.percentage || 0,
+            duplicatesFound: status.duplicates_found || 0
+          });
+          
+          if (status.status === "completed") {
+            // Stop polling
+            if (pollingIntervalRef.current) {
+              clearInterval(pollingIntervalRef.current);
+              pollingIntervalRef.current = null;
+            }
+            
+            setDuplicates(status.duplicates || []);
+            setCheckingDuplicates(false);
+            setDuplicateProgress({ current: 0, total: 0, percentage: 0, duplicatesFound: 0 });
+            
+            if (status.duplicates_count > 0) {
+              setShowDuplicatesModal(true);
+              toast.success(`${status.duplicates_count} duplicados encontrados con ${modelLabel}`);
+            } else {
+              toast.success(`No se encontraron duplicados con ${modelLabel}`);
+            }
+            
+            fetchQuestions();
+            
+            // Cleanup the task from server memory
+            axios.delete(`${API}/duplicates/status/${taskId}`).catch(() => {});
+            
+          } else if (status.status === "error") {
+            // Stop polling on error
+            if (pollingIntervalRef.current) {
+              clearInterval(pollingIntervalRef.current);
+              pollingIntervalRef.current = null;
+            }
+            
+            setCheckingDuplicates(false);
+            setDuplicateProgress({ current: 0, total: 0, percentage: 0, duplicatesFound: 0 });
+            toast.error(`Error: ${status.error || 'Error desconocido'}`);
+            
+            // Cleanup
+            axios.delete(`${API}/duplicates/status/${taskId}`).catch(() => {});
+          }
+        } catch (pollError) {
+          console.error("Error polling status:", pollError);
+        }
+      };
+      
+      // Start polling every 1.5 seconds
+      pollingIntervalRef.current = setInterval(pollStatus, 1500);
+      
+      // Also poll immediately
+      pollStatus();
+      
     } catch (error) {
-      console.error("Error checking duplicates with AI:", error);
-      if (error.code === 'ECONNABORTED') {
-        toast.error("La búsqueda tardó demasiado. Intenta con menos preguntas.");
-      } else {
-        toast.error("Error al buscar duplicados con IA");
-      }
-    } finally {
+      console.error("Error starting AI duplicate check:", error);
       setCheckingDuplicates(false);
+      setDuplicateProgress({ current: 0, total: 0, percentage: 0, duplicatesFound: 0 });
+      toast.error("Error al iniciar la búsqueda de duplicados");
     }
   };
 
@@ -970,7 +1035,7 @@ export default function Editor() {
         </Button>
 
         <div className="flex items-center gap-2">
-          <Select value={aiModel} onValueChange={setAiModel}>
+          <Select value={aiModel} onValueChange={setAiModel} disabled={checkingDuplicates}>
             <SelectTrigger className="w-[180px] h-10 rounded-sm text-xs">
               <SelectValue placeholder="Modelo IA" />
             </SelectTrigger>
@@ -996,11 +1061,32 @@ export default function Editor() {
             ) : (
               <Sparkles className="w-4 h-4 mr-2" />
             )}
-            Buscar con IA
+            {checkingDuplicates && duplicateProgress.total > 0 
+              ? `${duplicateProgress.percentage}%` 
+              : "Buscar con IA"
+            }
           </Button>
         </div>
+        
+        {/* AI Duplicate Search Progress */}
+        {checkingDuplicates && duplicateProgress.total > 0 && (
+          <div className="flex-1 max-w-sm">
+            <div className="h-2 bg-secondary rounded-full overflow-hidden">
+              <div 
+                className="h-full bg-primary transition-all duration-300"
+                style={{ width: `${duplicateProgress.percentage}%` }}
+              />
+            </div>
+            <div className="flex justify-between text-xs text-muted-foreground mt-1">
+              <span>{duplicateProgress.current}/{duplicateProgress.total} preguntas</span>
+              <span className="text-primary font-medium">
+                {duplicateProgress.duplicatesFound > 0 && `${duplicateProgress.duplicatesFound} encontrados`}
+              </span>
+            </div>
+          </div>
+        )}
 
-        {duplicates.length > 0 && (
+        {duplicates.length > 0 && !checkingDuplicates && (
           <Button
             variant="secondary"
             onClick={() => setShowDuplicatesModal(true)}

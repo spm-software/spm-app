@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, HTTPException, Query
+from fastapi import FastAPI, APIRouter, HTTPException, Query, BackgroundTasks
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -11,6 +11,7 @@ import uuid
 from datetime import datetime, timezone, timedelta
 import re
 from bson import ObjectId
+import asyncio
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -32,6 +33,11 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+# ==================== BACKGROUND TASK STORAGE ====================
+# In-memory storage for background task status
+# In production, consider using Redis or database storage
+background_tasks_status: Dict[str, Dict[str, Any]] = {}
 
 # ==================== MODELS ====================
 
@@ -573,8 +579,14 @@ Aplica estas preferencias fijas del estilo SPM:
         return text
 
 
-async def check_duplicates_with_ai(questions_to_check: List[Dict], all_questions: List[Dict], current_batch_id: str, model: str = "gpt-5.2") -> List[Dict]:
-    """Use AI to find semantic duplicates from the SAME USER.
+async def check_duplicates_with_ai_progress(
+    questions_to_check: List[Dict], 
+    all_questions: List[Dict], 
+    current_batch_id: str, 
+    model: str = "gpt-5.2",
+    task_id: str = None
+) -> List[Dict]:
+    """Use AI to find semantic duplicates from the SAME USER with progress tracking.
     
     Checks:
     1. Within the current batch (same user, different questions)
@@ -599,10 +611,22 @@ async def check_duplicates_with_ai(questions_to_check: List[Dict], all_questions
     provider, model_name = model_config.get(model, ("openai", "gpt-5.2"))
     logger.info(f"Using model: {provider}/{model_name}")
     
+    def update_progress(current: int, total: int, status: str = "processing", duplicates_so_far: int = 0):
+        """Update the task progress in memory"""
+        if task_id and task_id in background_tasks_status:
+            background_tasks_status[task_id].update({
+                "current": current,
+                "total": total,
+                "status": status,
+                "duplicates_found": duplicates_so_far,
+                "updated_at": datetime.now(timezone.utc).isoformat()
+            })
+    
     try:
         api_key = os.environ.get('EMERGENT_LLM_KEY')
         if not api_key:
             logger.warning("No EMERGENT_LLM_KEY found for duplicate check")
+            update_progress(0, 0, "error")
             return duplicates_found
         
         # Group ALL questions by normalized user name
@@ -624,12 +648,17 @@ async def check_duplicates_with_ai(questions_to_check: List[Dict], all_questions
             if new_user in users_with_multiple:
                 questions_to_process.append(new_q)
         
-        logger.info(f"Questions to process with AI: {len(questions_to_process)}")
+        total_to_process = len(questions_to_process)
+        logger.info(f"Questions to process with AI: {total_to_process}")
+        update_progress(0, total_to_process, "processing")
         
-        for new_q in questions_to_process:
+        for idx, new_q in enumerate(questions_to_process):
             new_user = normalize_text(new_q.get("real_name", "") or new_q.get("youtube_username", ""))
             new_text = new_q.get("corrected_text") or new_q.get("original_text", "")
             new_id = new_q["id"]
+            
+            # Update progress
+            update_progress(idx, total_to_process, "processing", len(duplicates_found))
             
             # Get ALL questions from this same user (excluding the current question)
             user_questions = [q for q in questions_by_user.get(new_user, []) if q["id"] != new_id]
@@ -643,10 +672,16 @@ async def check_duplicates_with_ai(questions_to_check: List[Dict], all_questions
                 for i, hq in enumerate(user_questions[:20])  # Limit to 20 for API efficiency
             ])
             
-            chat = LlmChat(
-                api_key=api_key,
-                session_id=f"duplicate-check-{uuid.uuid4()}",
-                system_message="""Eres un detector de preguntas duplicadas para un programa de YouTube cristiano.
+            # Retry mechanism for transient API errors
+            max_retries = 3
+            retry_delay = 2
+            
+            for attempt in range(max_retries):
+                try:
+                    chat = LlmChat(
+                        api_key=api_key,
+                        session_id=f"duplicate-check-{uuid.uuid4()}",
+                        system_message="""Eres un detector de preguntas duplicadas para un programa de YouTube cristiano.
 Tu tarea es identificar si una NUEVA pregunta ya fue hecha antes por el MISMO usuario.
 
 Dos preguntas son DUPLICADAS si:
@@ -662,21 +697,30 @@ NO son duplicadas si:
 Responde SOLO con los números de las preguntas duplicadas separados por comas, o "NINGUNA" si no hay duplicados.
 Ejemplo: "1, 3" o "NINGUNA"
 """
-            )
-            
-            chat.with_model(provider, model_name)
-            
-            user_prompt = f"""NUEVA PREGUNTA de {new_q.get('real_name', 'Usuario')}:
+                    )
+                    
+                    chat.with_model(provider, model_name)
+                    
+                    user_prompt = f"""NUEVA PREGUNTA de {new_q.get('real_name', 'Usuario')}:
 "{new_text}"
 
 OTRAS PREGUNTAS DEL MISMO USUARIO:
 {history_list}
 
 ¿Cuáles de las preguntas anteriores son duplicadas de la nueva? Responde SOLO números o NINGUNA."""
-            
-            user_message = UserMessage(text=user_prompt)
-            response = await chat.send_message(user_message)
-            response = response.strip().upper() if response else ""
+                    
+                    user_message = UserMessage(text=user_prompt)
+                    response = await chat.send_message(user_message)
+                    response = response.strip().upper() if response else ""
+                    break  # Success, exit retry loop
+                    
+                except Exception as api_error:
+                    logger.warning(f"API error on attempt {attempt + 1}/{max_retries}: {api_error}")
+                    if attempt < max_retries - 1:
+                        await asyncio.sleep(retry_delay * (attempt + 1))
+                    else:
+                        logger.error(f"Failed after {max_retries} attempts for question {new_id}")
+                        response = ""
             
             if response and response != "NINGUNA":
                 # Parse the response to get duplicate numbers
@@ -706,12 +750,14 @@ OTRAS PREGUNTAS DEL MISMO USUARIO:
                                 if not hist_batch:
                                     logger.warning(f"Batch not found for id: {hist_batch_id}")
                             
-                            # Build batch info string
-                            batch_name = None
-                            batch_date = None
-                            if hist_batch:
-                                batch_name = hist_batch.get("name")
-                                batch_date = hist_batch.get("created_at")
+                            # Get batch info for the new question
+                            new_batch = None
+                            new_batch_id = new_q.get("import_batch_id")
+                            if new_batch_id:
+                                new_batch = await db.import_batches.find_one(
+                                    {"id": new_batch_id},
+                                    {"_id": 0, "name": 1, "created_at": 1}
+                                )
                             
                             duplicates_found.append({
                                 "new_question": {
@@ -720,7 +766,9 @@ OTRAS PREGUNTAS DEL MISMO USUARIO:
                                     "real_name": new_q.get("real_name"),
                                     "text": new_text,
                                     "created_at": new_q.get("created_at"),
-                                    "batch_id": new_q.get("import_batch_id")
+                                    "batch_id": new_batch_id,
+                                    "batch_name": new_batch.get("name") if new_batch else None,
+                                    "batch_date": new_batch.get("created_at") if new_batch else None
                                 },
                                 "original_question": {
                                     "id": hist_q["id"],
@@ -729,8 +777,8 @@ OTRAS PREGUNTAS DEL MISMO USUARIO:
                                     "text": hist_q.get("corrected_text") or hist_q.get("original_text"),
                                     "created_at": hist_q.get("created_at"),
                                     "batch_id": hist_batch_id,
-                                    "batch_name": batch_name,
-                                    "batch_date": batch_date
+                                    "batch_name": hist_batch.get("name") if hist_batch else None,
+                                    "batch_date": hist_batch.get("created_at") if hist_batch else None
                                 },
                                 "similarity": 100,
                                 "type": "ai_same_batch" if is_same_batch else "ai_detected"
@@ -743,11 +791,70 @@ OTRAS PREGUNTAS DEL MISMO USUARIO:
                             )
                 except Exception as parse_error:
                     logger.error(f"Error parsing AI response: {parse_error}")
+        
+        # Final progress update
+        update_progress(total_to_process, total_to_process, "completed", len(duplicates_found))
                     
     except Exception as e:
         logger.error(f"Error in AI duplicate check: {e}")
+        if task_id:
+            update_progress(0, 0, "error")
     
     return duplicates_found
+
+
+async def run_ai_duplicate_check_background(task_id: str, batch_id: str, model: str):
+    """Background task to run AI duplicate check"""
+    try:
+        # Get questions from current batch
+        questions = await db.questions.find(
+            {"import_batch_id": batch_id, "is_greeting": {"$ne": True}},
+            {"_id": 0}
+        ).to_list(500)
+        
+        if not questions:
+            background_tasks_status[task_id].update({
+                "status": "completed",
+                "duplicates_count": 0,
+                "duplicates": [],
+                "message": "No questions in batch"
+            })
+            return
+        
+        # Get ALL questions
+        all_questions = await db.questions.find(
+            {"is_greeting": {"$ne": True}},
+            {"_id": 0}
+        ).to_list(10000)
+        
+        # Run the duplicate check with progress
+        duplicates = await check_duplicates_with_ai_progress(
+            questions, all_questions, batch_id, model, task_id
+        )
+        
+        # Update final status
+        background_tasks_status[task_id].update({
+            "status": "completed",
+            "duplicates_count": len(duplicates),
+            "duplicates": duplicates,
+            "questions_checked": len(questions),
+            "total_questions": len(all_questions),
+            "model_used": model,
+            "completed_at": datetime.now(timezone.utc).isoformat()
+        })
+        
+    except Exception as e:
+        logger.error(f"Error in background AI duplicate check: {e}")
+        background_tasks_status[task_id].update({
+            "status": "error",
+            "error": str(e)
+        })
+
+
+# Keep the old function for backwards compatibility (synchronous version)
+async def check_duplicates_with_ai(questions_to_check: List[Dict], all_questions: List[Dict], current_batch_id: str, model: str = "gpt-5.2") -> List[Dict]:
+    """Legacy function - calls the new progress version without task tracking"""
+    return await check_duplicates_with_ai_progress(questions_to_check, all_questions, current_batch_id, model, None)
 
 # ==================== API ROUTES ====================
 
@@ -1229,9 +1336,82 @@ class DuplicateCheckRequest(BaseModel):
     model: Optional[str] = "gpt-5.2"
 
 
+@api_router.post("/questions/check-duplicates-ai-start/{batch_id}")
+async def start_ai_duplicate_check(batch_id: str, request: DuplicateCheckRequest = DuplicateCheckRequest()):
+    """Start an AI duplicate check as a background task.
+    
+    Returns a task_id that can be used to poll for progress and results.
+    This avoids timeouts for large batches.
+    """
+    # Create task ID
+    task_id = str(uuid.uuid4())
+    
+    # Initialize task status
+    background_tasks_status[task_id] = {
+        "task_id": task_id,
+        "batch_id": batch_id,
+        "model": request.model,
+        "status": "starting",
+        "current": 0,
+        "total": 0,
+        "duplicates_found": 0,
+        "started_at": datetime.now(timezone.utc).isoformat()
+    }
+    
+    # Start the background task
+    asyncio.create_task(run_ai_duplicate_check_background(task_id, batch_id, request.model))
+    
+    return {
+        "task_id": task_id,
+        "status": "started",
+        "message": "Búsqueda de duplicados iniciada. Usa /api/duplicates/status/{task_id} para ver el progreso."
+    }
+
+
+@api_router.get("/duplicates/status/{task_id}")
+async def get_duplicate_check_status(task_id: str):
+    """Get the status and progress of a background AI duplicate check task."""
+    if task_id not in background_tasks_status:
+        raise HTTPException(status_code=404, detail="Tarea no encontrada")
+    
+    task = background_tasks_status[task_id]
+    
+    # Calculate percentage
+    percentage = 0
+    if task.get("total", 0) > 0:
+        percentage = round((task.get("current", 0) / task["total"]) * 100)
+    
+    return {
+        "task_id": task_id,
+        "status": task.get("status", "unknown"),
+        "current": task.get("current", 0),
+        "total": task.get("total", 0),
+        "percentage": percentage,
+        "duplicates_found": task.get("duplicates_found", 0),
+        "duplicates_count": task.get("duplicates_count"),
+        "duplicates": task.get("duplicates"),
+        "model_used": task.get("model"),
+        "started_at": task.get("started_at"),
+        "completed_at": task.get("completed_at"),
+        "error": task.get("error")
+    }
+
+
+@api_router.delete("/duplicates/status/{task_id}")
+async def cleanup_duplicate_check_task(task_id: str):
+    """Clean up a completed task from memory."""
+    if task_id in background_tasks_status:
+        del background_tasks_status[task_id]
+        return {"message": "Tarea eliminada"}
+    raise HTTPException(status_code=404, detail="Tarea no encontrada")
+
+
 @api_router.post("/questions/check-duplicates-ai/{batch_id}")
 async def check_duplicates_ai(batch_id: str, request: DuplicateCheckRequest = DuplicateCheckRequest()):
-    """Check for duplicate questions using AI semantic comparison.
+    """Check for duplicate questions using AI semantic comparison (synchronous version).
+    
+    Note: For large batches, use /questions/check-duplicates-ai-start/{batch_id} instead
+    to avoid timeouts.
     
     Only compares questions from the SAME USER:
     - Within the current batch
