@@ -151,6 +151,8 @@ export default function Distribuidor() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
+                  <SelectItem value="1">1 programa</SelectItem>
+                  <SelectItem value="2">2 programas</SelectItem>
                   <SelectItem value="3">3 programas</SelectItem>
                   <SelectItem value="4">4 programas</SelectItem>
                   <SelectItem value="5">5 programas</SelectItem>
@@ -186,7 +188,7 @@ export default function Distribuidor() {
               ) : (
                 <>
                   <Layers className="w-4 h-4 mr-2" />
-                  Distribuir en {numPrograms} programas
+                  Distribuir en {numPrograms} {numPrograms === "1" ? "programa" : "programas"}
                 </>
               )}
             </Button>
