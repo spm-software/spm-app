@@ -821,11 +821,34 @@ export default function Editor() {
       try {
         // Fetch both questions with their batch info
         const [originalResponse, newQuestionResponse] = await Promise.all([
-          axios.get(`${API}/questions/by-id/${question.duplicate_of}`),
-          axios.get(`${API}/questions/by-id/${question.id}`)
+          axios.get(`${API}/questions/by-id/${question.duplicate_of}`).catch(err => {
+            console.error("Error fetching original question:", err);
+            return null;
+          }),
+          axios.get(`${API}/questions/by-id/${question.id}`).catch(err => {
+            console.error("Error fetching new question:", err);
+            return null;
+          })
         ]);
+        
+        // Check if original question was found
+        if (!originalResponse || !originalResponse.data || originalResponse.data.detail) {
+          toast.error("La pregunta duplicada original fue eliminada. Limpiando referencia...");
+          // Clear the duplicate flag since original no longer exists
+          try {
+            await axios.put(`${API}/questions/${question.id}`, {
+              is_duplicate: false,
+              duplicate_of: null
+            });
+          } catch (e) {
+            console.error("Error clearing duplicate flag:", e);
+          }
+          fetchQuestions();
+          return;
+        }
+        
         const originalQ = originalResponse.data;
-        const newQ = newQuestionResponse.data;
+        const newQ = newQuestionResponse?.data || question;
         
         setDuplicates([{
           new_question: {
@@ -833,7 +856,7 @@ export default function Editor() {
             username: question.youtube_username,
             real_name: question.real_name,
             text: question.corrected_text || question.original_text,
-            batch_id: newQ.import_batch_id,
+            batch_id: newQ.import_batch_id || question.import_batch_id,
             batch_name: newQ.batch_name,
             batch_date: newQ.batch_date
           },
@@ -855,10 +878,14 @@ export default function Editor() {
         if (error.response?.status === 404) {
           toast.error("La pregunta original fue eliminada");
           // Clear the duplicate flag since original no longer exists
-          await axios.put(`${API}/questions/${question.id}`, {
-            is_duplicate: false,
-            duplicate_of: null
-          });
+          try {
+            await axios.put(`${API}/questions/${question.id}`, {
+              is_duplicate: false,
+              duplicate_of: null
+            });
+          } catch (e) {
+            console.error("Error clearing duplicate flag:", e);
+          }
           fetchQuestions();
         } else {
           toast.error("Error al buscar el duplicado");

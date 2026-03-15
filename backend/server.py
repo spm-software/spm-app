@@ -1423,6 +1423,35 @@ async def cleanup_duplicate_check_task(task_id: str):
     raise HTTPException(status_code=404, detail="Tarea no encontrada")
 
 
+@api_router.post("/duplicates/cleanup-orphans")
+async def cleanup_orphan_duplicates():
+    """Clean up duplicate flags that point to non-existent questions."""
+    # Get all questions
+    all_questions = await db.questions.find({}, {"_id": 0, "id": 1}).to_list(10000)
+    all_ids = {q["id"] for q in all_questions}
+    
+    # Find duplicates with invalid references
+    duplicates = await db.questions.find(
+        {"is_duplicate": True, "duplicate_of": {"$ne": None}},
+        {"_id": 0, "id": 1, "duplicate_of": 1}
+    ).to_list(10000)
+    
+    orphans_fixed = 0
+    for dup in duplicates:
+        if dup.get("duplicate_of") and dup["duplicate_of"] not in all_ids:
+            await db.questions.update_one(
+                {"id": dup["id"]},
+                {"$set": {"is_duplicate": False, "duplicate_of": None}}
+            )
+            orphans_fixed += 1
+            logger.info(f"Cleaned orphan duplicate: {dup['id']} -> {dup['duplicate_of']}")
+    
+    return {
+        "message": f"Limpieza completada",
+        "orphans_fixed": orphans_fixed
+    }
+
+
 @api_router.post("/questions/check-duplicates-ai/{batch_id}")
 async def check_duplicates_ai(batch_id: str, request: DuplicateCheckRequest = DuplicateCheckRequest()):
     """Check for duplicate questions using AI semantic comparison (synchronous version).
