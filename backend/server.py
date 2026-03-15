@@ -1812,6 +1812,34 @@ async def distribute_questions(data: DistributeRequest):
         "distribution": distribution
     }
 
+
+@api_router.delete("/programs/clear/{batch_id}")
+async def clear_distribution(batch_id: str):
+    """Clear all distribution for a batch - delete programs and reset question assignments"""
+    # Delete all programs for this batch
+    result = await db.programs.delete_many({"batch_id": batch_id})
+    programs_deleted = result.deleted_count
+    
+    # Reset all question assignments for this batch
+    await db.questions.update_many(
+        {"import_batch_id": batch_id},
+        {"$set": {"program_id": None, "program_number": None, "order_in_program": None}}
+    )
+    
+    # Mark batch as not distributed
+    await db.import_batches.update_one(
+        {"id": batch_id},
+        {"$set": {"is_distributed": False, "num_programs": None}}
+    )
+    
+    logger.info(f"Cleared distribution for batch {batch_id}: {programs_deleted} programs deleted")
+    
+    return {
+        "message": "Distribución eliminada",
+        "programs_deleted": programs_deleted
+    }
+
+
 # ----- EXPORT -----
 
 @api_router.get("/programs/{program_id}/export")

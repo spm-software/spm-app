@@ -1155,9 +1155,15 @@ export default function Editor() {
             <div className="w-3 h-3 rounded-full bg-green-500" />
             <span><strong>{validQuestions.length}</strong> válidas</span>
           </div>
+          {questions.filter(q => !q.real_name || q.real_name.trim() === "").length > 0 && (
+            <div className="flex items-center gap-2 text-yellow-600">
+              <div className="w-3 h-3 rounded-full bg-yellow-500" />
+              <span><strong>{questions.filter(q => !q.real_name || q.real_name.trim() === "").length}</strong> sin nombre</span>
+            </div>
+          )}
           {questions.filter(q => q.is_greeting).length > 0 && (
             <div className="flex items-center gap-2">
-              <div className="w-3 h-3 rounded-full bg-yellow-500" />
+              <div className="w-3 h-3 rounded-full bg-gray-400" />
               <span><strong>{questions.filter(q => q.is_greeting).length}</strong> saludos</span>
             </div>
           )}
@@ -1222,6 +1228,11 @@ export default function Editor() {
                   <EditableName question={question} onSave={handleUpdateQuestion} />
                   
                   <div className="flex gap-2 ml-auto flex-shrink-0">
+                    {(!question.real_name || question.real_name.trim() === "") && (
+                      <Badge variant="outline" className="text-xs text-yellow-700 border-yellow-500 bg-yellow-50">
+                        Sin nombre
+                      </Badge>
+                    )}
                     {question.is_corrected && (
                       <Badge variant="secondary" className="text-xs bg-green-100 text-green-700 border-green-300">
                         <Check className="w-3 h-3 mr-1" />
@@ -1229,7 +1240,7 @@ export default function Editor() {
                       </Badge>
                     )}
                     {question.is_greeting && (
-                      <Badge variant="outline" className="text-xs text-yellow-700 border-yellow-500 bg-yellow-50">
+                      <Badge variant="outline" className="text-xs text-gray-600 border-gray-400 bg-gray-50">
                         Saludo
                       </Badge>
                     )}

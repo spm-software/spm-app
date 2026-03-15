@@ -17,7 +17,9 @@ import {
   Loader2,
   ChevronRight,
   Archive,
-  BarChart3
+  BarChart3,
+  Trash2,
+  AlertCircle
 } from "lucide-react";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -30,6 +32,7 @@ export default function Distribuidor() {
   const [questions, setQuestions] = useState([]);
   const [loading, setLoading] = useState(false);
   const [distributing, setDistributing] = useState(false);
+  const [clearing, setClearing] = useState(false);
 
   useEffect(() => {
     fetchBatches();
@@ -99,6 +102,25 @@ export default function Distribuidor() {
       toast.error(error.response?.data?.detail || "Error al distribuir");
     } finally {
       setDistributing(false);
+    }
+  };
+
+  const handleClearDistribution = async () => {
+    if (!window.confirm("¿Estás seguro de eliminar la distribución? Esto borrará todos los programas y podrás redistribuir.")) {
+      return;
+    }
+    
+    setClearing(true);
+    try {
+      await axios.delete(`${API}/programs/clear/${selectedBatch}`);
+      toast.success("Distribución eliminada");
+      setPrograms([]);
+      fetchQuestions();
+    } catch (error) {
+      console.error("Error clearing distribution:", error);
+      toast.error("Error al eliminar la distribución");
+    } finally {
+      setClearing(false);
     }
   };
 
@@ -178,7 +200,7 @@ export default function Distribuidor() {
 
             <Button
               onClick={handleDistribute}
-              disabled={distributing || validQuestions.length === 0}
+              disabled={distributing || clearing || validQuestions.length === 0}
               className="rounded-sm uppercase tracking-wide"
               data-testid="distribute-button"
             >
@@ -194,6 +216,28 @@ export default function Distribuidor() {
                 </>
               )}
             </Button>
+
+            {programs.length > 0 && (
+              <Button
+                variant="outline"
+                onClick={handleClearDistribution}
+                disabled={distributing || clearing}
+                className="rounded-sm uppercase tracking-wide text-destructive hover:text-destructive"
+                data-testid="clear-distribution-button"
+              >
+                {clearing ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    Limpiando...
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-4 h-4 mr-2" />
+                    Limpiar
+                  </>
+                )}
+              </Button>
+            )}
           </div>
 
           {/* Rules reminder */}
@@ -260,24 +304,30 @@ export default function Distribuidor() {
                       </p>
                     ) : (
                       <div className="space-y-2">
-                        {programQuestions.map((q, idx) => (
-                          <div 
-                            key={q.id}
-                            className="p-3 bg-secondary/30 rounded-sm"
-                          >
-                            <div className="flex items-center gap-2 mb-1">
-                              <span className="w-5 h-5 rounded-full bg-primary/10 text-primary text-xs flex items-center justify-center font-bold">
-                                {idx + 1}
-                              </span>
-                              <span className="text-xs font-medium truncate">
-                                {q.real_name || q.youtube_username}
-                              </span>
+                        {programQuestions.map((q, idx) => {
+                          const hasRealName = q.real_name && q.real_name.trim() !== "";
+                          return (
+                            <div 
+                              key={q.id}
+                              className={`p-3 rounded-sm ${!hasRealName ? 'bg-yellow-500/10 border border-yellow-500/30' : 'bg-secondary/30'}`}
+                            >
+                              <div className="flex items-center gap-2 mb-1">
+                                <span className="w-5 h-5 rounded-full bg-primary/10 text-primary text-xs flex items-center justify-center font-bold">
+                                  {idx + 1}
+                                </span>
+                                <span className={`text-xs font-medium truncate ${!hasRealName ? 'text-yellow-600' : ''}`}>
+                                  {hasRealName ? q.real_name : q.youtube_username}
+                                </span>
+                                {!hasRealName && (
+                                  <AlertCircle className="w-3 h-3 text-yellow-500 flex-shrink-0" title="Sin nombre real registrado" />
+                                )}
+                              </div>
+                              <p className="text-xs text-muted-foreground line-clamp-2 ml-7">
+                                {q.corrected_text || q.original_text}
+                              </p>
                             </div>
-                            <p className="text-xs text-muted-foreground line-clamp-2 ml-7">
-                              {q.corrected_text || q.original_text}
-                            </p>
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     )}
                   </ScrollArea>
