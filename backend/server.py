@@ -1231,6 +1231,14 @@ async def check_duplicates(batch_id: str):
         {"_id": 0}
     ).to_list(500)
     
+    # Get current batch info for the "new" questions
+    current_batch = await db.import_batches.find_one(
+        {"id": batch_id},
+        {"_id": 0, "name": 1, "created_at": 1}
+    )
+    current_batch_name = current_batch.get("name") if current_batch else None
+    current_batch_date = current_batch.get("created_at") if current_batch else None
+    
     duplicates_found = []
     texts_in_batch = {}  # normalized_text -> question_id
     
@@ -1254,14 +1262,20 @@ async def check_duplicates(batch_id: str):
                             "username": q.get("youtube_username"),
                             "real_name": q.get("real_name"),
                             "text": q.get("corrected_text") or q.get("original_text"),
-                            "created_at": q.get("created_at")
+                            "created_at": q.get("created_at"),
+                            "batch_id": batch_id,
+                            "batch_name": current_batch_name,
+                            "batch_date": current_batch_date
                         },
                         "original_question": {
                             "id": original_q["id"],
                             "username": original_q.get("youtube_username"),
                             "real_name": original_q.get("real_name"),
                             "text": original_q.get("corrected_text") or original_q.get("original_text"),
-                            "created_at": original_q.get("created_at")
+                            "created_at": original_q.get("created_at"),
+                            "batch_id": batch_id,
+                            "batch_name": current_batch_name,
+                            "batch_date": current_batch_date
                         },
                         "similarity": round(overlap * 100),
                         "type": "in_batch"
@@ -1308,7 +1322,10 @@ async def check_duplicates(batch_id: str):
                                 "username": q.get("youtube_username"),
                                 "real_name": q.get("real_name"),
                                 "text": q.get("corrected_text") or q.get("original_text"),
-                                "created_at": q.get("created_at")
+                                "created_at": q.get("created_at"),
+                                "batch_id": batch_id,
+                                "batch_name": current_batch_name,
+                                "batch_date": current_batch_date
                             },
                             "original_question": {
                                 "id": hist_q["id"],
