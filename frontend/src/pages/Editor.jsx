@@ -543,6 +543,7 @@ export default function Editor() {
   const [showDuplicatesModal, setShowDuplicatesModal] = useState(false);
   const [showSearchModal, setShowSearchModal] = useState(false);
   const [showOnlyDuplicates, setShowOnlyDuplicates] = useState(false);
+  const [showOnlyNoName, setShowOnlyNoName] = useState(false);
   const [aiModel, setAiModel] = useState("gpt-5.2");
   const initialBatchLoaded = useRef(false);
   const pollingIntervalRef = useRef(null);
@@ -1165,10 +1166,23 @@ export default function Editor() {
               return !hasRealName;
             }).length;
             return noNameCount > 0 ? (
-              <div className="flex items-center gap-2 text-yellow-600">
-                <div className="w-3 h-3 rounded-full bg-yellow-500" />
-                <span><strong>{noNameCount}</strong> sin nombre</span>
-              </div>
+              <button
+                onClick={() => {
+                  setShowOnlyNoName(!showOnlyNoName);
+                  if (!showOnlyNoName) setShowOnlyDuplicates(false);
+                }}
+                className={`flex items-center gap-2 px-3 py-1 rounded transition-colors cursor-pointer border ${
+                  showOnlyNoName 
+                    ? 'bg-yellow-500 text-white border-yellow-500' 
+                    : 'hover:bg-yellow-50 border-yellow-400'
+                }`}
+                title={showOnlyNoName ? "Ver todas las preguntas" : "Filtrar solo sin nombre"}
+              >
+                <div className={`w-3 h-3 rounded-full ${showOnlyNoName ? 'bg-white' : 'bg-yellow-500'}`} />
+                <span className={`font-medium ${showOnlyNoName ? '' : 'text-yellow-600'}`}>
+                  <strong>{noNameCount}</strong> sin nombre
+                </span>
+              </button>
             ) : null;
           })()}
           {questions.filter(q => q.is_greeting).length > 0 && (
@@ -1179,7 +1193,10 @@ export default function Editor() {
           )}
           {questions.filter(q => q.is_duplicate).length > 0 && (
             <button
-              onClick={() => setShowOnlyDuplicates(!showOnlyDuplicates)}
+              onClick={() => {
+                setShowOnlyDuplicates(!showOnlyDuplicates);
+                if (!showOnlyDuplicates) setShowOnlyNoName(false);
+              }}
               className={`flex items-center gap-2 px-3 py-1 rounded transition-colors cursor-pointer border ${
                 showOnlyDuplicates 
                   ? 'bg-red-500 text-white border-red-500' 
@@ -1214,7 +1231,23 @@ export default function Editor() {
             </CardContent>
           </Card>
         ) : (
-          (showOnlyDuplicates ? questions.filter(q => q.is_duplicate) : questions).map((question, index) => (
+          (() => {
+            // Helper function to check if a question has no real name
+            const hasNoRealName = (q) => {
+              const username = (q.youtube_username || '').replace('@', '').toLowerCase();
+              const realName = (q.real_name || '').toLowerCase().trim();
+              return !q.real_name || q.real_name.trim() === '' || (realName === username && !q.real_name_confirmed);
+            };
+            
+            // Apply filters
+            let filteredQuestions = questions;
+            if (showOnlyDuplicates) {
+              filteredQuestions = questions.filter(q => q.is_duplicate);
+            } else if (showOnlyNoName) {
+              filteredQuestions = questions.filter(hasNoRealName);
+            }
+            
+            return filteredQuestions.map((question, index) => (
             <Card 
               key={question.id}
               className={`bg-card border rounded-sm transition-all ${
@@ -1356,7 +1389,8 @@ export default function Editor() {
                 </div>
               </CardContent>
             </Card>
-          ))
+          ));
+          })()
         )}
       </div>
 
