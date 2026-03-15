@@ -695,13 +695,23 @@ OTRAS PREGUNTAS DEL MISMO USUARIO:
                             # Determine if it's in same batch or history
                             is_same_batch = hist_q.get("import_batch_id") == current_batch_id
                             
-                            # Get batch info
+                            # Get batch info for the original question
                             hist_batch = None
-                            if hist_q.get("import_batch_id"):
+                            hist_batch_id = hist_q.get("import_batch_id")
+                            if hist_batch_id:
                                 hist_batch = await db.import_batches.find_one(
-                                    {"id": hist_q["import_batch_id"]},
+                                    {"id": hist_batch_id},
                                     {"_id": 0, "name": 1, "created_at": 1}
                                 )
+                                if not hist_batch:
+                                    logger.warning(f"Batch not found for id: {hist_batch_id}")
+                            
+                            # Build batch info string
+                            batch_name = None
+                            batch_date = None
+                            if hist_batch:
+                                batch_name = hist_batch.get("name")
+                                batch_date = hist_batch.get("created_at")
                             
                             duplicates_found.append({
                                 "new_question": {
@@ -709,7 +719,8 @@ OTRAS PREGUNTAS DEL MISMO USUARIO:
                                     "username": new_q.get("youtube_username"),
                                     "real_name": new_q.get("real_name"),
                                     "text": new_text,
-                                    "created_at": new_q.get("created_at")
+                                    "created_at": new_q.get("created_at"),
+                                    "batch_id": new_q.get("import_batch_id")
                                 },
                                 "original_question": {
                                     "id": hist_q["id"],
@@ -717,9 +728,9 @@ OTRAS PREGUNTAS DEL MISMO USUARIO:
                                     "real_name": hist_q.get("real_name"),
                                     "text": hist_q.get("corrected_text") or hist_q.get("original_text"),
                                     "created_at": hist_q.get("created_at"),
-                                    "batch_id": hist_q.get("import_batch_id"),
-                                    "batch_name": hist_batch.get("name") if hist_batch else None,
-                                    "batch_date": hist_batch.get("created_at") if hist_batch else None
+                                    "batch_id": hist_batch_id,
+                                    "batch_name": batch_name,
+                                    "batch_date": batch_date
                                 },
                                 "similarity": 100,
                                 "type": "ai_same_batch" if is_same_batch else "ai_detected"

@@ -221,12 +221,7 @@ const DuplicatesModal = ({ open, onClose, duplicates, onDelete, onKeep, currentB
   if (!duplicates || duplicates.length === 0) return null;
 
   const formatBatchInfo = (question, type, isNewQuestion = false) => {
-    // For new question, use current batch info
-    if (isNewQuestion) {
-      return currentBatchName || "Importación actual";
-    }
-    
-    // For original question, get the batch info
+    // First, try to use the question's own batch info (works for both new and original)
     if (question.batch_name) {
       return question.batch_name;
     }
@@ -251,7 +246,12 @@ const DuplicatesModal = ({ open, onClose, duplicates, onDelete, onKeep, currentB
       }
     }
     
-    // Last resort - show batch_id shortened
+    // For new question without batch info, use current batch as fallback
+    if (isNewQuestion && currentBatchName) {
+      return currentBatchName;
+    }
+    
+    // Last resort - show batch_id shortened if available
     if (question.batch_id) {
       return `Lote ${question.batch_id.slice(0, 8)}...`;
     }
@@ -754,24 +754,30 @@ export default function Editor() {
     // If not, fetch the duplicate directly by ID
     if (question.duplicate_of) {
       try {
-        const response = await axios.get(`${API}/questions/by-id/${question.duplicate_of}`);
-        const originalQ = response.data;
-        
-        // Get current batch info
-        const currentBatch = batches.find(b => b.id === selectedBatch);
+        // Fetch both questions with their batch info
+        const [originalResponse, newQuestionResponse] = await Promise.all([
+          axios.get(`${API}/questions/by-id/${question.duplicate_of}`),
+          axios.get(`${API}/questions/by-id/${question.id}`)
+        ]);
+        const originalQ = originalResponse.data;
+        const newQ = newQuestionResponse.data;
         
         setDuplicates([{
           new_question: {
             id: question.id,
             username: question.youtube_username,
             real_name: question.real_name,
-            text: question.corrected_text || question.original_text
+            text: question.corrected_text || question.original_text,
+            batch_id: newQ.import_batch_id,
+            batch_name: newQ.batch_name,
+            batch_date: newQ.batch_date
           },
           original_question: {
             id: originalQ.id,
             username: originalQ.youtube_username,
             real_name: originalQ.real_name,
             text: originalQ.corrected_text || originalQ.original_text,
+            batch_id: originalQ.import_batch_id,
             batch_name: originalQ.batch_name,
             batch_date: originalQ.batch_date
           },

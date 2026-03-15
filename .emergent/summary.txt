@@ -1,0 +1,192 @@
+<analysis>**original_problem_statement:**
+The user manages a Q&A YouTube channel and needs a tool to automate their workflow. Currently, they manually collect comments, clean them up, correct grammar, and group them for upcoming videos.
+
+**PRODUCT REQUIREMENTS:**
+1.  **Import:** Collect comments from various text formats.
+2.  **Data Cleaning:**
+    *   Automatically remove greetings and timestamps.
+    *   Correct grammar, spelling, and punctuation using AI.
+    *   Extract real user names from their YouTube handles and remember them.
+3.  **Content Management:**
+    *   Group questions into programs.
+    *   Detect and manage duplicate questions from the **same user**, both within the current import and against historical questions, using both simple and advanced AI-powered semantic matching.
+    *   Edit batch names, dates, question text, and usernames.
+4.  **Output:** Export organized programs into a single plain text file.
+
+**User's preferred language**: Spanish
+
+**what currently exists?**
+A full-stack application (React + FastAPI) for managing YouTube Q&A comments. Key features include:
+-   **Dashboard**: Displays all imported batches with editable names and dates.
+-   **Importer**: A robust text parser that handles multiple formats from copied YouTube comments and TXT files.
+-   **Editor**: The main workspace to view, edit, and manage questions.
+    -   All text fields (username, real name, question text) are editable.
+    -   **Advanced Duplicate Detection**:
+        -   A fast search for word-based similarities (now case/accent insensitive).
+        -   An **AI-powered semantic search** that finds topically similar questions from the *same user*.
+        -   A dropdown menu to select the AI model (GPT-5.2, GPT-4o, Claude Sonnet 4.5, Gemini 3 Flash) for the search.
+    -   **Duplicate Management UI**:
+        -   A filter to show only duplicate questions.
+        -   A clear side-by-side comparison modal to decide which question to keep.
+        -   The modal shows the exact source batch for each question.
+-   **AI Correction**: A feature to correct grammar and spelling on individual questions.
+
+**Last working item**:
+    - Last item agent was working: The user reported that the duplicate comparison modal sometimes shows Desconocido as the location for a duplicate question. The agent was investigating the backend logic in  to understand why the batch information is not being correctly fetched and passed to the frontend, especially after an AI-powered search.
+    - Status: IN PROGRESS
+    - Agent Testing Done: N
+    - Which testing method agent to use? backend testing agent
+    - User Testing Done: N
+
+**All Pending/In progress Issue list**:
+  Issue 1: Duplicate comparison modal shows Desconocido as batch location. (Priority: P0)
+  Issue 2: AI-powered duplicate search is slow and can time out on large batches. (Priority: P1)
+
+  Issues Detail:
+  - Issue 1: 
+     - Attempted fixes: The agent started investigating the backend code and added logging to trace how batch information is handled when constructing the duplicate pairs list. The issue seems to be that the historical question object doesn't have its batch information pre-loaded when the AI search returns a match.
+     - Next debug checklist: 
+        1. In , within the  function, inspect the  object after it's identified as a potential duplicate.
+        2. Ensure that its  is used to fetch the corresponding batch details (name and date).
+        3. Modify the logic to explicitly look up the batch information for every historical duplicate found, rather than relying on pre-loaded data.
+        4. Test the  endpoint with a known duplicate pair and verify the JSON response contains correct batch info for both questions.
+     - Why fix this issue and what will be achieved with the fix? The user needs to know the source of each duplicate to make an informed decision. Fixing this is critical for the usability of the duplicate management feature.
+     - Status:  IN PROGRESS
+     - Is recurring issue? N
+     - Should Test frontend/backend/both after fix? backend
+     - Blocked on other issue: None
+
+  - Issue 2: 
+     - Attempted fixes: The agent optimized the AI search to only process users who have more than one question in the combined dataset. However, this is not a complete solution, as a single user with many questions can still cause a timeout.
+     - Next debug checklist: 
+        1. Implement a background task mechanism (e.g., using FastAPI's ) for the AI duplicate search.
+        2. The endpoint () should immediately return a task ID.
+        3. Create a new endpoint () for the frontend to poll for progress and results.
+        4. Update the frontend  to show a progress bar and poll the status endpoint instead of waiting for the initial call to finish.
+     - Why fix this issue and what will be achieved with the fix? This will prevent proxy timeouts and provide a much better user experience when running a long and computationally expensive operation.
+     - Status:  IN PROGRESS
+     - Is recurring issue? Y
+     - Should Test frontend/backend/both after fix? both
+     - Blocked on other issue: None
+
+**In progress Task List**:
+- None.
+
+**Upcoming and Future Tasks**
+- **Upcoming Tasks:**
+  - **P0**: Add automatic retries for transient OpenAI API errors (e.g., ) to improve the reliability of all AI features (correction and duplicate detection). This involves wrapping API calls in a simple retry loop.
+  - **P1**: Refactor the  component to break it down into smaller, manageable child components and custom hooks (e.g., , ). It currently handles too much state and logic.
+- **Future Tasks:**
+  - **P2**: Implement a final AI-powered formatting step during the **export** process. This would apply the user's SPM style rules to the approved questions automatically, creating a ready-to-use script.
+
+**Completed work in this session**
+- **Feature: Editable Batch Info**: Implemented functionality to edit both the name and date of import batches directly from the Dashboard.
+- **Feature: Advanced Duplicate Detection**:
+    - Built an AI-powered semantic duplicate search that only compares questions from the **same user**.
+    - Added a UI dropdown to allow the user to select the AI model for the search (GPT-5.2, GPT-4o, Claude, Gemini).
+    - Improved the basic word-based search to be case and accent insensitive.
+- **Feature: Robust Import Parser**: Massively improved the import parser in  to handle a wide variety of inconsistent formats from user-provided TXT files and direct YouTube copy-pastes.
+- **Feature: Editable Content**: Made question text and usernames () directly editable in the Editor view.
+- **UI/UX for Duplicate Management**:
+    - Created a clear, side-by-side comparison modal for resolving duplicates.
+    - The duplicate count badge in the Editor now functions as a toggle filter to show only duplicated questions.
+    - Improved the comparison modal to show the exact source batch name/date for each question.
+- **Bug Fixes**:
+    - Resolved a navigation bug where the Editor would incorrectly default to the first batch.
+    - Fixed an issue where the page would scroll to the top after an AI correction or question deletion.
+    - Implemented a server-side cleanup function to remove orphan duplicates pointing to deleted questions.
+    - Ensured the batch question count updates correctly on the Dashboard after a question is deleted.
+
+**Earlier issues found/mentioned but not fixed**
+   - Issue 1: Transient OpenAI API errors (like ) are not handled.
+     - Debug checklist: In , wrap the  calls within a try/except block that catches specific network-related exceptions and retries the request 2-3 times with a short delay.
+     - Why to solve this issue and what will be achieved with this? This will make the AI features more resilient and prevent failures due to temporary network or service issues on OpenAI's side.
+     - Should Test frontend/backend/both after fix: backend
+     - Is recurring issue? Y
+
+**Known issue recurrence from previous fork**
+  - None.
+
+**Code Architecture**
+
+
+**Key Technical Concepts**
+- **Backend**: FastAPI, Pydantic, Motor (async MongoDB driver).
+- **Frontend**: React, TailwindCSS, shadcn/ui.
+- **Database**: MongoDB.
+- **Integrations**: OpenAI API, Anthropic API, Google Gemini API (all via Emergent LLM Key) for semantic search and text correction.
+- **Architecture**: Monolithic FastAPI backend serving a React SPA.
+
+**key DB schema**
+  - **users**: 
+  - **batches**: 
+  - **questions**: 
+
+**changes in tech stack**
+  - None.
+
+**All files of reference**
+- : Heavily modified to add new endpoints (, ), a much more robust import parser, AI model selection logic, and duplicate detection restricted to the same user.
+- : The most changed file. Contains logic for AI model selection, duplicate filtering, triggering the new comparison modal, and handling timeouts and loading states.
+- : Completely redesigned to provide a clear, actionable side-by-side view for resolving duplicates.
+- : Updated to make the username and question text editable and to include the Click to compare badge logic for duplicates.
+- : Updated to support editing batch names and dates.
+
+**Areas that need refactoring**:
+- The  file has become extremely large and should be broken down into multiple routers (e.g., , , ).
+- The  component is overly complex and manages excessive state. It should be refactored into smaller components and custom hooks to improve maintainability.
+
+**key api endpoints**
+- : **(New)** Performs semantic duplicate search using a user-selected AI model, restricted to questions from the same user.
+- : **(New)** Fetches a single question by its ID, used for the duplicate comparison modal.
+- : **(Updated)** Now handles updates for both  and Sun Mar 15 17:41:38 UTC 2026.
+- : **(Updated)** Parser logic was completely overhauled to support multiple inconsistent text formats.
+- : **(Updated)** Now correctly triggers a refresh of the batch question counts.
+- : **(New)** A utility endpoint to clean up invalid duplicate flags.
+
+**Critical Info for New Agent**
+- **MUST communicate in Spanish.**
+- The highest priority is fixing the Desconocido bug in the duplicate comparison modal.
+- The AI-powered duplicate search is a critical feature but is slow and can time out. The next step is to move it to a background task with polling from the frontend.
+- The duplicate detection logic has a strict requirement from the user: **it must only find duplicates from the same user**.
+- The import parser is now very complex to handle messy user input. Be cautious when modifying it.
+
+**documents and test reports created in this job**
+- None.
+
+**Last 10 User Messages and any pending HUMAN messages** 
+ 1.  - Reported error finding original duplicate question. (Status: Completed, fixed by adding a cleanup for orphan duplicates).
+ 2.  - Reported that the question count on the dashboard doesn't update after deletion. (Status: Completed).
+ 3.  - Requested a way to switch AI models for duplicate detection. (Status: Completed, model selector was added).
+ 4.  - Reported the page scrolls to the top after AI correction. (Status: Completed).
+ 5.  - Requested the duplicate modal show the specific batch name/date. (Status: Completed).
+ 6.  - Requested the ability to edit question text and usernames. (Status: Completed).
+ 7.  - Reported that the import parser was incorrectly splitting single questions into multiple. (Status: Completed, parser was fixed).
+ 8.  - Provided a clear rule for the import parser logic. (Status: Completed, logic was simplified based on this).
+ 9.  - Approval to proceed after the parser fix. (Status: Completed).
+ 10.  - The current active bug report: the duplicate modal shows Desconocido as the location. (Status: **In Progress**).
+
+**Project Health Check:**
+- **Broken**:
+    - The duplicate comparison modal sometimes fails to show the source batch (Desconocido).
+    - The AI-powered duplicate search is prone to timeouts on large batches of questions.
+- **Mocked**: Direct integration with the YouTube API for automatically fetching comments is still not implemented. The workflow relies on manual copy-pasting.
+
+**3rd Party Integrations**
+- **OpenAI (GPT-5.2, GPT-4o)**: Powers AI text correction and semantic duplicate search. Uses Emergent LLM Key.
+- **Anthropic (Claude Sonnet 4.5)**: Alternative model for semantic duplicate search. Uses Emergent LLM Key.
+- **Google (Gemini 3 Flash)**: Alternative model for semantic duplicate search. Uses Emergent LLM Key.
+- **YouTube Data API v3**: Credentials exist, but it is not actively used in the application.
+
+**Testing status**
+  - Testing agent used after significant changes: NO
+  - Troubleshoot agent used after agent stuck in loop: NO
+  - Test files created: []
+  - Known regressions: None
+
+**Credentials to test flow:**
+N/A (No application-level login)
+
+**What agent forgot to execute**
+- The agent did not implement the planned retry mechanism for transient OpenAI API errors, which was identified as a necessary reliability improvement in the initial handoff summary.
+- The agent started addressing the AI search timeout issue by optimizing the query but did not implement a full solution (like background tasks and a progress bar) before moving on to the user's next request.</analysis>
