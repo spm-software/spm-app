@@ -32,7 +32,10 @@ import {
   Hash,
   Trash2,
   AlertTriangle,
-  Database
+  Database,
+  Download,
+  Upload,
+  HardDrive
 } from "lucide-react";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -49,6 +52,8 @@ export default function Configuracion() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [cleaning, setCleaning] = useState(false);
+  const [backingUp, setBackingUp] = useState(false);
+  const [restoring, setRestoring] = useState(false);
   const [selectedCleanupDays, setSelectedCleanupDays] = useState("30");
 
   useEffect(() => {
@@ -128,6 +133,55 @@ export default function Configuracion() {
       toast.error("Error al limpiar datos");
     } finally {
       setCleaning(false);
+    }
+  };
+
+  const handleBackup = async () => {
+    setBackingUp(true);
+    try {
+      const response = await axios.get(`${API}/backup`);
+      const dataStr = JSON.stringify(response.data, null, 2);
+      const dataBlob = new Blob([dataStr], { type: 'application/json' });
+      const url = URL.createObjectURL(dataBlob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `backup_${new Date().toISOString().slice(0,10)}.json`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      toast.success(`Backup descargado: ${response.data.counts.questions} preguntas, ${response.data.counts.batches} lotes`);
+    } catch (error) {
+      console.error("Error creating backup:", error);
+      toast.error("Error al crear backup");
+    } finally {
+      setBackingUp(false);
+    }
+  };
+
+  const handleRestore = async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    
+    setRestoring(true);
+    try {
+      const text = await file.text();
+      const backupData = JSON.parse(text);
+      
+      if (!backupData.data) {
+        toast.error("Formato de backup inválido");
+        return;
+      }
+      
+      const response = await axios.post(`${API}/restore`, backupData);
+      toast.success(`Restaurado: ${Object.entries(response.data.restored).map(([k,v]) => `${v} ${k}`).join(', ')}`);
+      fetchCleanupStats();
+    } catch (error) {
+      console.error("Error restoring backup:", error);
+      toast.error("Error al restaurar backup: " + (error.response?.data?.detail || error.message));
+    } finally {
+      setRestoring(false);
+      event.target.value = '';
     }
   };
 
@@ -317,6 +371,93 @@ export default function Configuracion() {
             )}
           </Button>
         </div>
+
+        {/* Backup Section */}
+        <Card className="bg-card border border-primary/30 rounded-sm lg:col-span-2">
+          <CardHeader>
+            <CardTitle className="font-heading text-lg uppercase tracking-tight flex items-center gap-2 text-primary">
+              <HardDrive className="w-5 h-5" />
+              BACKUP Y RESTAURACIÓN
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            <p className="text-sm text-muted-foreground">
+              Descarga una copia de seguridad de todos tus datos o restaura desde un backup anterior.
+            </p>
+            
+            <div className="flex flex-wrap gap-4">
+              <Button
+                onClick={handleBackup}
+                disabled={backingUp}
+                className="rounded-sm uppercase tracking-wide"
+                data-testid="backup-button"
+              >
+                {backingUp ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    Creando backup...
+                  </>
+                ) : (
+                  <>
+                    <Download className="w-4 h-4 mr-2" />
+                    Descargar Backup
+                  </>
+                )}
+              </Button>
+
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button
+                    variant="outline"
+                    disabled={restoring}
+                    className="rounded-sm uppercase tracking-wide"
+                    data-testid="restore-button"
+                  >
+                    {restoring ? (
+                      <>
+                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                        Restaurando...
+                      </>
+                    ) : (
+                      <>
+                        <Upload className="w-4 h-4 mr-2" />
+                        Restaurar Backup
+                      </>
+                    )}
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>⚠️ Restaurar Backup</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      Al restaurar un backup, <strong>TODOS los datos actuales serán reemplazados</strong>.
+                      <br /><br />
+                      Asegúrate de haber descargado un backup de los datos actuales antes de continuar.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                    <AlertDialogAction asChild>
+                      <label className="cursor-pointer bg-primary text-primary-foreground hover:bg-primary/90 px-4 py-2 rounded-sm">
+                        Seleccionar archivo
+                        <input
+                          type="file"
+                          accept=".json"
+                          onChange={handleRestore}
+                          className="hidden"
+                        />
+                      </label>
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            </div>
+
+            <p className="text-xs text-muted-foreground">
+              El backup incluye: preguntas, lotes, programas, usuarios y configuración.
+            </p>
+          </CardContent>
+        </Card>
 
         {/* Database Cleanup Section */}
         <Card className="bg-card border border-destructive/30 rounded-sm lg:col-span-2">

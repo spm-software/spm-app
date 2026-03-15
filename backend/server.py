@@ -2082,6 +2082,98 @@ async def cleanup_old_batches(days: int = Query(..., ge=1, le=365)):
         "cutoff_date": cutoff
     }
 
+
+@api_router.get("/backup")
+async def create_backup():
+    """Create a complete backup of all data in JSON format"""
+    from fastapi.responses import JSONResponse
+    
+    # Get all data from all collections
+    questions = await db.questions.find({}, {"_id": 0}).to_list(10000)
+    batches = await db.import_batches.find({}, {"_id": 0}).to_list(1000)
+    programs = await db.programs.find({}, {"_id": 0}).to_list(1000)
+    users = await db.users.find({}, {"_id": 0}).to_list(10000)
+    settings = await db.settings.find({}, {"_id": 0}).to_list(10)
+    
+    # Create backup object
+    backup = {
+        "backup_date": datetime.now(timezone.utc).isoformat(),
+        "version": "1.0",
+        "data": {
+            "questions": questions,
+            "batches": batches,
+            "programs": programs,
+            "users": users,
+            "settings": settings
+        },
+        "counts": {
+            "questions": len(questions),
+            "batches": len(batches),
+            "programs": len(programs),
+            "users": len(users)
+        }
+    }
+    
+    return JSONResponse(
+        content=backup,
+        headers={
+            "Content-Disposition": f"attachment; filename=backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+        }
+    )
+
+
+@api_router.post("/restore")
+async def restore_backup(backup_data: dict):
+    """Restore data from a backup file.
+    
+    WARNING: This will REPLACE all existing data!
+    """
+    if "data" not in backup_data:
+        raise HTTPException(status_code=400, detail="Formato de backup inválido")
+    
+    data = backup_data["data"]
+    restored = {}
+    
+    try:
+        # Restore questions
+        if "questions" in data and data["questions"]:
+            await db.questions.delete_many({})
+            await db.questions.insert_many(data["questions"])
+            restored["questions"] = len(data["questions"])
+        
+        # Restore batches
+        if "batches" in data and data["batches"]:
+            await db.import_batches.delete_many({})
+            await db.import_batches.insert_many(data["batches"])
+            restored["batches"] = len(data["batches"])
+        
+        # Restore programs
+        if "programs" in data and data["programs"]:
+            await db.programs.delete_many({})
+            await db.programs.insert_many(data["programs"])
+            restored["programs"] = len(data["programs"])
+        
+        # Restore users
+        if "users" in data and data["users"]:
+            await db.users.delete_many({})
+            await db.users.insert_many(data["users"])
+            restored["users"] = len(data["users"])
+        
+        # Restore settings
+        if "settings" in data and data["settings"]:
+            await db.settings.delete_many({})
+            await db.settings.insert_many(data["settings"])
+            restored["settings"] = len(data["settings"])
+        
+        return {
+            "message": "Backup restaurado exitosamente",
+            "restored": restored
+        }
+    except Exception as e:
+        logger.error(f"Error restoring backup: {e}")
+        raise HTTPException(status_code=500, detail=f"Error al restaurar: {str(e)}")
+
+
 @api_router.delete("/cleanup/all")
 async def cleanup_all_data():
     """Delete ALL data from the database (use with caution)"""
