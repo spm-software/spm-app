@@ -26,6 +26,8 @@ Administración de un canal de YouTube de preguntas y respuestas. Cada 15 días 
 - ✅ Importación y parseo de comentarios (múltiples formatos)
 - ✅ Corrección con IA (emergentintegrations + OpenAI GPT-5.2)
 - ✅ Detección de duplicados (rápida + IA semántica)
+- ✅ **Sistema de tareas en segundo plano** para búsqueda AI con progreso
+- ✅ **Retry automático** para errores transitorios de API
 - ✅ Distribución en programas con reglas
 - ✅ Exportación TXT
 - ✅ Edición de nombres/fechas de lotes
@@ -35,6 +37,7 @@ Administración de un canal de YouTube de preguntas y respuestas. Cada 15 días 
 - ✅ Importador de comentarios
 - ✅ Editor con corrección IA
 - ✅ Búsqueda de duplicados con IA (selector de modelo)
+- ✅ **Barra de progreso en tiempo real** para búsqueda AI
 - ✅ Modal de comparación de duplicados (con lote de origen correcto)
 - ✅ Filtro para ver solo duplicados
 - ✅ Campos editables (username, nombre, texto)
@@ -50,8 +53,14 @@ Administración de un canal de YouTube de preguntas y respuestas. Cada 15 días 
 - ✅ MongoDB para persistencia
 - 📋 YouTube API (credenciales guardadas, integración pendiente)
 
-## Última Actualización (15 Marzo 2026)
-- ✅ **Bug corregido**: Modal de comparación de duplicados mostraba "Desconocido" como lote de origen. Ahora muestra correctamente el nombre del lote para ambas preguntas.
+## Últimas Actualizaciones (15 Marzo 2026)
+- ✅ **Bug corregido**: Modal de comparación de duplicados mostraba "Desconocido" como lote de origen
+- ✅ **Nueva funcionalidad**: Sistema de progreso con polling para búsqueda AI de duplicados
+  - Endpoint `/api/questions/check-duplicates-ai-start/{batch_id}` inicia tarea en segundo plano
+  - Endpoint `/api/duplicates/status/{task_id}` permite consultar progreso
+  - Barra de progreso visual en el frontend
+  - Muestra porcentaje, preguntas procesadas y duplicados encontrados en tiempo real
+- ✅ **Mejora**: Retry automático (3 intentos) para errores transitorios de API de OpenAI
 
 ## Backlog Priorizado
 
@@ -59,8 +68,6 @@ Administración de un canal de YouTube de preguntas y respuestas. Cada 15 días 
 - Ninguno pendiente
 
 ### P1 (Importante)
-- Resolver timeout de búsqueda AI con tareas en segundo plano
-- Añadir reintentos automáticos para errores transitorios de OpenAI API
 - Integración directa con YouTube API para obtener comentarios automáticamente
 
 ### P2 (Mejoras)
@@ -71,6 +78,5 @@ Administración de un canal de YouTube de preguntas y respuestas. Cada 15 días 
 - Estadísticas de usuarios más frecuentes
 
 ## Próximas Tareas
-1. Implementar background tasks para búsqueda AI de duplicados (evitar timeouts)
-2. Añadir retry mechanism para errores de API de OpenAI
-3. Integración OAuth con YouTube para comentarios directos
+1. Integración OAuth con YouTube para comentarios directos
+2. Refactorizar código para mejor mantenibilidad
