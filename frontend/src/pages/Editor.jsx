@@ -102,6 +102,71 @@ const EditableName = ({ question, onSave }) => {
   );
 };
 
+// Componente para editar username (@...)
+const EditableUsername = ({ question, onSave }) => {
+  const [isEditing, setIsEditing] = useState(false);
+  const [localUsername, setLocalUsername] = useState(question.youtube_username || "");
+  const inputRef = useRef(null);
+
+  useEffect(() => {
+    setLocalUsername(question.youtube_username || "");
+  }, [question.youtube_username]);
+
+  useEffect(() => {
+    if (isEditing && inputRef.current) {
+      inputRef.current.focus();
+      inputRef.current.select();
+    }
+  }, [isEditing]);
+
+  const handleSave = () => {
+    if (localUsername !== question.youtube_username) {
+      // Ensure it starts with @
+      const username = localUsername.startsWith('@') ? localUsername : `@${localUsername}`;
+      onSave(question.id, "youtube_username", username);
+    }
+    setIsEditing(false);
+  };
+
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      handleSave();
+    }
+    if (e.key === 'Escape') {
+      setLocalUsername(question.youtube_username || "");
+      setIsEditing(false);
+    }
+  };
+
+  if (isEditing) {
+    return (
+      <Input
+        ref={inputRef}
+        value={localUsername}
+        onChange={(e) => setLocalUsername(e.target.value)}
+        onBlur={handleSave}
+        onKeyDown={handleKeyDown}
+        className="h-7 w-40 rounded-sm text-xs font-mono bg-secondary/50"
+        placeholder="@username"
+        data-testid={`username-input-${question.id}`}
+      />
+    );
+  }
+
+  return (
+    <button
+      onClick={() => setIsEditing(true)}
+      className="font-mono text-xs text-muted-foreground bg-secondary/50 px-2 py-1 rounded flex-shrink-0 hover:bg-secondary transition-colors group flex items-center gap-1"
+      title="Click para editar username"
+      data-testid={`username-edit-button-${question.id}`}
+    >
+      {question.youtube_username}
+      <Pencil className="w-2.5 h-2.5 opacity-0 group-hover:opacity-100 transition-opacity" />
+    </button>
+  );
+};
+
 // Componente separado para editar texto
 const EditableText = ({ question, onSave }) => {
   const [isEditing, setIsEditing] = useState(false);
@@ -1031,9 +1096,7 @@ export default function Editor() {
                     {index + 1}
                   </div>
                   
-                  <span className="font-mono text-xs text-muted-foreground bg-secondary/50 px-2 py-1 rounded flex-shrink-0">
-                    {question.youtube_username}
-                  </span>
+                  <EditableUsername question={question} onSave={handleUpdateQuestion} />
                   
                   <span className="text-muted-foreground flex-shrink-0">→</span>
                   
