@@ -51,9 +51,17 @@ Administración de un canal de YouTube de preguntas y respuestas. Cada 15 días 
 - ✅ Claude Sonnet 4.5 (via Emergent LLM Key)
 - ✅ Gemini 3 Flash (via Emergent LLM Key)
 - ✅ MongoDB para persistencia
-- 📋 YouTube API (credenciales guardadas, integración pendiente)
+- 📋 YouTube API (credenciales guardadas, OAuth popup activo, descarga de comentarios funcional)
 
-## Últimas Actualizaciones (15 Marzo 2026)
+## Últimas Actualizaciones (Feb 2026)
+- ✅ **Flujo OAuth manual de YouTube** (popup `window.open`) integrado en Configuración:
+  - Nueva sección "Cuenta de YouTube" en `Configuracion.jsx` con botón "Conectar cuenta de YouTube"
+  - Abre ventana emergente a Google OAuth con `prompt=select_account` y `access_type=offline`
+  - Ventana cierra automáticamente al completar y notifica al padre via `postMessage`
+  - Muestra email + canal conectado con botones "Cambiar de cuenta" y "Desconectar"
+  - Token + refresh_token persistidos en MongoDB (`db.youtube_tokens`)
+  - `Importador.jsx` simplificado: si no hay token invita a ir a Configuración; si hay token descarga directo
+  - Corte automático por `ultimo_comentario_id` para evitar re-importaciones
 - ✅ **Bug corregido**: Modal de comparación de duplicados mostraba "Desconocido" como lote de origen
 - ✅ **Nueva funcionalidad**: Sistema de progreso con polling para búsqueda AI de duplicados
   - Endpoint `/api/questions/check-duplicates-ai-start/{batch_id}` inicia tarea en segundo plano
