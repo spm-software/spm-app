@@ -2302,7 +2302,12 @@ async def youtube_auth_status():
         if expiry_dt < datetime.now(timezone.utc):
             # Token expired, try to refresh
             if token_doc.get("refresh_token"):
-                return {"authenticated": True, "needs_refresh": True}
+                return {
+                    "authenticated": True, 
+                    "needs_refresh": True,
+                    "account_email": token_doc.get("account_email"),
+                    "channel_title": token_doc.get("channel_title")
+                }
             return {"authenticated": False, "message": "Token expired"}
     
     # Get last import info
@@ -2313,6 +2318,8 @@ async def youtube_auth_status():
     
     return {
         "authenticated": True,
+        "account_email": token_doc.get("account_email"),
+        "channel_title": token_doc.get("channel_title"),
         "last_import": {
             "date": last_import.get("created_at") if last_import else None,
             "last_comment_id": last_import.get("last_comment_id") if last_import else None,
@@ -2351,8 +2358,7 @@ async def youtube_get_auth_url(redirect_uri: str):
     
     auth_url, state = flow.authorization_url(
         access_type='offline',
-        include_granted_scopes='false',
-        prompt='consent select_account'
+        prompt='select_account'
     )
     
     # Store state for later verification
@@ -2393,6 +2399,32 @@ async def youtube_oauth_callback(data: YouTubeAuthCallback):
         flow.fetch_token(code=data.code)
         credentials = flow.credentials
         
+        # Get channel info to identify the account
+        youtube = build('youtube', 'v3', credentials=credentials, cache_discovery=False)
+        channels_response = youtube.channels().list(
+            part='snippet',
+            mine=True
+        ).execute()
+        
+        channel_title = None
+        account_email = None
+        if channels_response.get('items'):
+            channel_title = channels_response['items'][0]['snippet'].get('title')
+        
+        # Try to get user info from Google
+        try:
+            from google.oauth2 import id_token
+            from google.auth.transport import requests
+            # Get user email from token info
+            token_info_url = f"https://oauth2.googleapis.com/tokeninfo?access_token={credentials.token}"
+            import urllib.request
+            with urllib.request.urlopen(token_info_url) as response:
+                import json
+                token_info = json.loads(response.read().decode())
+                account_email = token_info.get('email')
+        except Exception as e:
+            logger.warning(f"Could not get email from token: {e}")
+        
         # Store tokens in MongoDB
         token_data = {
             "type": "user_token",
@@ -2403,6 +2435,8 @@ async def youtube_oauth_callback(data: YouTubeAuthCallback):
             "client_secret": credentials.client_secret,
             "scopes": list(credentials.scopes) if credentials.scopes else [],
             "expiry": credentials.expiry.isoformat() if credentials.expiry else None,
+            "account_email": account_email,
+            "channel_title": channel_title,
             "updated_at": datetime.now(timezone.utc).isoformat()
         }
         
@@ -2413,9 +2447,14 @@ async def youtube_oauth_callback(data: YouTubeAuthCallback):
             upsert=True
         )
         
-        logger.info("YouTube OAuth tokens stored successfully")
+        logger.info(f"YouTube OAuth tokens stored for channel: {channel_title} ({account_email})")
         
-        return {"success": True, "message": "YouTube conectado exitosamente"}
+        return {
+            "success": True, 
+            "message": "YouTube conectado exitosamente",
+            "channel_title": channel_title,
+            "account_email": account_email
+        }
         
     except Exception as e:
         logger.error(f"OAuth callback error: {e}")
