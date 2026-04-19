@@ -2352,7 +2352,8 @@ async def youtube_get_auth_url(redirect_uri: str):
     auth_url, state = flow.authorization_url(
         access_type='offline',
         include_granted_scopes='false',
-        prompt='consent select_account'
+        prompt='consent select_account',
+        login_hint='samuelperezmillos@gmail.com'
     )
     
     # Store state for later verification
