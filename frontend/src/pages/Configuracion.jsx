@@ -35,7 +35,10 @@ import {
   Database,
   Download,
   Upload,
-  HardDrive
+  HardDrive,
+  CheckCircle,
+  LogOut,
+  Link2
 } from "lucide-react";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -55,11 +58,88 @@ export default function Configuracion() {
   const [backingUp, setBackingUp] = useState(false);
   const [restoring, setRestoring] = useState(false);
   const [selectedCleanupDays, setSelectedCleanupDays] = useState("30");
+  const [youtubeAuth, setYoutubeAuth] = useState({ authenticated: false, loading: true });
+  const [connecting, setConnecting] = useState(false);
 
   useEffect(() => {
     fetchSettings();
     fetchCleanupStats();
+    checkYoutubeAuth();
+
+    // Listen for popup messages
+    const handleMessage = (event) => {
+      if (event.data?.type === 'youtube-auth-success') {
+        toast.success("Cuenta de YouTube conectada");
+        checkYoutubeAuth();
+        setConnecting(false);
+      } else if (event.data?.type === 'youtube-auth-error') {
+        toast.error("Error al conectar: " + (event.data.error || ""));
+        setConnecting(false);
+      }
+    };
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
   }, []);
+
+  const checkYoutubeAuth = async () => {
+    try {
+      const response = await axios.get(`${API}/youtube/auth-status`);
+      setYoutubeAuth({ ...response.data, loading: false });
+    } catch (error) {
+      console.error("Error checking YouTube auth:", error);
+      setYoutubeAuth({ authenticated: false, loading: false });
+    }
+  };
+
+  const handleConnectYouTube = async () => {
+    setConnecting(true);
+    try {
+      const redirectUri = `${window.location.origin}/youtube-callback.html`;
+      const response = await axios.get(`${API}/youtube/auth-url`, {
+        params: { redirect_uri: redirectUri }
+      });
+
+      const width = 500;
+      const height = 650;
+      const left = window.screenX + (window.outerWidth - width) / 2;
+      const top = window.screenY + (window.outerHeight - height) / 2;
+
+      const popup = window.open(
+        response.data.auth_url,
+        'youtube_auth',
+        `width=${width},height=${height},left=${left},top=${top}`
+      );
+
+      if (!popup) {
+        toast.error("El navegador bloqueó la ventana emergente. Habilita los popups.");
+        setConnecting(false);
+        return;
+      }
+
+      // Poll for popup closure
+      const timer = setInterval(() => {
+        if (popup.closed) {
+          clearInterval(timer);
+          setConnecting(false);
+          checkYoutubeAuth();
+        }
+      }, 500);
+    } catch (error) {
+      console.error("Error getting auth URL:", error);
+      toast.error(error.response?.data?.detail || "Error al iniciar conexión con YouTube");
+      setConnecting(false);
+    }
+  };
+
+  const handleDisconnectYouTube = async () => {
+    try {
+      await axios.delete(`${API}/youtube/disconnect`);
+      setYoutubeAuth({ authenticated: false, loading: false });
+      toast.success("Cuenta de YouTube desconectada");
+    } catch (error) {
+      toast.error("Error al desconectar");
+    }
+  };
 
   const fetchSettings = async () => {
     try {
@@ -347,6 +427,130 @@ export default function Configuracion() {
                 />
               </div>
             </div>
+          </CardContent>
+        </Card>
+
+        {/* YouTube Account Connection */}
+        <Card className="bg-card border border-border rounded-sm lg:col-span-2">
+          <CardHeader>
+            <CardTitle className="font-heading text-lg uppercase tracking-tight flex items-center gap-2">
+              <Link2 className="w-5 h-5 text-primary" />
+              CUENTA DE YOUTUBE
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              Conecta la cuenta de YouTube (Google) que quieres usar para descargar comentarios. 
+              Se abrirá una ventana emergente para que puedas elegir cualquier cuenta de Google, 
+              independientemente de la sesión activa en tu navegador.
+            </p>
+
+            {youtubeAuth.loading ? (
+              <div className="flex items-center justify-center py-6">
+                <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+              </div>
+            ) : youtubeAuth.authenticated ? (
+              <div className="space-y-4">
+                <div className="flex items-start justify-between p-4 bg-green-500/10 border border-green-500/30 rounded-sm gap-4">
+                  <div className="flex items-start gap-3 min-w-0">
+                    <CheckCircle className="w-5 h-5 text-green-500 mt-0.5 flex-shrink-0" />
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium">Cuenta conectada</p>
+                      {youtubeAuth.account_email && (
+                        <p className="text-sm text-muted-foreground truncate" data-testid="youtube-account-email">
+                          {youtubeAuth.account_email}
+                        </p>
+                      )}
+                      {youtubeAuth.channel_title && (
+                        <p className="text-xs text-muted-foreground truncate">
+                          Canal: {youtubeAuth.channel_title}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap gap-3">
+                  <Button
+                    variant="outline"
+                    onClick={handleConnectYouTube}
+                    disabled={connecting}
+                    className="rounded-sm uppercase tracking-wide text-xs"
+                    data-testid="change-youtube-account-button"
+                  >
+                    {connecting ? (
+                      <>
+                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                        Conectando...
+                      </>
+                    ) : (
+                      <>
+                        <Youtube className="w-4 h-4 mr-2" />
+                        Cambiar de cuenta
+                      </>
+                    )}
+                  </Button>
+
+                  <AlertDialog>
+                    <AlertDialogTrigger asChild>
+                      <Button
+                        variant="outline"
+                        className="rounded-sm uppercase tracking-wide text-xs border-destructive/50 text-destructive hover:bg-destructive/10"
+                        data-testid="disconnect-youtube-button"
+                      >
+                        <LogOut className="w-4 h-4 mr-2" />
+                        Desconectar
+                      </Button>
+                    </AlertDialogTrigger>
+                    <AlertDialogContent>
+                      <AlertDialogHeader>
+                        <AlertDialogTitle>¿Desconectar cuenta de YouTube?</AlertDialogTitle>
+                        <AlertDialogDescription>
+                          Se eliminará el token guardado. Tendrás que volver a conectarte 
+                          para descargar comentarios desde el Importador.
+                        </AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                        <AlertDialogAction
+                          onClick={handleDisconnectYouTube}
+                          className="bg-destructive hover:bg-destructive/90"
+                        >
+                          Desconectar
+                        </AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
+                </div>
+              </div>
+            ) : (
+              <div>
+                <Button
+                  onClick={handleConnectYouTube}
+                  disabled={connecting || !settings.youtube_client_id || !settings.youtube_client_secret}
+                  className="bg-red-600 hover:bg-red-700 rounded-sm uppercase tracking-wide"
+                  data-testid="connect-youtube-account-button"
+                >
+                  {connecting ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      Conectando...
+                    </>
+                  ) : (
+                    <>
+                      <Youtube className="w-4 h-4 mr-2" />
+                      Conectar cuenta de YouTube
+                    </>
+                  )}
+                </Button>
+                {(!settings.youtube_client_id || !settings.youtube_client_secret) && (
+                  <p className="text-xs text-yellow-600 mt-3 flex items-center gap-2">
+                    <AlertTriangle className="w-3 h-3" />
+                    Primero configura el Client ID y Client Secret arriba, guarda y después conecta la cuenta.
+                  </p>
+                )}
+              </div>
+            )}
           </CardContent>
         </Card>
 

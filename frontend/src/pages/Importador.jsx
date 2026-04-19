@@ -39,13 +39,6 @@ export default function Importador() {
   // Check YouTube auth status on mount
   useEffect(() => {
     checkYoutubeAuth();
-    
-    // Handle OAuth callback
-    const urlParams = new URLSearchParams(window.location.search);
-    const code = urlParams.get('code');
-    if (code) {
-      handleOAuthCallback(code);
-    }
   }, []);
 
   const checkYoutubeAuth = async () => {
@@ -72,58 +65,6 @@ export default function Importador() {
     } catch (error) {
       console.error("Error checking YouTube auth:", error);
       setYoutubeAuth({ authenticated: false, loading: false });
-    }
-  };
-
-  const handleConnectYouTube = async () => {
-    try {
-      const redirectUri = `${window.location.origin}${window.location.pathname}`;
-      const response = await axios.get(`${API}/youtube/auth-url`, {
-        params: { redirect_uri: redirectUri }
-      });
-      
-      // Redirect to Google OAuth
-      window.location.href = response.data.auth_url;
-      
-    } catch (error) {
-      console.error("Error getting auth URL:", error);
-      toast.error(error.response?.data?.detail || "Error al conectar con YouTube");
-    }
-  };
-
-  const handleOAuthCallback = async (code) => {
-    try {
-      const redirectUri = `${window.location.origin}${window.location.pathname}`;
-      
-      await axios.post(`${API}/youtube/callback`, {
-        code: code,
-        redirect_uri: redirectUri
-      });
-      
-      toast.success("YouTube conectado exitosamente");
-      
-      // Clean URL
-      window.history.replaceState({}, document.title, window.location.pathname);
-      
-      // Refresh auth status
-      checkYoutubeAuth();
-      
-    } catch (error) {
-      console.error("OAuth callback error:", error);
-      toast.error("Error al autenticar con YouTube");
-      window.history.replaceState({}, document.title, window.location.pathname);
-    }
-  };
-
-  const handleDisconnectYouTube = async () => {
-    if (!window.confirm("¿Desconectar YouTube?")) return;
-    
-    try {
-      await axios.delete(`${API}/youtube/disconnect`);
-      setYoutubeAuth({ authenticated: false, loading: false });
-      toast.success("YouTube desconectado");
-    } catch (error) {
-      toast.error("Error al desconectar");
     }
   };
 
@@ -260,43 +201,41 @@ Pedro López - Gracias por el contenido! Mi pregunta es: ¿Cuánto tiempo tarda 
                       <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
                     </div>
                   ) : !youtubeAuth.authenticated ? (
-                    /* Not authenticated - show connect button */
+                    /* Not authenticated - direct user to Configuración */
                     <div className="text-center py-8 space-y-4">
                       <Youtube className="w-16 h-16 mx-auto text-red-500 opacity-50" />
                       <div>
-                        <h3 className="text-lg font-medium mb-2">Conecta tu canal de YouTube</h3>
+                        <h3 className="text-lg font-medium mb-2">Conecta tu cuenta de YouTube</h3>
                         <p className="text-sm text-muted-foreground mb-6">
-                          Autoriza el acceso para descargar comentarios automáticamente
+                          Ve a <strong>Configuración → Cuenta de YouTube</strong> para conectar 
+                          la cuenta de Google que quieras usar. Se abrirá una ventana emergente 
+                          para elegir la cuenta correcta.
                         </p>
                         <Button 
-                          onClick={handleConnectYouTube}
-                          className="bg-red-600 hover:bg-red-700 rounded-sm uppercase tracking-wide"
-                          data-testid="connect-youtube-button"
+                          onClick={() => window.location.href = '/configuracion'}
+                          className="rounded-sm uppercase tracking-wide"
+                          data-testid="go-to-config-button"
                         >
-                          <Youtube className="w-4 h-4 mr-2" />
-                          Conectar con YouTube
+                          <Link2 className="w-4 h-4 mr-2" />
+                          Ir a Configuración
                         </Button>
                       </div>
-                      <p className="text-xs text-muted-foreground mt-4">
-                        Necesitas configurar las credenciales de YouTube en Ajustes primero.
-                      </p>
                     </div>
                   ) : (
                     /* Authenticated - show fetch options */
                     <div className="space-y-6">
                       <div className="flex items-center justify-between p-4 bg-green-500/10 border border-green-500/30 rounded-sm">
-                        <div className="flex items-center gap-2">
-                          <CheckCircle className="w-5 h-5 text-green-500" />
-                          <span className="text-sm font-medium">YouTube conectado</span>
+                        <div className="flex items-center gap-2 min-w-0">
+                          <CheckCircle className="w-5 h-5 text-green-500 flex-shrink-0" />
+                          <div className="min-w-0">
+                            <span className="text-sm font-medium block">YouTube conectado</span>
+                            {youtubeAuth.account_email && (
+                              <span className="text-xs text-muted-foreground truncate block" data-testid="importer-youtube-email">
+                                {youtubeAuth.account_email}
+                              </span>
+                            )}
+                          </div>
                         </div>
-                        <Button 
-                          variant="ghost" 
-                          size="sm"
-                          onClick={handleDisconnectYouTube}
-                          className="text-xs"
-                        >
-                          Desconectar
-                        </Button>
                       </div>
 
                       {/* Date Range Selection */}
