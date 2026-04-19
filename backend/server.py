@@ -13,6 +13,12 @@ import re
 from bson import ObjectId
 import asyncio
 
+# YouTube API imports
+from google_auth_oauthlib.flow import Flow
+from google.oauth2.credentials import Credentials
+from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
+
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
@@ -33,6 +39,12 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+# ==================== YOUTUBE OAUTH CONFIG ====================
+YOUTUBE_SCOPES = [
+    'https://www.googleapis.com/auth/youtube.readonly',
+    'https://www.googleapis.com/auth/youtube.force-ssl'
+]
 
 # ==================== BACKGROUND TASK STORAGE ====================
 # In-memory storage for background task status
@@ -135,6 +147,15 @@ class DistributeRequest(BaseModel):
 class CorrectionRequest(BaseModel):
     question_ids: List[str]
 
+class YouTubeAuthCallback(BaseModel):
+    code: str
+    redirect_uri: str
+
+class YouTubeFetchRequest(BaseModel):
+    fecha_desde: str  # ISO date string
+    fecha_hasta: str  # ISO date string
+    ultimo_comentario_id: Optional[str] = None  # Para punto de corte
+
 # ==================== HELPER FUNCTIONS ====================
 
 def serialize_datetime(obj):
@@ -187,6 +208,50 @@ async def extract_display_name(youtube_username: str) -> str:
     if name_parts.strip():
         return ' '.join(word.capitalize() for word in name_parts.split())
     return clean_name
+
+
+def is_greeting(text: str) -> bool:
+    """Check if the text is likely just a greeting without a real question"""
+    if not text:
+        return True
+    
+    text_lower = text.lower().strip()
+    
+    # Very short texts are likely greetings
+    if len(text_lower) < 15:
+        return True
+    
+    # Check for greeting patterns without questions
+    greeting_patterns = [
+        r'^(hola|buenos días|buenas tardes|buenas noches|saludos|bendiciones)',
+        r'^(gracias|muchas gracias|mil gracias)',
+        r'^(felicidades|felicitaciones|enhorabuena)',
+        r'^(excelente|muy bien|genial|increíble|maravilloso)',
+        r'^(dios te bendiga|dios los bendiga|bendiciones)',
+        r'^(amen|amén)$',
+        r'^(primera|primero|segundo|segundo vez).*!?$',
+        r'^(like|me gusta|me encanta).*$',
+    ]
+    
+    for pattern in greeting_patterns:
+        if re.match(pattern, text_lower):
+            # Check if there's a question mark - if so, not just a greeting
+            if '?' in text:
+                return False
+            # Check if text is long enough to be more than greeting
+            if len(text_lower) > 50:
+                return False
+            return True
+    
+    # If no question mark and very short, likely a greeting
+    if '?' not in text and len(text_lower) < 30:
+        # Check for common non-question content
+        non_question_starters = ['gracias', 'bendiciones', 'saludos', 'hola', 'amén', 'amen']
+        if any(text_lower.startswith(s) for s in non_question_starters):
+            return True
+    
+    return False
+
 
 def clean_youtube_metadata(text: str) -> str:
     """Remove YouTube metadata like timestamps from comment text"""
@@ -2188,6 +2253,374 @@ async def cleanup_all_data():
         "deleted_batches": batches.deleted_count,
         "message": "Todos los datos eliminados (usuarios conservados)"
     }
+
+
+# ==================== YOUTUBE INTEGRATION ====================
+
+def get_youtube_oauth_flow(redirect_uri: str):
+    """Create OAuth flow for YouTube authentication"""
+    settings = asyncio.get_event_loop().run_until_complete(get_settings())
+    
+    if not settings.youtube_client_id or not settings.youtube_client_secret:
+        raise HTTPException(
+            status_code=400, 
+            detail="YouTube credentials not configured. Go to Settings to add them."
+        )
+    
+    client_config = {
+        "web": {
+            "client_id": settings.youtube_client_id,
+            "client_secret": settings.youtube_client_secret,
+            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+            "token_uri": "https://oauth2.googleapis.com/token",
+            "redirect_uris": [redirect_uri]
+        }
+    }
+    
+    flow = Flow.from_client_config(
+        client_config,
+        scopes=YOUTUBE_SCOPES,
+        redirect_uri=redirect_uri
+    )
+    
+    return flow
+
+
+@api_router.get("/youtube/auth-status")
+async def youtube_auth_status():
+    """Check if user is authenticated with YouTube"""
+    # Check if we have valid tokens stored
+    token_doc = await db.youtube_tokens.find_one({"type": "user_token"})
+    
+    if not token_doc:
+        return {"authenticated": False, "message": "No token found"}
+    
+    # Check if token is expired
+    expiry = token_doc.get("expiry")
+    if expiry:
+        expiry_dt = datetime.fromisoformat(expiry) if isinstance(expiry, str) else expiry
+        if expiry_dt < datetime.now(timezone.utc):
+            # Token expired, try to refresh
+            if token_doc.get("refresh_token"):
+                return {"authenticated": True, "needs_refresh": True}
+            return {"authenticated": False, "message": "Token expired"}
+    
+    # Get last import info
+    last_import = await db.youtube_imports.find_one(
+        {},
+        sort=[("created_at", -1)]
+    )
+    
+    return {
+        "authenticated": True,
+        "last_import": {
+            "date": last_import.get("created_at") if last_import else None,
+            "last_comment_id": last_import.get("last_comment_id") if last_import else None,
+            "last_comment_text": last_import.get("last_comment_text") if last_import else None,
+            "comments_count": last_import.get("comments_count") if last_import else 0
+        } if last_import else None
+    }
+
+
+@api_router.get("/youtube/auth-url")
+async def youtube_get_auth_url(redirect_uri: str):
+    """Generate YouTube OAuth authorization URL"""
+    settings = await get_settings()
+    
+    if not settings.youtube_client_id or not settings.youtube_client_secret:
+        raise HTTPException(
+            status_code=400, 
+            detail="Configura las credenciales de YouTube en Ajustes primero"
+        )
+    
+    client_config = {
+        "web": {
+            "client_id": settings.youtube_client_id,
+            "client_secret": settings.youtube_client_secret,
+            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+            "token_uri": "https://oauth2.googleapis.com/token",
+            "redirect_uris": [redirect_uri]
+        }
+    }
+    
+    flow = Flow.from_client_config(
+        client_config,
+        scopes=YOUTUBE_SCOPES,
+        redirect_uri=redirect_uri
+    )
+    
+    auth_url, state = flow.authorization_url(
+        access_type='offline',
+        include_granted_scopes='true',
+        prompt='consent'
+    )
+    
+    # Store state for later verification
+    await db.youtube_oauth_states.insert_one({
+        "state": state,
+        "redirect_uri": redirect_uri,
+        "created_at": datetime.now(timezone.utc)
+    })
+    
+    return {"auth_url": auth_url, "state": state}
+
+
+@api_router.post("/youtube/callback")
+async def youtube_oauth_callback(data: YouTubeAuthCallback):
+    """Handle OAuth callback and store tokens"""
+    settings = await get_settings()
+    
+    if not settings.youtube_client_id or not settings.youtube_client_secret:
+        raise HTTPException(status_code=400, detail="YouTube credentials not configured")
+    
+    client_config = {
+        "web": {
+            "client_id": settings.youtube_client_id,
+            "client_secret": settings.youtube_client_secret,
+            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+            "token_uri": "https://oauth2.googleapis.com/token",
+            "redirect_uris": [data.redirect_uri]
+        }
+    }
+    
+    try:
+        flow = Flow.from_client_config(
+            client_config,
+            scopes=YOUTUBE_SCOPES,
+            redirect_uri=data.redirect_uri
+        )
+        
+        flow.fetch_token(code=data.code)
+        credentials = flow.credentials
+        
+        # Store tokens in MongoDB
+        token_data = {
+            "type": "user_token",
+            "token": credentials.token,
+            "refresh_token": credentials.refresh_token,
+            "token_uri": credentials.token_uri,
+            "client_id": credentials.client_id,
+            "client_secret": credentials.client_secret,
+            "scopes": list(credentials.scopes) if credentials.scopes else [],
+            "expiry": credentials.expiry.isoformat() if credentials.expiry else None,
+            "updated_at": datetime.now(timezone.utc).isoformat()
+        }
+        
+        # Upsert the token
+        await db.youtube_tokens.update_one(
+            {"type": "user_token"},
+            {"$set": token_data},
+            upsert=True
+        )
+        
+        logger.info("YouTube OAuth tokens stored successfully")
+        
+        return {"success": True, "message": "YouTube conectado exitosamente"}
+        
+    except Exception as e:
+        logger.error(f"OAuth callback error: {e}")
+        raise HTTPException(status_code=400, detail=f"Error de autenticación: {str(e)}")
+
+
+async def get_youtube_service():
+    """Get authenticated YouTube service"""
+    token_doc = await db.youtube_tokens.find_one({"type": "user_token"})
+    
+    if not token_doc:
+        raise HTTPException(status_code=401, detail="YouTube no conectado")
+    
+    credentials = Credentials(
+        token=token_doc["token"],
+        refresh_token=token_doc.get("refresh_token"),
+        token_uri=token_doc.get("token_uri", "https://oauth2.googleapis.com/token"),
+        client_id=token_doc.get("client_id"),
+        client_secret=token_doc.get("client_secret"),
+        scopes=token_doc.get("scopes", [])
+    )
+    
+    # Refresh if expired
+    if credentials.expired and credentials.refresh_token:
+        from google.auth.transport.requests import Request
+        credentials.refresh(Request())
+        
+        # Update stored token
+        await db.youtube_tokens.update_one(
+            {"type": "user_token"},
+            {"$set": {
+                "token": credentials.token,
+                "expiry": credentials.expiry.isoformat() if credentials.expiry else None,
+                "updated_at": datetime.now(timezone.utc).isoformat()
+            }}
+        )
+    
+    return build('youtube', 'v3', credentials=credentials, cache_discovery=False)
+
+
+@api_router.post("/youtube/fetch-comments")
+async def youtube_fetch_comments(request: YouTubeFetchRequest):
+    """Fetch comments from YouTube channel videos within date range"""
+    try:
+        youtube = await get_youtube_service()
+        
+        # Parse dates
+        fecha_desde = datetime.fromisoformat(request.fecha_desde.replace('Z', '+00:00'))
+        fecha_hasta = datetime.fromisoformat(request.fecha_hasta.replace('Z', '+00:00'))
+        
+        # Add time to make it end of day
+        fecha_hasta = fecha_hasta.replace(hour=23, minute=59, second=59)
+        
+        logger.info(f"Fetching videos from {fecha_desde} to {fecha_hasta}")
+        
+        # Get authenticated user's channel
+        channels_response = youtube.channels().list(
+            part='id,snippet',
+            mine=True
+        ).execute()
+        
+        if not channels_response.get('items'):
+            raise HTTPException(status_code=404, detail="No se encontró tu canal de YouTube")
+        
+        channel_id = channels_response['items'][0]['id']
+        channel_title = channels_response['items'][0]['snippet']['title']
+        logger.info(f"Found channel: {channel_title} ({channel_id})")
+        
+        # Get videos from the channel within date range
+        videos = []
+        next_page_token = None
+        
+        while True:
+            search_response = youtube.search().list(
+                part='id,snippet',
+                channelId=channel_id,
+                type='video',
+                publishedAfter=fecha_desde.isoformat(),
+                publishedBefore=fecha_hasta.isoformat(),
+                maxResults=50,
+                pageToken=next_page_token,
+                order='date'
+            ).execute()
+            
+            for item in search_response.get('items', []):
+                videos.append({
+                    'id': item['id']['videoId'],
+                    'title': item['snippet']['title'],
+                    'published_at': item['snippet']['publishedAt']
+                })
+            
+            next_page_token = search_response.get('nextPageToken')
+            if not next_page_token:
+                break
+        
+        logger.info(f"Found {len(videos)} videos in date range")
+        
+        # Fetch comments for each video
+        all_comments = []
+        greetings_filtered = 0
+        stop_fetching = False
+        
+        for video in videos:
+            if stop_fetching:
+                break
+                
+            logger.info(f"Fetching comments for video: {video['title']}")
+            next_page_token = None
+            
+            while True:
+                if stop_fetching:
+                    break
+                    
+                try:
+                    comments_response = youtube.commentThreads().list(
+                        part='snippet',
+                        videoId=video['id'],
+                        maxResults=100,
+                        pageToken=next_page_token,
+                        order='time'
+                    ).execute()
+                    
+                    for item in comments_response.get('items', []):
+                        comment = item['snippet']['topLevelComment']['snippet']
+                        comment_id = item['id']
+                        
+                        # Check for cutoff point
+                        if request.ultimo_comentario_id:
+                            if comment_id == request.ultimo_comentario_id:
+                                logger.info(f"Found cutoff comment: {comment_id}")
+                                stop_fetching = True
+                                break
+                        
+                        username = comment.get('authorDisplayName', '')
+                        text = comment.get('textDisplay', '')
+                        
+                        # Filter greetings using existing function
+                        if is_greeting(text):
+                            greetings_filtered += 1
+                            continue
+                        
+                        all_comments.append({
+                            'comment_id': comment_id,
+                            'youtube_username': f"@{username.replace('@', '')}",
+                            'text': text,
+                            'video_id': video['id'],
+                            'video_title': video['title'],
+                            'published_at': comment.get('publishedAt'),
+                            'author_channel_id': comment.get('authorChannelId', {}).get('value')
+                        })
+                    
+                    next_page_token = comments_response.get('nextPageToken')
+                    if not next_page_token:
+                        break
+                        
+                except HttpError as e:
+                    if 'commentsDisabled' in str(e):
+                        logger.info(f"Comments disabled for video: {video['title']}")
+                        break
+                    raise
+        
+        logger.info(f"Total comments fetched: {len(all_comments)}, greetings filtered: {greetings_filtered}")
+        
+        # Save last import info if we have comments
+        if all_comments:
+            last_comment = all_comments[0]  # Most recent comment
+            await db.youtube_imports.insert_one({
+                "created_at": datetime.now(timezone.utc),
+                "fecha_desde": fecha_desde,
+                "fecha_hasta": fecha_hasta,
+                "videos_count": len(videos),
+                "comments_count": len(all_comments),
+                "greetings_filtered": greetings_filtered,
+                "last_comment_id": last_comment['comment_id'],
+                "last_comment_text": last_comment['text'][:100] if last_comment['text'] else "",
+                "channel_id": channel_id,
+                "channel_title": channel_title
+            })
+        
+        return {
+            "success": True,
+            "channel": channel_title,
+            "videos_count": len(videos),
+            "comments_count": len(all_comments),
+            "greetings_filtered": greetings_filtered,
+            "comments": all_comments,
+            "last_comment_id": all_comments[0]['comment_id'] if all_comments else None
+        }
+        
+    except HttpError as e:
+        logger.error(f"YouTube API error: {e}")
+        if 'quotaExceeded' in str(e):
+            raise HTTPException(status_code=429, detail="Cuota de API de YouTube excedida")
+        raise HTTPException(status_code=400, detail=f"Error de API de YouTube: {str(e)}")
+    except Exception as e:
+        logger.error(f"Error fetching comments: {e}")
+        raise HTTPException(status_code=500, detail=f"Error al obtener comentarios: {str(e)}")
+
+
+@api_router.delete("/youtube/disconnect")
+async def youtube_disconnect():
+    """Disconnect YouTube account"""
+    await db.youtube_tokens.delete_many({"type": "user_token"})
+    return {"success": True, "message": "YouTube desconectado"}
+
 
 # Include the router in the main app
 app.include_router(api_router)
