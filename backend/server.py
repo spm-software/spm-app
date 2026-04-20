@@ -2353,7 +2353,8 @@ async def youtube_get_auth_url(redirect_uri: str):
     flow = Flow.from_client_config(
         client_config,
         scopes=YOUTUBE_SCOPES,
-        redirect_uri=redirect_uri
+        redirect_uri=redirect_uri,
+        autogenerate_code_verifier=False
     )
     
     auth_url, state = flow.authorization_url(
@@ -2393,7 +2394,8 @@ async def youtube_oauth_callback(data: YouTubeAuthCallback):
         flow = Flow.from_client_config(
             client_config,
             scopes=YOUTUBE_SCOPES,
-            redirect_uri=data.redirect_uri
+            redirect_uri=data.redirect_uri,
+            autogenerate_code_verifier=False
         )
         
         flow.fetch_token(code=data.code)
