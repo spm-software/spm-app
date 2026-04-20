@@ -12,6 +12,7 @@ from datetime import datetime, timezone, timedelta
 import re
 import json
 import html
+from difflib import SequenceMatcher
 from bson import ObjectId
 import asyncio
 
@@ -164,6 +165,20 @@ class YouTubeFetchRequest(BaseModel):
     empezar_desde_ultimo: bool = False  # Usar anchor guardado como punto de corte
     texto_corte: Optional[str] = None  # Texto del último comentario ya procesado (match manual)
 
+class BlockedComment(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    youtube_username: str
+    texto_referencia: str
+    motivo: Optional[str] = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+class BlockedCommentCreate(BaseModel):
+    youtube_username: str
+    texto_referencia: str
+    motivo: Optional[str] = None
+
+
 # ==================== HELPER FUNCTIONS ====================
 
 def serialize_datetime(obj):
@@ -285,6 +300,50 @@ def clean_html_to_plain_text(text: str) -> str:
     text = re.sub(r'\n{3,}', '\n\n', text)
     
     return text.strip()
+
+
+def _normalize_username(u: str) -> str:
+    return (u or "").lstrip('@').strip().lower()
+
+
+def _normalize_for_similarity(s: str) -> str:
+    """Lowercase, collapse whitespace. HTML cleanup is done upstream."""
+    return re.sub(r'\s+', ' ', (s or "").strip().lower())
+
+
+async def is_blocked_comment(youtube_username: str, text: str, threshold: float = 0.80) -> Optional[Dict]:
+    """Return the matching blocked-comment doc if this comment should be auto-deleted, else None.
+    
+    Match requires BOTH:
+    - same youtube_username (after normalization: strip @, lowercase)
+    - text similarity >= threshold (SequenceMatcher ratio on normalized text)
+    """
+    user_norm = _normalize_username(youtube_username)
+    if not user_norm:
+        return None
+    
+    blocked_docs = await db.comentarios_bloqueados.find(
+        {},
+        {"_id": 0}
+    ).to_list(length=None)
+    
+    if not blocked_docs:
+        return None
+    
+    text_norm = _normalize_for_similarity(text)
+    if not text_norm:
+        return None
+    
+    for doc in blocked_docs:
+        if _normalize_username(doc.get("youtube_username")) != user_norm:
+            continue
+        ref_norm = _normalize_for_similarity(doc.get("texto_referencia", ""))
+        if not ref_norm:
+            continue
+        ratio = SequenceMatcher(None, ref_norm, text_norm).ratio()
+        if ratio >= threshold:
+            return {**doc, "similarity": round(ratio, 3)}
+    return None
 
 
 
@@ -1127,6 +1186,70 @@ async def delete_user_mapping(user_id: str):
         raise HTTPException(status_code=404, detail="Usuario no encontrado")
     return {"message": "Usuario eliminado"}
 
+
+# ----- COMENTARIOS BLOQUEADOS -----
+
+@api_router.get("/comentarios-bloqueados", response_model=List[BlockedComment])
+async def list_blocked_comments():
+    """List all blocked comments (users/texts that are auto-removed)."""
+    docs = await db.comentarios_bloqueados.find(
+        {},
+        {"_id": 0}
+    ).sort("created_at", -1).to_list(length=None)
+    return [BlockedComment(**d) for d in docs]
+
+
+@api_router.post("/comentarios-bloqueados", response_model=BlockedComment)
+async def create_blocked_comment(data: BlockedCommentCreate):
+    """Add a comment to the blocked list. Deletes any existing matching questions from DB."""
+    if not data.youtube_username.strip() or not data.texto_referencia.strip():
+        raise HTTPException(status_code=400, detail="youtube_username y texto_referencia son obligatorios")
+    
+    blocked = BlockedComment(
+        youtube_username=data.youtube_username.strip(),
+        texto_referencia=clean_html_to_plain_text(data.texto_referencia.strip()),
+        motivo=(data.motivo or "").strip() or None
+    )
+    doc = blocked.model_dump()
+    doc['created_at'] = serialize_datetime(doc['created_at'])
+    await db.comentarios_bloqueados.insert_one(doc)
+    
+    # Remove already-imported questions that match this new block rule
+    user_norm = _normalize_username(blocked.youtube_username)
+    existing = await db.questions.find(
+        {},
+        {"_id": 0, "id": 1, "youtube_username": 1, "original_text": 1, "corrected_text": 1}
+    ).to_list(length=None)
+    removed_ids: List[str] = []
+    for q in existing:
+        if _normalize_username(q.get("youtube_username", "")) != user_norm:
+            continue
+        q_text = (q.get("corrected_text") or q.get("original_text") or "").strip()
+        if not q_text:
+            continue
+        ratio = SequenceMatcher(
+            None,
+            _normalize_for_similarity(blocked.texto_referencia),
+            _normalize_for_similarity(q_text)
+        ).ratio()
+        if ratio >= 0.80:
+            removed_ids.append(q["id"])
+    if removed_ids:
+        await db.questions.delete_many({"id": {"$in": removed_ids}})
+        logger.info(f"[BlockedComment] new rule removed {len(removed_ids)} existing questions")
+    
+    return blocked
+
+
+@api_router.delete("/comentarios-bloqueados/{blocked_id}")
+async def delete_blocked_comment(blocked_id: str):
+    """Remove a comment from the blocked list (does not restore previously deleted questions)."""
+    result = await db.comentarios_bloqueados.delete_one({"id": blocked_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Entrada no encontrada")
+    return {"message": "Entrada eliminada de la lista negra"}
+
+
 # ----- QUESTIONS -----
 
 @api_router.get("/questions", response_model=List[Question])
@@ -1437,12 +1560,26 @@ async def run_clasificacion_background(task_id: str, batch_id: str):
         
         questions = await db.questions.find(
             {"import_batch_id": batch_id},
-            {"_id": 0, "id": 1, "original_text": 1, "corrected_text": 1}
+            {"_id": 0, "id": 1, "youtube_username": 1, "original_text": 1, "corrected_text": 1}
         ).to_list(length=None)
+        
+        # First, remove any questions that match the blocked list (same user + similar text)
+        blocked_removed = 0
+        remaining_questions = []
+        for q in questions:
+            text_for_check = (q.get("corrected_text") or q.get("original_text") or "").strip()
+            if text_for_check and await is_blocked_comment(q.get("youtube_username", ""), text_for_check):
+                await db.questions.delete_one({"id": q["id"]})
+                blocked_removed += 1
+                continue
+            remaining_questions.append(q)
+        
+        if blocked_removed:
+            logger.info(f"[Clasificar] removed {blocked_removed} blocked comments before classification")
         
         comentarios = [
             {"id": q["id"], "text": (q.get("corrected_text") or q.get("original_text") or "").strip()}
-            for q in questions
+            for q in remaining_questions
             if (q.get("corrected_text") or q.get("original_text") or "").strip()
         ]
         
@@ -3051,6 +3188,7 @@ async def youtube_import_comments(request: YouTubeImportCommentsRequest):
     
     imported_count = 0
     updated_count = 0
+    blocked_count = 0
     
     for c in request.comments:
         yt_id = c.get("comment_id")
@@ -3060,6 +3198,18 @@ async def youtube_import_comments(request: YouTubeImportCommentsRequest):
         text = clean_html_to_plain_text((c.get("text") or "").strip())
         username = c.get("youtube_username") or ""
         if not text or not username:
+            continue
+        
+        # Skip blocked comments entirely (same user + similar text)
+        blocked_match = await is_blocked_comment(username, text)
+        if blocked_match:
+            blocked_count += 1
+            logger.info(
+                f"[BlockedComment] Skipped import: user={username} yt_id={yt_id} "
+                f"similarity={blocked_match.get('similarity')} motivo={blocked_match.get('motivo')!r}"
+            )
+            # If it somehow already exists in DB (from a previous import), remove it
+            await db.questions.delete_one({"youtube_comment_id": yt_id})
             continue
         
         existing = await db.questions.find_one(
@@ -3109,14 +3259,15 @@ async def youtube_import_comments(request: YouTubeImportCommentsRequest):
         )
     
     logger.info(
-        f"[YouTube] import-comments: {imported_count} new, {updated_count} updated "
-        f"(batch_id={batch_id})"
+        f"[YouTube] import-comments: {imported_count} new, {updated_count} updated, "
+        f"{blocked_count} blocked (batch_id={batch_id})"
     )
     
     return {
         "batch_id": batch_id,
         "questions_imported": imported_count,
         "questions_updated": updated_count,
+        "blocked_count": blocked_count,
         "total": imported_count + updated_count
     }
 
@@ -3139,6 +3290,27 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.on_event("startup")
+async def seed_default_blocked_comments():
+    """Seed the blocked-comments collection with the default entry if not present."""
+    DEFAULT_BLOCKED = {
+        "youtube_username": "@allenvarelamontenegro9329",
+        "texto_referencia": "Saludos pastor Samuel Perez Millos Dios Soberano lo proteja y bendiga",
+        "motivo": "Comentario recurrente semanal"
+    }
+    try:
+        existing = await db.comentarios_bloqueados.find_one(
+            {"youtube_username": DEFAULT_BLOCKED["youtube_username"]}
+        )
+        if not existing:
+            doc = BlockedComment(**DEFAULT_BLOCKED).model_dump()
+            doc['created_at'] = serialize_datetime(doc['created_at'])
+            await db.comentarios_bloqueados.insert_one(doc)
+            logger.info(f"[BlockedComment] seeded default entry for {DEFAULT_BLOCKED['youtube_username']}")
+    except Exception as e:
+        logger.error(f"[BlockedComment] seed failed: {e}")
+
 
 @app.on_event("shutdown")
 async def shutdown_db_client():

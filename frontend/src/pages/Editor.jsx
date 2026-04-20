@@ -34,7 +34,8 @@ import {
   ArrowRight,
   Users,
   Sparkles,
-  Filter
+  Filter,
+  Ban
 } from "lucide-react";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -1073,6 +1074,29 @@ export default function Editor() {
     }
   };
 
+  const handleBlockUser = async (question) => {
+    const user = question.youtube_username || "";
+    if (!window.confirm(
+      `¿Bloquear a ${user}?\n\nSus comentarios similares se eliminarán automáticamente en esta y futuras importaciones.`
+    )) return;
+    
+    try {
+      const refText = question.corrected_text || question.original_text || "";
+      await axios.post(`${API}/comentarios-bloqueados`, {
+        youtube_username: user,
+        texto_referencia: refText,
+        motivo: "Bloqueado desde el editor"
+      });
+      await axios.delete(`${API}/questions/${question.id}`);
+      setQuestions(prev => prev.filter(q => q.id !== question.id));
+      toast.success(`${user} bloqueado — comentario eliminado`);
+      fetchBatches();
+    } catch (error) {
+      console.error("Error blocking user:", error);
+      toast.error("Error al bloquear");
+    }
+  };
+
   const validQuestions = questions.filter(q => !q.is_greeting && !q.is_duplicate);
 
   return (
@@ -1587,6 +1611,18 @@ export default function Editor() {
                   </Button>
                   
                   <div className="flex-1" />
+                  
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => handleBlockUser(question)}
+                    className="rounded-sm text-xs text-orange-600 hover:text-orange-700 hover:bg-orange-50"
+                    data-testid={`block-user-btn-${question.id}`}
+                    title="Añadir este usuario a la lista negra — sus comentarios similares se eliminarán siempre"
+                  >
+                    <Ban className="w-3.5 h-3.5" />
+                    <span className="ml-1.5 hidden sm:inline">Bloquear usuario</span>
+                  </Button>
                   
                   <Button
                     variant="ghost"

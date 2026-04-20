@@ -38,7 +38,8 @@ import {
   HardDrive,
   CheckCircle,
   LogOut,
-  Link2
+  Link2,
+  Ban
 } from "lucide-react";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -60,11 +61,14 @@ export default function Configuracion() {
   const [selectedCleanupDays, setSelectedCleanupDays] = useState("30");
   const [youtubeAuth, setYoutubeAuth] = useState({ authenticated: false, loading: true });
   const [connecting, setConnecting] = useState(false);
+  const [blockedComments, setBlockedComments] = useState([]);
+  const [blockedLoading, setBlockedLoading] = useState(false);
 
   useEffect(() => {
     fetchSettings();
     fetchCleanupStats();
     checkYoutubeAuth();
+    fetchBlockedComments();
 
     // Listen for popup messages
     const handleMessage = (event) => {
@@ -138,6 +142,29 @@ export default function Configuracion() {
       toast.success("Cuenta de YouTube desconectada");
     } catch (error) {
       toast.error("Error al desconectar");
+    }
+  };
+
+  const fetchBlockedComments = async () => {
+    setBlockedLoading(true);
+    try {
+      const res = await axios.get(`${API}/comentarios-bloqueados`);
+      setBlockedComments(res.data);
+    } catch (error) {
+      console.error("Error fetching blocked list:", error);
+    } finally {
+      setBlockedLoading(false);
+    }
+  };
+
+  const handleUnblock = async (id) => {
+    if (!window.confirm("¿Eliminar esta entrada de la lista negra?")) return;
+    try {
+      await axios.delete(`${API}/comentarios-bloqueados/${id}`);
+      setBlockedComments(prev => prev.filter(b => b.id !== id));
+      toast.success("Entrada eliminada");
+    } catch (error) {
+      toast.error("Error al eliminar entrada");
     }
   };
 
@@ -575,6 +602,63 @@ export default function Configuracion() {
             )}
           </Button>
         </div>
+
+        {/* Blocked Comments Section */}
+        <Card className="bg-card border border-border rounded-sm lg:col-span-2">
+          <CardHeader>
+            <CardTitle className="font-heading text-lg uppercase tracking-tight flex items-center gap-2">
+              <Ban className="w-5 h-5 text-orange-500" />
+              COMENTARIOS BLOQUEADOS
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              Comentarios recurrentes que se eliminan automáticamente durante la importación o clasificación.
+              La coincidencia requiere el mismo usuario y ≥80% de similitud en el texto.
+            </p>
+
+            {blockedLoading ? (
+              <div className="flex items-center justify-center py-8">
+                <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+              </div>
+            ) : blockedComments.length === 0 ? (
+              <p className="text-sm text-muted-foreground italic">La lista está vacía.</p>
+            ) : (
+              <div className="space-y-2" data-testid="blocked-list">
+                {blockedComments.map((b) => (
+                  <div
+                    key={b.id}
+                    className="flex items-start justify-between gap-4 p-3 bg-secondary/30 border border-border rounded-sm"
+                    data-testid={`blocked-entry-${b.id}`}
+                  >
+                    <div className="min-w-0 flex-1 space-y-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-mono text-sm font-medium">{b.youtube_username}</span>
+                        {b.motivo && (
+                          <span className="text-xs text-muted-foreground">· {b.motivo}</span>
+                        )}
+                      </div>
+                      <p className="text-xs text-muted-foreground italic line-clamp-2">
+                        "{b.texto_referencia.length > 180
+                          ? b.texto_referencia.slice(0, 180) + '…'
+                          : b.texto_referencia}"
+                      </p>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => handleUnblock(b.id)}
+                      className="rounded-sm text-xs text-destructive hover:text-destructive hover:bg-destructive/10 flex-shrink-0"
+                      data-testid={`unblock-btn-${b.id}`}
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
 
         {/* Backup Section */}
         <Card className="bg-card border border-primary/30 rounded-sm lg:col-span-2">
