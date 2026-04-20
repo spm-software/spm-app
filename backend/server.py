@@ -154,7 +154,7 @@ class YouTubeAuthCallback(BaseModel):
 class YouTubeFetchRequest(BaseModel):
     fecha_desde: str  # ISO date string
     fecha_hasta: str  # ISO date string
-    ultimo_comentario_id: Optional[str] = None  # Para punto de corte
+    empezar_desde_ultimo: bool = False  # Usar punto de corte guardado
 
 # ==================== HELPER FUNCTIONS ====================
 
@@ -2326,22 +2326,17 @@ async def youtube_auth_status():
         f"email={token_doc.get('account_email')} has_refresh={bool(token_doc.get('refresh_token'))}"
     )
     
-    # Get last import info
-    last_import = await db.youtube_imports.find_one(
-        {},
-        sort=[("created_at", -1)]
+    # Get last import anchor (raw, unmodified reference for next cutoff)
+    last_anchor = await db.youtube_last_imported.find_one(
+        {"type": "last_anchor"},
+        {"_id": 0}
     )
     
     return {
         "authenticated": True,
         "account_email": token_doc.get("account_email"),
         "channel_title": token_doc.get("channel_title"),
-        "last_import": {
-            "date": last_import.get("created_at") if last_import else None,
-            "last_comment_id": last_import.get("last_comment_id") if last_import else None,
-            "last_comment_text": last_import.get("last_comment_text") if last_import else None,
-            "comments_count": last_import.get("comments_count") if last_import else 0
-        } if last_import else None
+        "last_anchor": last_anchor  # None if no import yet
     }
 
 
@@ -2631,6 +2626,18 @@ async def youtube_fetch_comments(request: YouTubeFetchRequest):
         
         logger.info(f"Found {len(videos)} videos in date range")
         
+        # Resolve cutoff: if checkbox marked, use stored last comment id from most recent import
+        cutoff_comment_id = None
+        if request.empezar_desde_ultimo:
+            last_anchor = await db.youtube_last_imported.find_one(
+                {"type": "last_anchor"}
+            )
+            if last_anchor and last_anchor.get("comment_id"):
+                cutoff_comment_id = last_anchor["comment_id"]
+                logger.info(f"[YouTube] Using stored cutoff from last import: {cutoff_comment_id}")
+            else:
+                logger.info("[YouTube] empezar_desde_ultimo=True but no stored anchor found")
+        
         # Fetch comments for each video
         all_comments = []
         greetings_filtered = 0
@@ -2653,7 +2660,7 @@ async def youtube_fetch_comments(request: YouTubeFetchRequest):
                         videoId=video['id'],
                         maxResults=100,
                         pageToken=next_page_token,
-                        order='time'
+                        order='time'  # API only supports newest-first; we reverse later
                     ).execute()
                     
                     for item in comments_response.get('items', []):
@@ -2661,11 +2668,10 @@ async def youtube_fetch_comments(request: YouTubeFetchRequest):
                         comment_id = item['id']
                         
                         # Check for cutoff point
-                        if request.ultimo_comentario_id:
-                            if comment_id == request.ultimo_comentario_id:
-                                logger.info(f"Found cutoff comment: {comment_id}")
-                                stop_fetching = True
-                                break
+                        if cutoff_comment_id and comment_id == cutoff_comment_id:
+                            logger.info(f"Found cutoff comment: {comment_id}")
+                            stop_fetching = True
+                            break
                         
                         username = comment.get('authorDisplayName', '')
                         text = comment.get('textDisplay', '')
@@ -2678,6 +2684,7 @@ async def youtube_fetch_comments(request: YouTubeFetchRequest):
                         all_comments.append({
                             'comment_id': comment_id,
                             'youtube_username': f"@{username.replace('@', '')}",
+                            'raw_username': username,  # exact value from YouTube
                             'text': text,
                             'video_id': video['id'],
                             'video_title': video['title'],
@@ -2697,9 +2704,35 @@ async def youtube_fetch_comments(request: YouTubeFetchRequest):
         
         logger.info(f"Total comments fetched: {len(all_comments)}, greetings filtered: {greetings_filtered}")
         
-        # Save last import info if we have comments
+        # Save last-imported anchor (RAW, unmodified) and import history if we have comments
         if all_comments:
-            last_comment = all_comments[0]  # Most recent comment
+            # all_comments is newest-first (from YouTube API order='time').
+            # The newest = the anchor for next import.
+            newest_comment = all_comments[0]
+            
+            anchor_doc = {
+                "type": "last_anchor",
+                "comment_id": newest_comment['comment_id'],
+                "raw_text": newest_comment['text'],              # EXACT text from YouTube
+                "raw_username": newest_comment['raw_username'],  # EXACT username from YouTube
+                "comment_published_at": newest_comment['published_at'],  # EXACT date from YouTube
+                "imported_at": datetime.now(timezone.utc).isoformat(),
+                "video_id": newest_comment['video_id'],
+                "video_title": newest_comment['video_title']
+            }
+            
+            # Upsert single "last_anchor" document — overwrites previous on each import
+            await db.youtube_last_imported.update_one(
+                {"type": "last_anchor"},
+                {"$set": anchor_doc},
+                upsert=True
+            )
+            logger.info(
+                f"[YouTube] Saved last_anchor: id={anchor_doc['comment_id']} "
+                f"user={anchor_doc['raw_username']} date={anchor_doc['comment_published_at']}"
+            )
+            
+            # Also keep history log
             await db.youtube_imports.insert_one({
                 "created_at": datetime.now(timezone.utc),
                 "fecha_desde": fecha_desde,
@@ -2707,11 +2740,14 @@ async def youtube_fetch_comments(request: YouTubeFetchRequest):
                 "videos_count": len(videos),
                 "comments_count": len(all_comments),
                 "greetings_filtered": greetings_filtered,
-                "last_comment_id": last_comment['comment_id'],
-                "last_comment_text": last_comment['text'][:100] if last_comment['text'] else "",
+                "last_comment_id": newest_comment['comment_id'],
+                "last_comment_text": newest_comment['text'],
                 "channel_id": channel_id,
                 "channel_title": channel_title
             })
+        
+        # Reverse to oldest→newest for the caller (UI/import pipeline)
+        all_comments.reverse()
         
         return {
             "success": True,
@@ -2720,7 +2756,7 @@ async def youtube_fetch_comments(request: YouTubeFetchRequest):
             "comments_count": len(all_comments),
             "greetings_filtered": greetings_filtered,
             "comments": all_comments,
-            "last_comment_id": all_comments[0]['comment_id'] if all_comments else None
+            "last_comment_id": all_comments[-1]['comment_id'] if all_comments else None
         }
         
     except HttpError as e:

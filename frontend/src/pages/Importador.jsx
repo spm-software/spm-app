@@ -8,15 +8,15 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Checkbox } from "@/components/ui/checkbox";
 import { 
   Upload, 
   CheckCircle, 
   Loader2, 
   Youtube,
-  Calendar,
   Link2,
   Download,
-  AlertTriangle
+  History
 } from "lucide-react";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -31,7 +31,7 @@ export default function Importador() {
   const [youtubeAuth, setYoutubeAuth] = useState({ authenticated: false, loading: true });
   const [fechaDesde, setFechaDesde] = useState("");
   const [fechaHasta, setFechaHasta] = useState("");
-  const [ultimoComentarioId, setUltimoComentarioId] = useState("");
+  const [empezarDesdeUltimo, setEmpezarDesdeUltimo] = useState(false);
   const [fetchingComments, setFetchingComments] = useState(false);
   const [fetchProgress, setFetchProgress] = useState(0);
   const [youtubeResult, setYoutubeResult] = useState(null);
@@ -49,9 +49,9 @@ export default function Importador() {
         loading: false 
       });
       
-      // Pre-fill last comment if available
-      if (response.data.last_import?.last_comment_id) {
-        setUltimoComentarioId(response.data.last_import.last_comment_id);
+      // If there's a saved anchor, default checkbox to true
+      if (response.data.last_anchor?.comment_id) {
+        setEmpezarDesdeUltimo(true);
       }
       
       // Set default dates
@@ -84,7 +84,7 @@ export default function Importador() {
       const response = await axios.post(`${API}/youtube/fetch-comments`, {
         fecha_desde: fechaDesde,
         fecha_hasta: fechaHasta,
-        ultimo_comentario_id: ultimoComentarioId || null
+        empezar_desde_ultimo: empezarDesdeUltimo
       });
       
       setFetchProgress(70);
@@ -96,7 +96,7 @@ export default function Importador() {
         return;
       }
       
-      // Now import the comments
+      // Now import the comments (already in ascending order: oldest→newest)
       const commentsText = response.data.comments.map(c => 
         `${c.youtube_username} ${c.text}`
       ).join('\n\n');
@@ -114,10 +114,8 @@ export default function Importador() {
         imported: importResponse.data
       });
       
-      // Update last comment for next time
-      if (response.data.last_comment_id) {
-        setUltimoComentarioId(response.data.last_comment_id);
-      }
+      // Refresh auth/anchor info so the aviso shows the new last comment
+      await checkYoutubeAuth();
       
       toast.success(`${importResponse.data.questions_imported} preguntas importadas de YouTube`);
       
@@ -268,25 +266,62 @@ Pedro López - Gracias por el contenido! Mi pregunta es: ¿Cuánto tiempo tarda 
                         </div>
                       </div>
 
-                      {/* Cutoff Point */}
-                      <div className="space-y-2">
-                        <Label htmlFor="ultimo-comentario" className="text-xs uppercase tracking-wide flex items-center gap-2">
-                          <Link2 className="w-3 h-3" />
-                          Hasta este comentario (opcional)
-                        </Label>
-                        <Input
-                          id="ultimo-comentario"
-                          type="text"
-                          value={ultimoComentarioId}
-                          onChange={(e) => setUltimoComentarioId(e.target.value)}
-                          placeholder="ID del último comentario importado"
-                          className="rounded-sm font-mono text-xs"
-                          data-testid="ultimo-comentario-input"
-                        />
-                        <p className="text-xs text-muted-foreground">
-                          La descarga se detendrá al llegar a este comentario. Se guarda automáticamente de la última importación.
-                        </p>
+                      {/* Cutoff Checkbox */}
+                      <div className="space-y-3">
+                        <div className="flex items-start gap-3">
+                          <Checkbox
+                            id="empezar-desde-ultimo"
+                            checked={empezarDesdeUltimo}
+                            onCheckedChange={(v) => setEmpezarDesdeUltimo(!!v)}
+                            disabled={!youtubeAuth.last_anchor?.comment_id}
+                            className="mt-0.5"
+                            data-testid="empezar-desde-ultimo-checkbox"
+                          />
+                          <Label
+                            htmlFor="empezar-desde-ultimo"
+                            className={`text-sm cursor-pointer leading-snug ${!youtubeAuth.last_anchor?.comment_id ? 'text-muted-foreground' : ''}`}
+                          >
+                            Empezar desde el último comentario importado
+                            {!youtubeAuth.last_anchor?.comment_id && (
+                              <span className="block text-xs text-muted-foreground font-normal">
+                                (no hay importaciones previas)
+                              </span>
+                            )}
+                          </Label>
+                        </div>
                       </div>
+
+                      {/* Last Import Notice */}
+                      {youtubeAuth.last_anchor && (
+                        <div className="p-4 bg-secondary/40 border border-border rounded-sm space-y-2" data-testid="last-import-notice">
+                          <div className="flex items-center gap-2 text-xs uppercase tracking-wide text-muted-foreground">
+                            <History className="w-3 h-3" />
+                            <span>
+                              Última importación:{' '}
+                              <span className="text-foreground font-medium">
+                                {new Date(youtubeAuth.last_anchor.imported_at).toLocaleString('es-ES', {
+                                  day: '2-digit', month: '2-digit', year: 'numeric',
+                                  hour: '2-digit', minute: '2-digit'
+                                })}
+                              </span>
+                            </span>
+                          </div>
+                          <p className="text-sm leading-relaxed">
+                            <span className="text-muted-foreground">Último comentario importado: </span>
+                            <span className="italic">"{youtubeAuth.last_anchor.raw_text?.length > 140
+                              ? youtubeAuth.last_anchor.raw_text.slice(0, 140) + '…'
+                              : youtubeAuth.last_anchor.raw_text}"</span>
+                            <span className="text-muted-foreground"> de </span>
+                            <span className="font-medium">{youtubeAuth.last_anchor.raw_username}</span>
+                            <span className="text-muted-foreground">
+                              {' '}({new Date(youtubeAuth.last_anchor.comment_published_at).toLocaleString('es-ES', {
+                                day: '2-digit', month: '2-digit', year: 'numeric',
+                                hour: '2-digit', minute: '2-digit'
+                              })})
+                            </span>
+                          </p>
+                        </div>
+                      )}
 
                       {/* Progress Bar */}
                       {fetchProgress > 0 && (
@@ -320,22 +355,6 @@ Pedro López - Gracias por el contenido! Mi pregunta es: ¿Cuánto tiempo tarda 
                           </>
                         )}
                       </Button>
-
-                      {/* Last Import Info */}
-                      {youtubeAuth.last_import && (
-                        <div className="p-4 bg-secondary/30 rounded-sm text-xs space-y-1">
-                          <p className="font-medium">Última importación:</p>
-                          <p className="text-muted-foreground">
-                            {youtubeAuth.last_import.comments_count} comentarios · 
-                            {new Date(youtubeAuth.last_import.date).toLocaleDateString('es-ES')}
-                          </p>
-                          {youtubeAuth.last_import.last_comment_text && (
-                            <p className="text-muted-foreground truncate">
-                              Último: "{youtubeAuth.last_import.last_comment_text}..."
-                            </p>
-                          )}
-                        </div>
-                      )}
                     </div>
                   )}
                 </CardContent>
