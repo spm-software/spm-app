@@ -2574,7 +2574,20 @@ async def youtube_fetch_comments(request: YouTubeFetchRequest):
         # Add time to make it end of day
         fecha_hasta = fecha_hasta.replace(hour=23, minute=59, second=59)
         
-        logger.info(f"Fetching videos from {fecha_desde} to {fecha_hasta}")
+        # Ensure UTC-aware, then format as RFC 3339 with Z suffix for YouTube API
+        if fecha_desde.tzinfo is None:
+            fecha_desde = fecha_desde.replace(tzinfo=timezone.utc)
+        else:
+            fecha_desde = fecha_desde.astimezone(timezone.utc)
+        if fecha_hasta.tzinfo is None:
+            fecha_hasta = fecha_hasta.replace(tzinfo=timezone.utc)
+        else:
+            fecha_hasta = fecha_hasta.astimezone(timezone.utc)
+        
+        published_after = fecha_desde.strftime('%Y-%m-%dT%H:%M:%SZ')
+        published_before = fecha_hasta.strftime('%Y-%m-%dT%H:%M:%SZ')
+        
+        logger.info(f"[YouTube] Fetching videos publishedAfter={published_after} publishedBefore={published_before}")
         
         # Get authenticated user's channel
         channels_response = youtube.channels().list(
@@ -2598,8 +2611,8 @@ async def youtube_fetch_comments(request: YouTubeFetchRequest):
                 part='id,snippet',
                 channelId=channel_id,
                 type='video',
-                publishedAfter=fecha_desde.isoformat(),
-                publishedBefore=fecha_hasta.isoformat(),
+                publishedAfter=published_after,
+                publishedBefore=published_before,
                 maxResults=50,
                 pageToken=next_page_token,
                 order='date'
