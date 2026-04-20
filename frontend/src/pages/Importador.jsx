@@ -8,7 +8,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Checkbox } from "@/components/ui/checkbox";
 import { 
   Upload, 
   CheckCircle, 
@@ -31,7 +30,8 @@ export default function Importador() {
   const [youtubeAuth, setYoutubeAuth] = useState({ authenticated: false, loading: true });
   const [fechaDesde, setFechaDesde] = useState("");
   const [fechaHasta, setFechaHasta] = useState("");
-  const [empezarDesdeUltimo, setEmpezarDesdeUltimo] = useState(false);
+  const [manualCutoffText, setManualCutoffText] = useState("");
+  const [usingManualCutoff, setUsingManualCutoff] = useState(false);
   const [fetchingComments, setFetchingComments] = useState(false);
   const [fetchProgress, setFetchProgress] = useState(0);
   const [youtubeResult, setYoutubeResult] = useState(null);
@@ -49,10 +49,14 @@ export default function Importador() {
         loading: false 
       });
       
-      // If there's a saved anchor, default checkbox to true
-      if (response.data.last_anchor?.comment_id) {
-        setEmpezarDesdeUltimo(true);
+      // If no anchor (first time), we're always in "manual cutoff" mode (empty field = full range)
+      // If anchor exists, we default to using it and expose a "Cambiar" link
+      if (!response.data.last_anchor?.comment_id) {
+        setUsingManualCutoff(true);
+      } else {
+        setUsingManualCutoff(false);
       }
+      setManualCutoffText("");
       
       // Set default dates
       const today = new Date();
@@ -81,11 +85,24 @@ export default function Importador() {
     try {
       setFetchProgress(30);
       
-      const response = await axios.post(`${API}/youtube/fetch-comments`, {
+      // Determine cutoff to send:
+      // - Manual text input (first time OR user clicked "Cambiar"): send texto_corte
+      // - Otherwise, if anchor exists: use stored anchor automatically
+      // - Otherwise: no cutoff (full range)
+      const hasAnchor = !!youtubeAuth.last_anchor?.comment_id;
+      const manualText = manualCutoffText.trim();
+      const payload = {
         fecha_desde: fechaDesde,
-        fecha_hasta: fechaHasta,
-        empezar_desde_ultimo: empezarDesdeUltimo
-      });
+        fecha_hasta: fechaHasta
+      };
+      if (usingManualCutoff) {
+        if (manualText) payload.texto_corte = manualText;
+        // else: no cutoff, full range
+      } else if (hasAnchor) {
+        payload.empezar_desde_ultimo = true;
+      }
+      
+      const response = await axios.post(`${API}/youtube/fetch-comments`, payload);
       
       setFetchProgress(70);
       
@@ -266,59 +283,73 @@ Pedro López - Gracias por el contenido! Mi pregunta es: ¿Cuánto tiempo tarda 
                         </div>
                       </div>
 
-                      {/* Cutoff Checkbox */}
-                      <div className="space-y-3">
-                        <div className="flex items-start gap-3">
-                          <Checkbox
-                            id="empezar-desde-ultimo"
-                            checked={empezarDesdeUltimo}
-                            onCheckedChange={(v) => setEmpezarDesdeUltimo(!!v)}
-                            disabled={!youtubeAuth.last_anchor?.comment_id}
-                            className="mt-0.5"
-                            data-testid="empezar-desde-ultimo-checkbox"
-                          />
-                          <Label
-                            htmlFor="empezar-desde-ultimo"
-                            className={`text-sm cursor-pointer leading-snug ${!youtubeAuth.last_anchor?.comment_id ? 'text-muted-foreground' : ''}`}
-                          >
-                            Empezar desde el último comentario importado
-                            {!youtubeAuth.last_anchor?.comment_id && (
-                              <span className="block text-xs text-muted-foreground font-normal">
-                                (no hay importaciones previas)
-                              </span>
-                            )}
-                          </Label>
-                        </div>
-                      </div>
-
-                      {/* Last Import Notice */}
-                      {youtubeAuth.last_anchor && (
-                        <div className="p-4 bg-secondary/40 border border-border rounded-sm space-y-2" data-testid="last-import-notice">
-                          <div className="flex items-center gap-2 text-xs uppercase tracking-wide text-muted-foreground">
-                            <History className="w-3 h-3" />
-                            <span>
-                              Última importación:{' '}
-                              <span className="text-foreground font-medium">
-                                {new Date(youtubeAuth.last_anchor.imported_at).toLocaleString('es-ES', {
-                                  day: '2-digit', month: '2-digit', year: 'numeric',
-                                  hour: '2-digit', minute: '2-digit'
-                                })}
-                              </span>
-                            </span>
+                      {/* Cutoff Section */}
+                      {youtubeAuth.last_anchor?.comment_id && !usingManualCutoff ? (
+                        /* Subsequent imports: auto-use stored anchor */
+                        <div className="p-4 bg-secondary/40 border border-border rounded-sm space-y-2" data-testid="auto-cutoff-info">
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-2 text-xs uppercase tracking-wide text-muted-foreground">
+                              <History className="w-3 h-3" />
+                              <span>Punto de corte automático</span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setUsingManualCutoff(true);
+                                setManualCutoffText("");
+                              }}
+                              className="text-xs text-primary hover:underline"
+                              data-testid="change-cutoff-link"
+                            >
+                              Cambiar
+                            </button>
                           </div>
                           <p className="text-sm leading-relaxed">
-                            <span className="text-muted-foreground">Último comentario importado: </span>
+                            <span className="text-muted-foreground">Empezando desde: </span>
                             <span className="italic">"{youtubeAuth.last_anchor.raw_text?.length > 140
                               ? youtubeAuth.last_anchor.raw_text.slice(0, 140) + '…'
                               : youtubeAuth.last_anchor.raw_text}"</span>
-                            <span className="text-muted-foreground"> de </span>
-                            <span className="font-medium">{youtubeAuth.last_anchor.raw_username}</span>
+                            <span className="text-muted-foreground"> ({youtubeAuth.last_anchor.raw_username}, </span>
                             <span className="text-muted-foreground">
-                              {' '}({new Date(youtubeAuth.last_anchor.comment_published_at).toLocaleString('es-ES', {
+                              {new Date(youtubeAuth.last_anchor.comment_published_at).toLocaleString('es-ES', {
                                 day: '2-digit', month: '2-digit', year: 'numeric',
                                 hour: '2-digit', minute: '2-digit'
                               })})
                             </span>
+                          </p>
+                        </div>
+                      ) : (
+                        /* First time OR user clicked "Cambiar": manual text input */
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between">
+                            <Label htmlFor="texto-corte" className="text-xs uppercase tracking-wide flex items-center gap-2">
+                              <Link2 className="w-3 h-3" />
+                              Texto del último comentario ya procesado (opcional)
+                            </Label>
+                            {youtubeAuth.last_anchor?.comment_id && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setUsingManualCutoff(false);
+                                  setManualCutoffText("");
+                                }}
+                                className="text-xs text-muted-foreground hover:text-foreground"
+                                data-testid="use-anchor-link"
+                              >
+                                Usar guardado
+                              </button>
+                            )}
+                          </div>
+                          <Textarea
+                            id="texto-corte"
+                            value={manualCutoffText}
+                            onChange={(e) => setManualCutoffText(e.target.value)}
+                            placeholder="Pega aquí el texto exacto del último comentario que ya procesaste. Si lo dejas vacío, se descargará todo el rango de fechas."
+                            className="rounded-sm text-sm min-h-[80px] resize-none"
+                            data-testid="texto-corte-input"
+                          />
+                          <p className="text-xs text-muted-foreground">
+                            La descarga se detendrá al encontrar ese comentario. Déjalo vacío para descargar todo el rango.
                           </p>
                         </div>
                       )}

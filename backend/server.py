@@ -154,7 +154,8 @@ class YouTubeAuthCallback(BaseModel):
 class YouTubeFetchRequest(BaseModel):
     fecha_desde: str  # ISO date string
     fecha_hasta: str  # ISO date string
-    empezar_desde_ultimo: bool = False  # Usar punto de corte guardado
+    empezar_desde_ultimo: bool = False  # Usar anchor guardado como punto de corte
+    texto_corte: Optional[str] = None  # Texto del último comentario ya procesado (match manual)
 
 # ==================== HELPER FUNCTIONS ====================
 
@@ -2626,17 +2627,30 @@ async def youtube_fetch_comments(request: YouTubeFetchRequest):
         
         logger.info(f"Found {len(videos)} videos in date range")
         
-        # Resolve cutoff: if checkbox marked, use stored last comment id from most recent import
+        # Resolve cutoff: anchor id (checkbox default) OR manual text match OR none
         cutoff_comment_id = None
+        cutoff_text_normalized = None
+        
+        def _normalize_for_match(s: str) -> str:
+            if not s:
+                return ""
+            # strip HTML tags, collapse whitespace, lowercase
+            stripped = re.sub(r'<[^>]+>', ' ', s)
+            stripped = re.sub(r'\s+', ' ', stripped).strip().lower()
+            return stripped
+        
         if request.empezar_desde_ultimo:
             last_anchor = await db.youtube_last_imported.find_one(
                 {"type": "last_anchor"}
             )
             if last_anchor and last_anchor.get("comment_id"):
                 cutoff_comment_id = last_anchor["comment_id"]
-                logger.info(f"[YouTube] Using stored cutoff from last import: {cutoff_comment_id}")
+                logger.info(f"[YouTube] Using stored anchor as cutoff: {cutoff_comment_id}")
             else:
                 logger.info("[YouTube] empezar_desde_ultimo=True but no stored anchor found")
+        elif request.texto_corte and request.texto_corte.strip():
+            cutoff_text_normalized = _normalize_for_match(request.texto_corte)
+            logger.info(f"[YouTube] Using manual text cutoff (normalized len={len(cutoff_text_normalized)})")
         
         # Fetch comments for each video
         all_comments = []
@@ -2667,14 +2681,23 @@ async def youtube_fetch_comments(request: YouTubeFetchRequest):
                         comment = item['snippet']['topLevelComment']['snippet']
                         comment_id = item['id']
                         
-                        # Check for cutoff point
+                        username = comment.get('authorDisplayName', '')
+                        text = comment.get('textDisplay', '')
+                        
+                        # Cutoff by stored anchor id
                         if cutoff_comment_id and comment_id == cutoff_comment_id:
-                            logger.info(f"Found cutoff comment: {comment_id}")
+                            logger.info(f"[YouTube] Found cutoff by anchor id: {comment_id}")
                             stop_fetching = True
                             break
                         
-                        username = comment.get('authorDisplayName', '')
-                        text = comment.get('textDisplay', '')
+                        # Cutoff by manual text match (exact or substring after normalize)
+                        if cutoff_text_normalized:
+                            normalized_comment = _normalize_for_match(text)
+                            if (normalized_comment == cutoff_text_normalized or
+                                (len(cutoff_text_normalized) >= 10 and cutoff_text_normalized in normalized_comment)):
+                                logger.info(f"[YouTube] Found cutoff by text match: {comment_id}")
+                                stop_fetching = True
+                                break
                         
                         # Filter greetings using existing function
                         if is_greeting(text):
