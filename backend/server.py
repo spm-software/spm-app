@@ -2293,22 +2293,38 @@ async def youtube_auth_status():
     token_doc = await db.youtube_tokens.find_one({"type": "user_token"})
     
     if not token_doc:
+        logger.info("[YouTube OAuth] auth-status: no token doc in DB")
         return {"authenticated": False, "message": "No token found"}
     
-    # Check if token is expired
+    # Check if token is expired (robust against naive datetimes from legacy docs)
     expiry = token_doc.get("expiry")
+    is_expired = False
     if expiry:
-        expiry_dt = datetime.fromisoformat(expiry) if isinstance(expiry, str) else expiry
-        if expiry_dt < datetime.now(timezone.utc):
-            # Token expired, try to refresh
-            if token_doc.get("refresh_token"):
-                return {
-                    "authenticated": True, 
-                    "needs_refresh": True,
-                    "account_email": token_doc.get("account_email"),
-                    "channel_title": token_doc.get("channel_title")
-                }
-            return {"authenticated": False, "message": "Token expired"}
+        try:
+            expiry_dt = datetime.fromisoformat(expiry) if isinstance(expiry, str) else expiry
+            if expiry_dt.tzinfo is None:
+                expiry_dt = expiry_dt.replace(tzinfo=timezone.utc)
+            is_expired = expiry_dt < datetime.now(timezone.utc)
+        except Exception as e:
+            logger.warning(f"[YouTube OAuth] auth-status: could not parse expiry={expiry!r}: {e}")
+            is_expired = False
+    
+    if is_expired:
+        if token_doc.get("refresh_token"):
+            logger.info("[YouTube OAuth] auth-status: token expired but has refresh_token -> still authenticated")
+            return {
+                "authenticated": True,
+                "needs_refresh": True,
+                "account_email": token_doc.get("account_email"),
+                "channel_title": token_doc.get("channel_title")
+            }
+        logger.info("[YouTube OAuth] auth-status: token expired and NO refresh_token -> authenticated=False")
+        return {"authenticated": False, "message": "Token expired"}
+    
+    logger.info(
+        f"[YouTube OAuth] auth-status: authenticated=True channel={token_doc.get('channel_title')} "
+        f"email={token_doc.get('account_email')} has_refresh={bool(token_doc.get('refresh_token'))}"
+    )
     
     # Get last import info
     last_import = await db.youtube_imports.find_one(
@@ -2359,8 +2375,11 @@ async def youtube_get_auth_url(redirect_uri: str):
     
     auth_url, state = flow.authorization_url(
         access_type='offline',
-        prompt='select_account'
+        prompt='consent select_account',
+        include_granted_scopes='true'
     )
+    
+    logger.info(f"[YouTube OAuth] Generated auth URL with redirect_uri={redirect_uri}, state={state}")
     
     # Store state for later verification
     await db.youtube_oauth_states.insert_one({
@@ -2427,6 +2446,15 @@ async def youtube_oauth_callback(data: YouTubeAuthCallback):
         except Exception as e:
             logger.warning(f"Could not get email from token: {e}")
         
+        # Normalize expiry to UTC-aware ISO string.
+        # google-auth returns credentials.expiry as naive UTC datetime.
+        expiry_iso = None
+        if credentials.expiry:
+            exp = credentials.expiry
+            if exp.tzinfo is None:
+                exp = exp.replace(tzinfo=timezone.utc)
+            expiry_iso = exp.isoformat()
+        
         # Store tokens in MongoDB
         token_data = {
             "type": "user_token",
@@ -2436,7 +2464,7 @@ async def youtube_oauth_callback(data: YouTubeAuthCallback):
             "client_id": credentials.client_id,
             "client_secret": credentials.client_secret,
             "scopes": list(credentials.scopes) if credentials.scopes else [],
-            "expiry": credentials.expiry.isoformat() if credentials.expiry else None,
+            "expiry": expiry_iso,
             "account_email": account_email,
             "channel_title": channel_title,
             "updated_at": datetime.now(timezone.utc).isoformat()
@@ -2449,7 +2477,10 @@ async def youtube_oauth_callback(data: YouTubeAuthCallback):
             upsert=True
         )
         
-        logger.info(f"YouTube OAuth tokens stored for channel: {channel_title} ({account_email})")
+        logger.info(
+            f"[YouTube OAuth] Token stored. channel={channel_title} email={account_email} "
+            f"has_refresh_token={bool(credentials.refresh_token)} expiry={expiry_iso}"
+        )
         
         return {
             "success": True, 
@@ -2468,7 +2499,26 @@ async def get_youtube_service():
     token_doc = await db.youtube_tokens.find_one({"type": "user_token"})
     
     if not token_doc:
+        logger.warning("[YouTube OAuth] get_youtube_service: no token doc in DB")
         raise HTTPException(status_code=401, detail="YouTube no conectado")
+    
+    logger.info(
+        f"[YouTube OAuth] get_youtube_service: loaded token "
+        f"channel={token_doc.get('channel_title')} has_refresh={bool(token_doc.get('refresh_token'))}"
+    )
+    
+    # Parse expiry robustly (support both naive legacy and aware)
+    expiry_dt = None
+    expiry_raw = token_doc.get("expiry")
+    if expiry_raw:
+        try:
+            expiry_dt = datetime.fromisoformat(expiry_raw) if isinstance(expiry_raw, str) else expiry_raw
+            # google-auth Credentials expects a naive UTC datetime for expiry
+            if expiry_dt.tzinfo is not None:
+                expiry_dt = expiry_dt.astimezone(timezone.utc).replace(tzinfo=None)
+        except Exception as e:
+            logger.warning(f"[YouTube OAuth] could not parse stored expiry={expiry_raw!r}: {e}")
+            expiry_dt = None
     
     credentials = Credentials(
         token=token_doc["token"],
@@ -2476,23 +2526,37 @@ async def get_youtube_service():
         token_uri=token_doc.get("token_uri", "https://oauth2.googleapis.com/token"),
         client_id=token_doc.get("client_id"),
         client_secret=token_doc.get("client_secret"),
-        scopes=token_doc.get("scopes", [])
+        scopes=token_doc.get("scopes", []),
+        expiry=expiry_dt,
     )
     
     # Refresh if expired
-    if credentials.expired and credentials.refresh_token:
+    if credentials.expired:
+        if not credentials.refresh_token:
+            logger.warning("[YouTube OAuth] token expired and NO refresh_token stored -> need reconnect")
+            raise HTTPException(
+                status_code=401,
+                detail="Token de YouTube expirado y sin refresh_token. Vuelve a conectar la cuenta en Configuración."
+            )
         from google.auth.transport.requests import Request
+        logger.info("[YouTube OAuth] token expired, refreshing...")
         credentials.refresh(Request())
+        
+        new_expiry_iso = None
+        if credentials.expiry:
+            exp = credentials.expiry if credentials.expiry.tzinfo else credentials.expiry.replace(tzinfo=timezone.utc)
+            new_expiry_iso = exp.isoformat()
         
         # Update stored token
         await db.youtube_tokens.update_one(
             {"type": "user_token"},
             {"$set": {
                 "token": credentials.token,
-                "expiry": credentials.expiry.isoformat() if credentials.expiry else None,
+                "expiry": new_expiry_iso,
                 "updated_at": datetime.now(timezone.utc).isoformat()
             }}
         )
+        logger.info(f"[YouTube OAuth] token refreshed, new expiry={new_expiry_iso}")
     
     return build('youtube', 'v3', credentials=credentials, cache_discovery=False)
 
