@@ -1106,44 +1106,42 @@ export default function Editor() {
 
       {/* Actions Bar */}
       <div className="flex flex-wrap items-center gap-4 mb-8 p-5 bg-card border border-border rounded-sm">
+        {/* 1. Clasificar con IA */}
         <Button
-          onClick={handleCorrectAll}
-          disabled={correcting || questions.length === 0}
+          variant="outline"
+          onClick={handleClasificarIA}
+          disabled={clasifying || questions.length === 0}
           size="lg"
-          className="rounded-sm uppercase tracking-wide text-xs min-w-[200px]"
-          data-testid="correct-all-button"
+          className="rounded-sm uppercase tracking-wide text-xs"
+          data-testid="clasificar-ia-button"
         >
-          {correcting ? (
-            <>
-              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-              {correctingProgress.total > 0 
-                ? `Corrigiendo ${correctingProgress.current}/${correctingProgress.total}...`
-                : "Iniciando..."
-              }
-            </>
+          {clasifying ? (
+            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
           ) : (
-            <>
-              <Wand2 className="w-4 h-4 mr-2" />
-              Corregir todo con IA
-            </>
+            <Filter className="w-4 h-4 mr-2" />
           )}
+          {clasifying && clasifyProgress.total > 0
+            ? `Clasificando ${clasifyProgress.percentage}%`
+            : "Clasificar con IA"}
         </Button>
-        
-        {/* Progress bar */}
-        {correcting && correctingProgress.total > 0 && (
-          <div className="flex-1 max-w-xs">
+
+        {/* AI Classification Progress */}
+        {clasifying && clasifyProgress.total > 0 && (
+          <div className="flex-1 max-w-sm" data-testid="clasif-progress">
             <div className="h-2 bg-secondary rounded-full overflow-hidden">
               <div 
                 className="h-full bg-primary transition-all duration-300"
-                style={{ width: `${(correctingProgress.current / correctingProgress.total) * 100}%` }}
+                style={{ width: `${clasifyProgress.percentage}%` }}
               />
             </div>
-            <p className="text-xs text-muted-foreground mt-1">
-              {Math.round((correctingProgress.current / correctingProgress.total) * 100)}% completado
-            </p>
+            <div className="flex justify-between text-xs text-muted-foreground mt-1">
+              <span>{clasifyProgress.current}/{clasifyProgress.total} comentarios</span>
+              <span className="text-primary font-medium">{clasifyProgress.percentage}%</span>
+            </div>
           </div>
         )}
-        
+
+        {/* 2. Duplicados (rápido) */}
         <Button
           variant="outline"
           onClick={handleCheckDuplicates}
@@ -1160,6 +1158,7 @@ export default function Editor() {
           Duplicados (rápido)
         </Button>
 
+        {/* 3. Buscar con IA (+ selector de modelo) */}
         <div className="flex items-center gap-2">
           <Select value={aiModel} onValueChange={setAiModel} disabled={checkingDuplicates}>
             <SelectTrigger className="w-[180px] h-10 rounded-sm text-xs">
@@ -1224,51 +1223,46 @@ export default function Editor() {
           </Button>
         )}
 
+        {/* 4. Corregir todo con IA */}
         <Button
-          variant="outline"
-          onClick={() => setShowSearchModal(true)}
+          onClick={handleCorrectAll}
+          disabled={correcting || questions.length === 0}
           size="lg"
-          className="rounded-sm uppercase tracking-wide text-xs"
-          data-testid="search-all-button"
+          className="rounded-sm uppercase tracking-wide text-xs min-w-[200px]"
+          data-testid="correct-all-button"
         >
-          <Search className="w-4 h-4 mr-2" />
-          Buscar en todo
-        </Button>
-
-        <Button
-          variant="outline"
-          onClick={handleClasificarIA}
-          disabled={clasifying || questions.length === 0}
-          size="lg"
-          className="rounded-sm uppercase tracking-wide text-xs"
-          data-testid="clasificar-ia-button"
-        >
-          {clasifying ? (
-            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+          {correcting ? (
+            <>
+              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+              {correctingProgress.total > 0 
+                ? `Corrigiendo ${correctingProgress.current}/${correctingProgress.total}...`
+                : "Iniciando..."
+              }
+            </>
           ) : (
-            <Filter className="w-4 h-4 mr-2" />
+            <>
+              <Wand2 className="w-4 h-4 mr-2" />
+              Corregir todo con IA
+            </>
           )}
-          {clasifying && clasifyProgress.total > 0
-            ? `Clasificando ${clasifyProgress.percentage}%`
-            : "Clasificar con IA"}
         </Button>
-
-        {/* AI Classification Progress */}
-        {clasifying && clasifyProgress.total > 0 && (
-          <div className="flex-1 max-w-sm" data-testid="clasif-progress">
+        
+        {/* Progress bar for Correct All */}
+        {correcting && correctingProgress.total > 0 && (
+          <div className="flex-1 max-w-xs">
             <div className="h-2 bg-secondary rounded-full overflow-hidden">
               <div 
                 className="h-full bg-primary transition-all duration-300"
-                style={{ width: `${clasifyProgress.percentage}%` }}
+                style={{ width: `${(correctingProgress.current / correctingProgress.total) * 100}%` }}
               />
             </div>
-            <div className="flex justify-between text-xs text-muted-foreground mt-1">
-              <span>{clasifyProgress.current}/{clasifyProgress.total} comentarios</span>
-              <span className="text-primary font-medium">{clasifyProgress.percentage}%</span>
-            </div>
+            <p className="text-xs text-muted-foreground mt-1">
+              {Math.round((correctingProgress.current / correctingProgress.total) * 100)}% completado
+            </p>
           </div>
         )}
 
+        {/* 5. Actualizar nombres */}
         <Button
           variant="outline"
           onClick={handleUpdateNames}
@@ -1279,6 +1273,18 @@ export default function Editor() {
         >
           <Users className="w-4 h-4 mr-2" />
           Actualizar nombres
+        </Button>
+
+        {/* 6. Buscar en todo */}
+        <Button
+          variant="outline"
+          onClick={() => setShowSearchModal(true)}
+          size="lg"
+          className="rounded-sm uppercase tracking-wide text-xs"
+          data-testid="search-all-button"
+        >
+          <Search className="w-4 h-4 mr-2" />
+          Buscar en todo
         </Button>
 
         <div className="flex-1" />
