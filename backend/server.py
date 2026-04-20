@@ -11,6 +11,7 @@ import uuid
 from datetime import datetime, timezone, timedelta
 import re
 import json
+import html
 from bson import ObjectId
 import asyncio
 
@@ -258,6 +259,33 @@ def is_greeting(text: str) -> bool:
             return True
     
     return False
+
+
+def clean_html_to_plain_text(text: str) -> str:
+    """Convert YouTube comment HTML into plain text.
+    
+    - Decodes HTML entities (&quot;, &amp;, &lt;, &gt;, &apos;, &#39;, etc.)
+    - Converts <br> / <br/> / <br /> to newlines
+    - Strips any remaining HTML tags
+    - Collapses 3+ consecutive newlines to max 2
+    """
+    if not text:
+        return text
+    
+    # 1) Replace <br>, <br/>, <br /> with newline (case-insensitive)
+    text = re.sub(r'<br\s*/?>', '\n', text, flags=re.IGNORECASE)
+    
+    # 2) Strip any other HTML tags
+    text = re.sub(r'<[^>]+>', '', text)
+    
+    # 3) Decode HTML entities
+    text = html.unescape(text)
+    
+    # 4) Collapse 3+ newlines into max 2
+    text = re.sub(r'\n{3,}', '\n\n', text)
+    
+    return text.strip()
+
 
 
 def clean_youtube_metadata(text: str) -> str:
@@ -1130,7 +1158,7 @@ async def create_question(data: QuestionCreate):
     question = Question(
         youtube_username=data.youtube_username,
         real_name=real_name,
-        original_text=data.original_text
+        original_text=clean_html_to_plain_text(data.original_text)
     )
     doc = question.model_dump()
     doc['created_at'] = serialize_datetime(doc['created_at'])
@@ -1297,7 +1325,7 @@ async def import_comments(data: CommentImport):
         question = Question(
             youtube_username=comment["youtube_username"],
             real_name=real_name,
-            original_text=comment["original_text"],
+            original_text=clean_html_to_plain_text(comment["original_text"]),
             import_batch_id=batch.id
         )
         doc = question.model_dump()
@@ -3029,7 +3057,7 @@ async def youtube_import_comments(request: YouTubeImportCommentsRequest):
         if not yt_id:
             continue
         
-        text = (c.get("text") or "").strip()
+        text = clean_html_to_plain_text((c.get("text") or "").strip())
         username = c.get("youtube_username") or ""
         if not text or not username:
             continue
