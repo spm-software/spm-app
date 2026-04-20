@@ -651,11 +651,13 @@ Aplica estas preferencias fijas del estilo SPM:
         return text
 
 
-async def clasificar_comentarios_con_ia(comentarios: List[Dict]) -> List[Dict]:
+async def clasificar_comentarios_con_ia(comentarios: List[Dict], task_id: str = None) -> List[Dict]:
     """Clasifica comentarios en pregunta/dudoso/saludo usando OpenAI.
     
     Input:  [{"id": str, "text": str}, ...]
     Output: [{"id": str, "clasificacion": "pregunta|dudoso|saludo", "motivo": str}, ...]
+    
+    Si `task_id` se provee y existe en background_tasks_status, actualiza progreso en vivo.
     """
     from emergentintegrations.llm.chat import LlmChat, UserMessage
     
@@ -677,8 +679,9 @@ El motivo debe ser muy corto (máx 10 palabras). No añadas texto antes ni despu
     results: List[Dict] = []
     BATCH = 20
     valid_labels = {"pregunta", "dudoso", "saludo"}
+    total = len(comentarios)
     
-    for i in range(0, len(comentarios), BATCH):
+    for i in range(0, total, BATCH):
         chunk = comentarios[i:i + BATCH]
         user_payload = "\n".join(
             f'[{c["id"]}] {c["text"][:800]}' for c in chunk
@@ -724,8 +727,16 @@ El motivo debe ser muy corto (máx 10 palabras). No añadas texto antes ni despu
         except Exception as e:
             logger.error(f"[Clasificar] chunk {i}: {e}")
             continue
+        
+        # Update progress for background task
+        if task_id and task_id in background_tasks_status:
+            background_tasks_status[task_id].update({
+                "current": min(i + BATCH, total),
+                "total": total,
+                "classified_so_far": len(results)
+            })
     
-    logger.info(f"[Clasificar] {len(results)}/{len(comentarios)} classified")
+    logger.info(f"[Clasificar] {len(results)}/{total} classified")
     return results
 
 
@@ -1390,46 +1401,127 @@ async def correct_batch_questions(data: CorrectionRequest):
 
 # ----- CLASIFICACIÓN -----
 
+async def run_clasificacion_background(task_id: str, batch_id: str):
+    """Background runner for AI classification with progress tracking."""
+    try:
+        background_tasks_status[task_id]["status"] = "running"
+        
+        questions = await db.questions.find(
+            {"import_batch_id": batch_id},
+            {"_id": 0, "id": 1, "original_text": 1, "corrected_text": 1}
+        ).to_list(length=None)
+        
+        comentarios = [
+            {"id": q["id"], "text": (q.get("corrected_text") or q.get("original_text") or "").strip()}
+            for q in questions
+            if (q.get("corrected_text") or q.get("original_text") or "").strip()
+        ]
+        
+        background_tasks_status[task_id].update({
+            "current": 0,
+            "total": len(comentarios)
+        })
+        
+        results = await clasificar_comentarios_con_ia(comentarios, task_id=task_id)
+        
+        # Apply classifications to DB
+        counts = {"pregunta": 0, "dudoso": 0, "saludo": 0}
+        classified_count = 0
+        for r in results:
+            upd = await db.questions.update_one(
+                {"id": r["id"]},
+                {"$set": {
+                    "clasificacion": r["clasificacion"],
+                    "motivo_clasificacion": r["motivo"]
+                }}
+            )
+            if upd.modified_count > 0:
+                classified_count += 1
+                counts[r["clasificacion"]] = counts.get(r["clasificacion"], 0) + 1
+        
+        background_tasks_status[task_id].update({
+            "status": "completed",
+            "current": len(comentarios),
+            "total": len(comentarios),
+            "classified_count": classified_count,
+            "counts": counts,
+            "completed_at": datetime.now(timezone.utc).isoformat()
+        })
+    except Exception as e:
+        logger.error(f"[Clasificar] background error: {e}")
+        background_tasks_status[task_id].update({
+            "status": "error",
+            "error": str(e),
+            "completed_at": datetime.now(timezone.utc).isoformat()
+        })
+
+
 @api_router.post("/questions/clasificar/{batch_id}")
 async def clasificar_batch(batch_id: str):
-    """Clasifica todas las preguntas de un lote en pregunta/dudoso/saludo usando IA."""
-    questions = await db.questions.find(
-        {"import_batch_id": batch_id},
-        {"_id": 0, "id": 1, "original_text": 1, "corrected_text": 1}
-    ).to_list(length=None)
+    """Inicia una tarea en background para clasificar todas las preguntas del lote.
     
-    if not questions:
+    Devuelve un task_id. Usa GET /api/questions/clasificar/status/{task_id} para el progreso.
+    """
+    # Pre-check: batch must have questions
+    total = await db.questions.count_documents({"import_batch_id": batch_id})
+    if total == 0:
         return {"classified_count": 0, "total": 0, "message": "No hay preguntas en este lote"}
     
-    # Prefer corrected text if available, else original
-    comentarios = [
-        {"id": q["id"], "text": (q.get("corrected_text") or q.get("original_text") or "").strip()}
-        for q in questions
-        if (q.get("corrected_text") or q.get("original_text") or "").strip()
-    ]
+    task_id = str(uuid.uuid4())
+    background_tasks_status[task_id] = {
+        "task_id": task_id,
+        "batch_id": batch_id,
+        "status": "starting",
+        "current": 0,
+        "total": total,
+        "started_at": datetime.now(timezone.utc).isoformat()
+    }
     
-    results = await clasificar_comentarios_con_ia(comentarios)
-    
-    # Apply classifications to DB
-    classified_count = 0
-    counts = {"pregunta": 0, "dudoso": 0, "saludo": 0}
-    for r in results:
-        update_result = await db.questions.update_one(
-            {"id": r["id"]},
-            {"$set": {
-                "clasificacion": r["clasificacion"],
-                "motivo_clasificacion": r["motivo"]
-            }}
-        )
-        if update_result.modified_count > 0:
-            classified_count += 1
-            counts[r["clasificacion"]] = counts.get(r["clasificacion"], 0) + 1
+    asyncio.create_task(run_clasificacion_background(task_id, batch_id))
     
     return {
-        "classified_count": classified_count,
-        "total": len(questions),
-        "counts": counts
+        "task_id": task_id,
+        "status": "started",
+        "total": total,
+        "message": "Clasificación iniciada. Usa /api/questions/clasificar/status/{task_id} para ver el progreso."
     }
+
+
+@api_router.get("/questions/clasificar/status/{task_id}")
+async def get_clasificacion_status(task_id: str):
+    """Get status and progress of a background classification task."""
+    if task_id not in background_tasks_status:
+        raise HTTPException(status_code=404, detail="Tarea no encontrada")
+    
+    task = background_tasks_status[task_id]
+    
+    percentage = 0
+    if task.get("total", 0) > 0:
+        percentage = round((task.get("current", 0) / task["total"]) * 100)
+    
+    return {
+        "task_id": task_id,
+        "status": task.get("status", "unknown"),
+        "current": task.get("current", 0),
+        "total": task.get("total", 0),
+        "percentage": percentage,
+        "classified_so_far": task.get("classified_so_far", 0),
+        "classified_count": task.get("classified_count"),
+        "counts": task.get("counts"),
+        "started_at": task.get("started_at"),
+        "completed_at": task.get("completed_at"),
+        "error": task.get("error")
+    }
+
+
+@api_router.delete("/questions/clasificar/status/{task_id}")
+async def cleanup_clasificacion_task(task_id: str):
+    """Clean up a completed classification task from memory."""
+    if task_id in background_tasks_status:
+        del background_tasks_status[task_id]
+        return {"message": "Tarea eliminada"}
+    raise HTTPException(status_code=404, detail="Tarea no encontrada")
+
 
 # ----- DUPLICATES -----
 

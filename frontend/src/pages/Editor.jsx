@@ -547,6 +547,8 @@ export default function Editor() {
   const [showOnlyNoName, setShowOnlyNoName] = useState(false);
   const [clasificationFilter, setClasificationFilter] = useState("dudoso"); // "all" | "pregunta" | "dudoso" | "saludo"
   const [clasifying, setClasifying] = useState(false);
+  const [clasifyProgress, setClasifyProgress] = useState({ current: 0, total: 0, percentage: 0 });
+  const clasifyPollRef = useRef(null);
   const [aiModel, setAiModel] = useState("gpt-5.2");
   const initialBatchLoaded = useRef(false);
   const pollingIntervalRef = useRef(null);
@@ -563,6 +565,9 @@ export default function Editor() {
     return () => {
       if (pollingIntervalRef.current) {
         clearInterval(pollingIntervalRef.current);
+      }
+      if (clasifyPollRef.current) {
+        clearInterval(clasifyPollRef.current);
       }
     };
   }, []);
@@ -981,18 +986,72 @@ export default function Editor() {
   const handleClasificarIA = async () => {
     if (!selectedBatch) return;
     setClasifying(true);
+    setClasifyProgress({ current: 0, total: 0, percentage: 0 });
+    
     try {
-      const response = await axios.post(`${API}/questions/clasificar/${selectedBatch}`);
-      const { classified_count, counts } = response.data;
-      toast.success(
-        `${classified_count} clasificadas · ${counts.pregunta || 0} preguntas, ${counts.dudoso || 0} dudosas, ${counts.saludo || 0} saludos`
-      );
-      await fetchQuestions();
+      const startResponse = await axios.post(`${API}/questions/clasificar/${selectedBatch}`);
+      
+      // Sync response path: no questions to classify
+      if (!startResponse.data.task_id) {
+        toast.info(startResponse.data.message || "Nada que clasificar");
+        setClasifying(false);
+        return;
+      }
+      
+      const taskId = startResponse.data.task_id;
+      const total = startResponse.data.total || 0;
+      setClasifyProgress({ current: 0, total, percentage: 0 });
+      toast.info(`Clasificando ${total} comentarios con IA...`, { duration: 2500 });
+      
+      const pollStatus = async () => {
+        try {
+          const statusRes = await axios.get(`${API}/questions/clasificar/status/${taskId}`);
+          const s = statusRes.data;
+          
+          setClasifyProgress({
+            current: s.current || 0,
+            total: s.total || 0,
+            percentage: s.percentage || 0
+          });
+          
+          if (s.status === "completed") {
+            if (clasifyPollRef.current) {
+              clearInterval(clasifyPollRef.current);
+              clasifyPollRef.current = null;
+            }
+            setClasifying(false);
+            setClasifyProgress({ current: 0, total: 0, percentage: 0 });
+            
+            const counts = s.counts || {};
+            toast.success(
+              `${s.classified_count || 0} clasificadas · ${counts.pregunta || 0} preguntas, ${counts.dudoso || 0} dudosas, ${counts.saludo || 0} saludos`
+            );
+            
+            await fetchQuestions();
+            axios.delete(`${API}/questions/clasificar/status/${taskId}`).catch(() => {});
+          } else if (s.status === "error") {
+            if (clasifyPollRef.current) {
+              clearInterval(clasifyPollRef.current);
+              clasifyPollRef.current = null;
+            }
+            setClasifying(false);
+            setClasifyProgress({ current: 0, total: 0, percentage: 0 });
+            toast.error(`Error al clasificar: ${s.error || 'desconocido'}`);
+            axios.delete(`${API}/questions/clasificar/status/${taskId}`).catch(() => {});
+          }
+        } catch (pollErr) {
+          console.error("Error polling clasif status:", pollErr);
+        }
+      };
+      
+      // Kick off immediately, then every 1.5s
+      pollStatus();
+      clasifyPollRef.current = setInterval(pollStatus, 1500);
     } catch (error) {
-      console.error("Error classifying:", error);
-      toast.error("Error al clasificar con IA");
-    } finally {
+      console.error("Error starting classification:", error);
+      toast.error("Error al iniciar clasificación");
       setClasifying(false);
+      setClasifyProgress({ current: 0, total: 0, percentage: 0 });
     }
   };
 
@@ -1189,8 +1248,26 @@ export default function Editor() {
           ) : (
             <Filter className="w-4 h-4 mr-2" />
           )}
-          Clasificar con IA
+          {clasifying && clasifyProgress.total > 0
+            ? `Clasificando ${clasifyProgress.percentage}%`
+            : "Clasificar con IA"}
         </Button>
+
+        {/* AI Classification Progress */}
+        {clasifying && clasifyProgress.total > 0 && (
+          <div className="flex-1 max-w-sm" data-testid="clasif-progress">
+            <div className="h-2 bg-secondary rounded-full overflow-hidden">
+              <div 
+                className="h-full bg-primary transition-all duration-300"
+                style={{ width: `${clasifyProgress.percentage}%` }}
+              />
+            </div>
+            <div className="flex justify-between text-xs text-muted-foreground mt-1">
+              <span>{clasifyProgress.current}/{clasifyProgress.total} comentarios</span>
+              <span className="text-primary font-medium">{clasifyProgress.percentage}%</span>
+            </div>
+          </div>
+        )}
 
         <Button
           variant="outline"
