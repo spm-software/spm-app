@@ -70,6 +70,7 @@ class Question(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     youtube_username: str
+    youtube_comment_id: Optional[str] = None  # Para deduplicar por ID del comentario de YouTube
     real_name: Optional[str] = None
     real_name_confirmed: bool = False  # True if the real_name was manually confirmed
     original_text: str
@@ -2847,30 +2848,23 @@ async def youtube_fetch_comments(request: YouTubeFetchRequest):
         
         logger.info(f"Found {len(videos)} videos in date range")
         
-        # Resolve cutoff: anchor id (checkbox default) OR manual text match OR none
-        cutoff_comment_id = None
+        # Resolve cutoff: ONLY manual `texto_corte` is honored (explicit user action).
+        # The stored anchor is NOT used as automatic cutoff — date range always prevails.
+        # Deduplication of already-imported comments is handled at DB level by youtube_comment_id.
         cutoff_text_normalized = None
         
         def _normalize_for_match(s: str) -> str:
             if not s:
                 return ""
-            # strip HTML tags, collapse whitespace, lowercase
             stripped = re.sub(r'<[^>]+>', ' ', s)
             stripped = re.sub(r'\s+', ' ', stripped).strip().lower()
             return stripped
         
-        if request.empezar_desde_ultimo:
-            last_anchor = await db.youtube_last_imported.find_one(
-                {"type": "last_anchor"}
-            )
-            if last_anchor and last_anchor.get("comment_id"):
-                cutoff_comment_id = last_anchor["comment_id"]
-                logger.info(f"[YouTube] Using stored anchor as cutoff: {cutoff_comment_id}")
-            else:
-                logger.info("[YouTube] empezar_desde_ultimo=True but no stored anchor found")
-        elif request.texto_corte and request.texto_corte.strip():
+        if request.texto_corte and request.texto_corte.strip():
             cutoff_text_normalized = _normalize_for_match(request.texto_corte)
             logger.info(f"[YouTube] Using manual text cutoff (normalized len={len(cutoff_text_normalized)})")
+        elif request.empezar_desde_ultimo:
+            logger.info("[YouTube] empezar_desde_ultimo=True IGNORED — date range always prevails, dedup handled by comment_id")
         
         # Fetch comments for each video
         all_comments = []
@@ -2904,13 +2898,7 @@ async def youtube_fetch_comments(request: YouTubeFetchRequest):
                         username = comment.get('authorDisplayName', '')
                         text = comment.get('textDisplay', '')
                         
-                        # Cutoff by stored anchor id
-                        if cutoff_comment_id and comment_id == cutoff_comment_id:
-                            logger.info(f"[YouTube] Found cutoff by anchor id: {comment_id}")
-                            stop_fetching = True
-                            break
-                        
-                        # Cutoff by manual text match (exact or substring after normalize)
+                        # Cutoff ONLY by manual text match (explicit user action)
                         if cutoff_text_normalized:
                             normalized_comment = _normalize_for_match(text)
                             if (normalized_comment == cutoff_text_normalized or
@@ -3010,6 +2998,100 @@ async def youtube_fetch_comments(request: YouTubeFetchRequest):
     except Exception as e:
         logger.error(f"Error fetching comments: {e}")
         raise HTTPException(status_code=500, detail=f"Error al obtener comentarios: {str(e)}")
+
+
+class YouTubeImportCommentsRequest(BaseModel):
+    comments: List[Dict]
+
+
+@api_router.post("/youtube/import-comments")
+async def youtube_import_comments(request: YouTubeImportCommentsRequest):
+    """Import a list of YouTube comments into the DB, deduplicating by youtube_comment_id.
+    
+    For each comment:
+    - If a Question with the same youtube_comment_id already exists → update text + username (keeps existing clasificacion, corrections, real_name, batch_id).
+    - If not → create a new Question inside a fresh import batch.
+    
+    Only returns a batch_id if at least one NEW question was created.
+    """
+    if not request.comments:
+        return {"batch_id": None, "questions_imported": 0, "questions_updated": 0, "total": 0}
+    
+    now = datetime.now(timezone.utc)
+    batch_id: Optional[str] = None
+    batch_doc: Optional[Dict] = None
+    
+    imported_count = 0
+    updated_count = 0
+    
+    for c in request.comments:
+        yt_id = c.get("comment_id")
+        if not yt_id:
+            continue
+        
+        text = (c.get("text") or "").strip()
+        username = c.get("youtube_username") or ""
+        if not text or not username:
+            continue
+        
+        existing = await db.questions.find_one(
+            {"youtube_comment_id": yt_id},
+            {"_id": 0, "id": 1}
+        )
+        
+        if existing:
+            await db.questions.update_one(
+                {"youtube_comment_id": yt_id},
+                {"$set": {
+                    "original_text": text,
+                    "youtube_username": username
+                }}
+            )
+            updated_count += 1
+        else:
+            # Lazy-create the batch on first new question
+            if batch_id is None:
+                batch = ImportBatch(question_count=0)
+                batch_id = batch.id
+                batch_doc = batch.model_dump()
+                batch_doc['created_at'] = serialize_datetime(batch_doc['created_at'])
+                await db.import_batches.insert_one(batch_doc)
+            
+            real_name = await get_real_name(username)
+            if not real_name:
+                real_name = await extract_display_name(username)
+            
+            question = Question(
+                youtube_username=username,
+                youtube_comment_id=yt_id,
+                real_name=real_name,
+                original_text=text,
+                import_batch_id=batch_id
+            )
+            doc = question.model_dump()
+            doc['created_at'] = serialize_datetime(doc['created_at'])
+            await db.questions.insert_one(doc)
+            imported_count += 1
+    
+    # Update batch question_count if a batch was created
+    if batch_id and imported_count > 0:
+        await db.import_batches.update_one(
+            {"id": batch_id},
+            {"$set": {"question_count": imported_count}}
+        )
+    
+    logger.info(
+        f"[YouTube] import-comments: {imported_count} new, {updated_count} updated "
+        f"(batch_id={batch_id})"
+    )
+    
+    return {
+        "batch_id": batch_id,
+        "questions_imported": imported_count,
+        "questions_updated": updated_count,
+        "total": imported_count + updated_count
+    }
+
 
 
 @api_router.delete("/youtube/disconnect")
