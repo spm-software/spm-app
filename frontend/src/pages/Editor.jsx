@@ -33,7 +33,8 @@ import {
   X,
   ArrowRight,
   Users,
-  Sparkles
+  Sparkles,
+  Filter
 } from "lucide-react";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -544,6 +545,8 @@ export default function Editor() {
   const [showSearchModal, setShowSearchModal] = useState(false);
   const [showOnlyDuplicates, setShowOnlyDuplicates] = useState(false);
   const [showOnlyNoName, setShowOnlyNoName] = useState(false);
+  const [clasificationFilter, setClasificationFilter] = useState("dudoso"); // "all" | "pregunta" | "dudoso" | "saludo"
+  const [clasifying, setClasifying] = useState(false);
   const [aiModel, setAiModel] = useState("gpt-5.2");
   const initialBatchLoaded = useRef(false);
   const pollingIntervalRef = useRef(null);
@@ -975,6 +978,42 @@ export default function Editor() {
     }
   };
 
+  const handleClasificarIA = async () => {
+    if (!selectedBatch) return;
+    setClasifying(true);
+    try {
+      const response = await axios.post(`${API}/questions/clasificar/${selectedBatch}`);
+      const { classified_count, counts } = response.data;
+      toast.success(
+        `${classified_count} clasificadas · ${counts.pregunta || 0} preguntas, ${counts.dudoso || 0} dudosas, ${counts.saludo || 0} saludos`
+      );
+      await fetchQuestions();
+    } catch (error) {
+      console.error("Error classifying:", error);
+      toast.error("Error al clasificar con IA");
+    } finally {
+      setClasifying(false);
+    }
+  };
+
+  const handleConfirmarComoPregunta = async (questionId) => {
+    try {
+      await axios.put(`${API}/questions/${questionId}`, {
+        clasificacion: "pregunta",
+        motivo_clasificacion: "Confirmado manualmente"
+      });
+      setQuestions(prev => prev.map(q =>
+        q.id === questionId
+          ? { ...q, clasificacion: "pregunta", motivo_clasificacion: "Confirmado manualmente" }
+          : q
+      ));
+      toast.success("Confirmada como pregunta");
+    } catch (error) {
+      console.error("Error confirming as question:", error);
+      toast.error("Error al confirmar");
+    }
+  };
+
   const validQuestions = questions.filter(q => !q.is_greeting && !q.is_duplicate);
 
   return (
@@ -1139,6 +1178,22 @@ export default function Editor() {
 
         <Button
           variant="outline"
+          onClick={handleClasificarIA}
+          disabled={clasifying || questions.length === 0}
+          size="lg"
+          className="rounded-sm uppercase tracking-wide text-xs"
+          data-testid="clasificar-ia-button"
+        >
+          {clasifying ? (
+            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+          ) : (
+            <Filter className="w-4 h-4 mr-2" />
+          )}
+          Clasificar con IA
+        </Button>
+
+        <Button
+          variant="outline"
           onClick={handleUpdateNames}
           disabled={questions.length === 0}
           size="lg"
@@ -1213,6 +1268,41 @@ export default function Editor() {
         </div>
       </div>
 
+      {/* Classification Filter Pills */}
+      {questions.some(q => q.clasificacion) && (
+        <div className="flex items-center gap-2 mb-6 flex-wrap" data-testid="clasificacion-filters">
+          <span className="text-xs uppercase tracking-wide text-muted-foreground mr-2">Filtrar:</span>
+          {(() => {
+            const cCounts = questions.reduce((acc, q) => {
+              if (q.clasificacion) acc[q.clasificacion] = (acc[q.clasificacion] || 0) + 1;
+              return acc;
+            }, {});
+            const pills = [
+              { value: "all", label: "Todas", count: questions.length, dot: "bg-foreground" },
+              { value: "pregunta", label: "Preguntas", count: cCounts.pregunta || 0, dot: "bg-green-500" },
+              { value: "dudoso", label: "Dudosas", count: cCounts.dudoso || 0, dot: "bg-yellow-500" },
+              { value: "saludo", label: "Saludos", count: cCounts.saludo || 0, dot: "bg-red-500" },
+            ];
+            return pills.map(p => (
+              <button
+                key={p.value}
+                onClick={() => setClasificationFilter(p.value)}
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-sm border text-xs transition-colors ${
+                  clasificationFilter === p.value
+                    ? 'bg-foreground text-background border-foreground'
+                    : 'border-border hover:bg-secondary/50'
+                }`}
+                data-testid={`filter-pill-${p.value}`}
+              >
+                <div className={`w-2.5 h-2.5 rounded-full ${p.dot}`} />
+                <span className="font-medium">{p.label}</span>
+                <span className="opacity-70">({p.count})</span>
+              </button>
+            ));
+          })()}
+        </div>
+      )}
+
       {/* Questions List */}
       <div className="space-y-4">
         {loading ? (
@@ -1245,6 +1335,8 @@ export default function Editor() {
               filteredQuestions = questions.filter(q => q.is_duplicate);
             } else if (showOnlyNoName) {
               filteredQuestions = questions.filter(hasNoRealName);
+            } else if (clasificationFilter !== "all" && questions.some(q => q.clasificacion)) {
+              filteredQuestions = questions.filter(q => q.clasificacion === clasificationFilter);
             }
             
             return filteredQuestions.map((question, index) => (
@@ -1305,6 +1397,29 @@ export default function Editor() {
                         Corregido
                       </Badge>
                     )}
+                    {question.clasificacion && (() => {
+                      const cls = question.clasificacion;
+                      const styles = cls === "pregunta"
+                        ? "text-green-700 border-green-400 bg-green-50"
+                        : cls === "dudoso"
+                        ? "text-yellow-700 border-yellow-400 bg-yellow-50"
+                        : "text-red-700 border-red-400 bg-red-50";
+                      const dot = cls === "pregunta" ? "🟢" : cls === "dudoso" ? "🟡" : "🔴";
+                      return (
+                        <Badge
+                          variant="outline"
+                          className={`text-xs ${styles}`}
+                          title={question.motivo_clasificacion || ""}
+                          data-testid={`clasif-badge-${question.id}`}
+                        >
+                          <span className="mr-1">{dot}</span>
+                          {cls === "pregunta" ? "Pregunta" : cls === "dudoso" ? "Dudoso" : "Saludo"}
+                          {question.motivo_clasificacion && (
+                            <span className="ml-1 opacity-70 font-normal normal-case">· {question.motivo_clasificacion}</span>
+                          )}
+                        </Badge>
+                      );
+                    })()}
                     {question.is_greeting && (
                       <Badge variant="outline" className="text-xs text-gray-600 border-gray-400 bg-gray-50">
                         Saludo
@@ -1356,6 +1471,20 @@ export default function Editor() {
                     <CheckCircle className="w-3.5 h-3.5" />
                     <span className="ml-1.5 hidden sm:inline">Aceptar</span>
                   </Button>
+                  
+                  {question.clasificacion && question.clasificacion !== "pregunta" && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleConfirmarComoPregunta(question.id)}
+                      className="rounded-sm text-xs text-green-700 border-green-400 hover:bg-green-50"
+                      data-testid={`confirm-as-question-btn-${question.id}`}
+                      title="Reclasificar como pregunta"
+                    >
+                      <CheckCircle className="w-3.5 h-3.5" />
+                      <span className="ml-1.5 hidden sm:inline">Es pregunta</span>
+                    </Button>
+                  )}
                   
                   <Button
                     variant="outline"

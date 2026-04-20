@@ -10,6 +10,7 @@ from typing import List, Optional, Dict, Any
 import uuid
 from datetime import datetime, timezone, timedelta
 import re
+import json
 from bson import ObjectId
 import asyncio
 
@@ -82,6 +83,8 @@ class Question(BaseModel):
     order_in_program: Optional[int] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     import_batch_id: Optional[str] = None
+    clasificacion: Optional[str] = None  # "pregunta" | "dudoso" | "saludo"
+    motivo_clasificacion: Optional[str] = None
 
 class QuestionCreate(BaseModel):
     youtube_username: str
@@ -93,6 +96,8 @@ class QuestionUpdate(BaseModel):
     is_greeting: Optional[bool] = None
     is_duplicate: Optional[bool] = None
     real_name: Optional[str] = None
+    clasificacion: Optional[str] = None
+    motivo_clasificacion: Optional[str] = None
 
 class Program(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -644,6 +649,85 @@ Aplica estas preferencias fijas del estilo SPM:
     except Exception as e:
         logger.error(f"Error correcting text: {e}")
         return text
+
+
+async def clasificar_comentarios_con_ia(comentarios: List[Dict]) -> List[Dict]:
+    """Clasifica comentarios en pregunta/dudoso/saludo usando OpenAI.
+    
+    Input:  [{"id": str, "text": str}, ...]
+    Output: [{"id": str, "clasificacion": "pregunta|dudoso|saludo", "motivo": str}, ...]
+    """
+    from emergentintegrations.llm.chat import LlmChat, UserMessage
+    
+    api_key = os.environ.get('EMERGENT_LLM_KEY')
+    if not api_key:
+        logger.warning("[Clasificar] No EMERGENT_LLM_KEY")
+        return []
+    
+    SYSTEM_PROMPT = """Eres un clasificador de comentarios de YouTube para un canal en español.
+Clasifica cada comentario en: "pregunta", "dudoso" o "saludo".
+
+- "pregunta": contiene una pregunta explícita o implícita sobre el tema del canal
+- "dudoso": es un comentario pero no una pregunta clara (opinión, anécdota, sugerencia)
+- "saludo": saludo, felicitación, comentario irrelevante, muy corto, spam
+
+Responde SOLO con JSON: [{"id": "...", "clasificacion": "pregunta|dudoso|saludo", "motivo": "..."}]
+El motivo debe ser muy corto (máx 10 palabras). No añadas texto antes ni después del JSON."""
+    
+    results: List[Dict] = []
+    BATCH = 20
+    valid_labels = {"pregunta", "dudoso", "saludo"}
+    
+    for i in range(0, len(comentarios), BATCH):
+        chunk = comentarios[i:i + BATCH]
+        user_payload = "\n".join(
+            f'[{c["id"]}] {c["text"][:800]}' for c in chunk
+        )
+        
+        try:
+            chat = LlmChat(
+                api_key=api_key,
+                session_id=f"clasificar-{uuid.uuid4()}",
+                system_message=SYSTEM_PROMPT
+            )
+            chat.with_model("openai", "gpt-5.2")
+            response = await chat.send_message(UserMessage(text=user_payload))
+            
+            if not response:
+                continue
+            
+            cleaned = response.strip()
+            if cleaned.startswith("```"):
+                cleaned = re.sub(r'^```(?:json)?\s*', '', cleaned)
+                cleaned = re.sub(r'\s*```\s*$', '', cleaned)
+            start = cleaned.find('[')
+            end = cleaned.rfind(']')
+            if start != -1 and end != -1 and end > start:
+                cleaned = cleaned[start:end + 1]
+            
+            parsed = json.loads(cleaned)
+            if not isinstance(parsed, list):
+                continue
+            
+            for item in parsed:
+                if not isinstance(item, dict):
+                    continue
+                cid = item.get("id")
+                label = (item.get("clasificacion") or "").strip().lower()
+                motivo = (item.get("motivo") or "").strip()
+                if cid and label in valid_labels:
+                    results.append({
+                        "id": str(cid),
+                        "clasificacion": label,
+                        "motivo": motivo[:200]
+                    })
+        except Exception as e:
+            logger.error(f"[Clasificar] chunk {i}: {e}")
+            continue
+    
+    logger.info(f"[Clasificar] {len(results)}/{len(comentarios)} classified")
+    return results
+
 
 
 async def check_duplicates_with_ai_progress(
@@ -1302,6 +1386,50 @@ async def correct_batch_questions(data: CorrectionRequest):
             errors.append({"id": qid, "error": str(e)})
     
     return {"corrected": corrected, "errors": errors}
+
+
+# ----- CLASIFICACIÓN -----
+
+@api_router.post("/questions/clasificar/{batch_id}")
+async def clasificar_batch(batch_id: str):
+    """Clasifica todas las preguntas de un lote en pregunta/dudoso/saludo usando IA."""
+    questions = await db.questions.find(
+        {"import_batch_id": batch_id},
+        {"_id": 0, "id": 1, "original_text": 1, "corrected_text": 1}
+    ).to_list(length=None)
+    
+    if not questions:
+        return {"classified_count": 0, "total": 0, "message": "No hay preguntas en este lote"}
+    
+    # Prefer corrected text if available, else original
+    comentarios = [
+        {"id": q["id"], "text": (q.get("corrected_text") or q.get("original_text") or "").strip()}
+        for q in questions
+        if (q.get("corrected_text") or q.get("original_text") or "").strip()
+    ]
+    
+    results = await clasificar_comentarios_con_ia(comentarios)
+    
+    # Apply classifications to DB
+    classified_count = 0
+    counts = {"pregunta": 0, "dudoso": 0, "saludo": 0}
+    for r in results:
+        update_result = await db.questions.update_one(
+            {"id": r["id"]},
+            {"$set": {
+                "clasificacion": r["clasificacion"],
+                "motivo_clasificacion": r["motivo"]
+            }}
+        )
+        if update_result.modified_count > 0:
+            classified_count += 1
+            counts[r["clasificacion"]] = counts.get(r["clasificacion"], 0) + 1
+    
+    return {
+        "classified_count": classified_count,
+        "total": len(questions),
+        "counts": counts
+    }
 
 # ----- DUPLICATES -----
 
