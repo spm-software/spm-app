@@ -6,9 +6,11 @@ import {
   Layers, 
   Users, 
   Settings, 
-  Download
+  Download,
+  LogOut
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/contexts/AuthContext";
 
 const navItems = [
   { to: "/", icon: LayoutDashboard, label: "Dashboard" },
@@ -21,6 +23,7 @@ const navItems = [
 ];
 
 export default function Layout() {
+  const { user, logout } = useAuth();
   return (
     <div className="flex min-h-screen">
       {/* Sidebar */}
@@ -67,11 +70,30 @@ export default function Layout() {
           ))}
         </nav>
 
-        {/* Footer */}
-        <div className="p-4 border-t border-border">
-          <p className="text-xs text-muted-foreground text-center">
-            Gestión quincenal de preguntas
-          </p>
+        {/* Footer with user + logout */}
+        <div className="p-4 border-t border-border space-y-3">
+          {user && (
+            <div className="flex items-center gap-2 px-2" data-testid="current-user">
+              {user.picture ? (
+                <img src={user.picture} alt="" className="w-7 h-7 rounded-full" />
+              ) : (
+                <div className="w-7 h-7 rounded-full bg-primary/10 text-primary text-xs flex items-center justify-center font-bold">
+                  {(user.name || user.email || "?").slice(0, 1).toUpperCase()}
+                </div>
+              )}
+              <span className="text-xs text-muted-foreground truncate flex-1">
+                {user.name || user.email}
+              </span>
+            </div>
+          )}
+          <button
+            onClick={logout}
+            className="w-full flex items-center gap-3 px-4 py-2.5 rounded-sm text-xs uppercase tracking-wide font-medium text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors"
+            data-testid="logout-button"
+          >
+            <LogOut className="w-4 h-4" strokeWidth={1.5} />
+            Cerrar sesión
+          </button>
         </div>
       </aside>
 

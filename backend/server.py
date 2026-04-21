@@ -3363,8 +3363,193 @@ async def youtube_disconnect():
     return {"success": True, "message": "YouTube desconectado"}
 
 
+# ==================== AUTHENTICATION ====================
+
+import jwt
+from fastapi import Header
+from fastapi.responses import JSONResponse
+from starlette.middleware.base import BaseHTTPMiddleware
+from google.oauth2 import id_token as google_id_token
+from google.auth.transport import requests as google_auth_requests
+
+JWT_SECRET = os.environ.get('JWT_SECRET')
+JWT_ALGORITHM = "HS256"
+JWT_EXP_DAYS = 7
+ALLOWED_EMAIL = (os.environ.get('ALLOWED_EMAIL') or "").strip().lower()
+GOOGLE_CLIENT_ID = os.environ.get('YOUTUBE_CLIENT_ID')
+GOOGLE_CLIENT_SECRET = os.environ.get('YOUTUBE_CLIENT_SECRET')
+AUTH_SCOPES = ["openid", "https://www.googleapis.com/auth/userinfo.email", "https://www.googleapis.com/auth/userinfo.profile"]
+
+# Paths that bypass JWT verification
+AUTH_PUBLIC_PREFIXES = ("/api/auth/",)
+
+
+def _create_jwt(email: str, name: str = "", picture: str = "") -> str:
+    payload = {
+        "email": email,
+        "name": name,
+        "picture": picture,
+        "iat": datetime.now(timezone.utc),
+        "exp": datetime.now(timezone.utc) + timedelta(days=JWT_EXP_DAYS),
+    }
+    return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+
+
+def _decode_jwt(token: str) -> Dict:
+    return jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+
+
+class JWTAuthMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        path = request.url.path
+        # Only enforce on /api/* paths, and skip /api/auth/*
+        if not path.startswith("/api/") or any(path.startswith(p) for p in AUTH_PUBLIC_PREFIXES):
+            return await call_next(request)
+        # Allow preflight CORS requests
+        if request.method == "OPTIONS":
+            return await call_next(request)
+        
+        auth_header = request.headers.get("authorization", "")
+        if not auth_header.lower().startswith("bearer "):
+            return JSONResponse({"detail": "Falta token de autenticación"}, status_code=401)
+        
+        token = auth_header[7:].strip()
+        try:
+            payload = _decode_jwt(token)
+        except jwt.ExpiredSignatureError:
+            return JSONResponse({"detail": "Token expirado"}, status_code=401)
+        except jwt.InvalidTokenError:
+            return JSONResponse({"detail": "Token inválido"}, status_code=401)
+        
+        # Double-check email on every request (defense in depth)
+        if (payload.get("email") or "").lower() != ALLOWED_EMAIL:
+            return JSONResponse({"detail": "No autorizado"}, status_code=403)
+        
+        request.state.user = payload
+        return await call_next(request)
+
+
+class GoogleCallbackRequest(BaseModel):
+    code: str
+    redirect_uri: str
+
+
+@api_router.get("/auth/google-url")
+async def auth_google_url(redirect_uri: str):
+    """Return the Google OAuth consent URL with prompt=select_account."""
+    if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
+        raise HTTPException(status_code=500, detail="Google OAuth no está configurado en el servidor")
+    
+    client_config = {
+        "web": {
+            "client_id": GOOGLE_CLIENT_ID,
+            "client_secret": GOOGLE_CLIENT_SECRET,
+            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+            "token_uri": "https://oauth2.googleapis.com/token",
+        }
+    }
+    flow = Flow.from_client_config(
+        client_config,
+        scopes=AUTH_SCOPES,
+        redirect_uri=redirect_uri,
+        autogenerate_code_verifier=False,
+    )
+    auth_url, state = flow.authorization_url(
+        access_type="online",
+        prompt="select_account",
+        include_granted_scopes="true",
+    )
+    logger.info(f"[Auth] google-url generated, redirect_uri={redirect_uri}")
+    return {"auth_url": auth_url, "state": state}
+
+
+@api_router.post("/auth/google-callback")
+async def auth_google_callback(data: GoogleCallbackRequest):
+    """Exchange code → id_token → verify email matches allowlist → issue JWT."""
+    if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
+        raise HTTPException(status_code=500, detail="Google OAuth no está configurado")
+    
+    client_config = {
+        "web": {
+            "client_id": GOOGLE_CLIENT_ID,
+            "client_secret": GOOGLE_CLIENT_SECRET,
+            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+            "token_uri": "https://oauth2.googleapis.com/token",
+        }
+    }
+    try:
+        flow = Flow.from_client_config(
+            client_config,
+            scopes=AUTH_SCOPES,
+            redirect_uri=data.redirect_uri,
+            autogenerate_code_verifier=False,
+        )
+        flow.fetch_token(code=data.code)
+    except Exception as e:
+        logger.error(f"[Auth] fetch_token failed: {e}")
+        raise HTTPException(status_code=400, detail=f"Error al intercambiar código: {e}")
+    
+    credentials = flow.credentials
+    
+    # Verify the id_token and extract identity claims
+    try:
+        id_info = google_id_token.verify_oauth2_token(
+            credentials.id_token,
+            google_auth_requests.Request(),
+            GOOGLE_CLIENT_ID,
+        )
+    except Exception as e:
+        logger.error(f"[Auth] id_token verification failed: {e}")
+        raise HTTPException(status_code=400, detail="No se pudo verificar el id_token de Google")
+    
+    email = (id_info.get("email") or "").lower().strip()
+    name = id_info.get("name") or ""
+    picture = id_info.get("picture") or ""
+    
+    logger.info(f"[Auth] callback: email={email} name={name}")
+    
+    if email != ALLOWED_EMAIL:
+        logger.warning(f"[Auth] REJECTED: {email} != allowed {ALLOWED_EMAIL}")
+        raise HTTPException(
+            status_code=403,
+            detail="Acceso denegado. Esta cuenta no tiene permiso para usar esta aplicación.",
+        )
+    
+    token = _create_jwt(email=email, name=name, picture=picture)
+    return {
+        "token": token,
+        "user": {"email": email, "name": name, "picture": picture},
+    }
+
+
+@api_router.get("/auth/me")
+async def auth_me(authorization: Optional[str] = Header(None)):
+    """Return the currently authenticated user (decoded from JWT)."""
+    if not authorization or not authorization.lower().startswith("bearer "):
+        raise HTTPException(status_code=401, detail="Falta token")
+    try:
+        payload = _decode_jwt(authorization[7:].strip())
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Token expirado")
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=401, detail="Token inválido")
+    
+    if (payload.get("email") or "").lower() != ALLOWED_EMAIL:
+        raise HTTPException(status_code=403, detail="No autorizado")
+    
+    return {
+        "email": payload.get("email"),
+        "name": payload.get("name"),
+        "picture": payload.get("picture"),
+    }
+
+
 # Include the router in the main app
 app.include_router(api_router)
+
+# JWT auth middleware MUST be added AFTER the router is registered
+# (middleware is applied in reverse order of add_middleware calls)
+app.add_middleware(JWTAuthMiddleware)
 
 app.add_middleware(
     CORSMiddleware,
