@@ -1375,6 +1375,23 @@ export default function Editor() {
         </div>
       </div>
 
+      {/* Ready-to-process counter */}
+      {questions.some(q => q.clasificacion) && (
+        <div
+          className="mb-4 p-3 bg-green-50 border border-green-200 rounded-sm flex items-center gap-3"
+          data-testid="ready-counter"
+        >
+          <CheckCircle className="w-4 h-4 text-green-600 flex-shrink-0" />
+          <p className="text-sm text-green-800">
+            <span className="font-semibold">
+              {questions.filter(q => q.clasificacion === "pregunta").length}
+            </span>{" "}
+            comentarios listos para procesar{" "}
+            <span className="text-green-600">(solo preguntas confirmadas)</span>
+          </p>
+        </div>
+      )}
+
       {/* Classification Filter Pills */}
       {questions.some(q => q.clasificacion) && (
         <div className="flex items-center gap-2 mb-6 flex-wrap" data-testid="clasificacion-filters">

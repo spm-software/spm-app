@@ -346,6 +346,37 @@ async def is_blocked_comment(youtube_username: str, text: str, threshold: float 
     return None
 
 
+async def build_clasificacion_filter(batch_id: str) -> Dict:
+    """Return a Mongo filter fragment restricting to 'pregunta' classification.
+    
+    If no question in the batch has any `clasificacion` set yet (legacy or
+    not-yet-classified), return {} so behavior is unchanged.
+    """
+    any_classified = await db.questions.find_one(
+        {"import_batch_id": batch_id, "clasificacion": {"$ne": None}},
+        {"_id": 1}
+    )
+    if any_classified:
+        return {"clasificacion": "pregunta"}
+    return {}
+
+
+async def build_clasificacion_filter_no_batch() -> Dict:
+    """Same as build_clasificacion_filter but global (all batches).
+    
+    Used by /programs/distribute which scopes by batch_id inside already.
+    Returns {"clasificacion": "pregunta"} if ANY question has a classification,
+    else {}.
+    """
+    any_classified = await db.questions.find_one(
+        {"clasificacion": {"$ne": None}},
+        {"_id": 1}
+    )
+    if any_classified:
+        return {"clasificacion": "pregunta"}
+    return {}
+
+
 
 def clean_youtube_metadata(text: str) -> str:
     """Remove YouTube metadata like timestamps from comment text"""
@@ -1494,12 +1525,18 @@ async def correct_questions(data: CorrectionRequest):
 
 @api_router.post("/questions/correct-all/{batch_id}")
 async def correct_all_questions(batch_id: str):
-    """Get list of questions to correct (does not correct them, just returns IDs)"""
+    """Get list of questions to correct (does not correct them, just returns IDs).
+    
+    Only operates on questions classified as 'pregunta' (or all, if none in the
+    batch has been classified yet).
+    """
+    clasif_filter = await build_clasificacion_filter(batch_id)
     questions = await db.questions.find(
         {
-            "import_batch_id": batch_id, 
+            "import_batch_id": batch_id,
             "is_greeting": {"$ne": True},
-            "is_corrected": {"$ne": True}
+            "is_corrected": {"$ne": True},
+            **clasif_filter
         },
         {"_id": 0, "id": 1, "youtube_username": 1}
     ).to_list(500)
@@ -1971,9 +2008,14 @@ async def clear_duplicate_flag(question_id: str):
 
 @api_router.post("/questions/update-names/{batch_id}")
 async def update_names_from_mappings(batch_id: str):
-    """Update all question names from stored user mappings"""
+    """Update all question names from stored user mappings.
+    
+    Only operates on questions classified as 'pregunta' (or all, if none in the
+    batch has been classified yet).
+    """
+    clasif_filter = await build_clasificacion_filter(batch_id)
     questions = await db.questions.find(
-        {"import_batch_id": batch_id},
+        {"import_batch_id": batch_id, **clasif_filter},
         {"_id": 0}
     ).to_list(500)
     
@@ -2056,11 +2098,13 @@ async def distribute_questions(data: DistributeRequest):
     4. Ángela Silva special rule: max 2 per program, never opens a program
     5. Excess goes to Reserva
     """
+    clasif_filter = await build_clasificacion_filter(data.batch_id)
     questions = await db.questions.find(
         {
             "import_batch_id": data.batch_id,
             "is_greeting": {"$ne": True},
-            "is_duplicate": {"$ne": True}
+            "is_duplicate": {"$ne": True},
+            **clasif_filter
         },
         {"_id": 0}
     ).sort("created_at", 1).to_list(1000)

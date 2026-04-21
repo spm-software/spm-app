@@ -130,7 +130,14 @@ export default function Distribuidor() {
       .sort((a, b) => (a.order_in_program || 999) - (b.order_in_program || 999));
   };
 
-  const validQuestions = questions.filter(q => !q.is_greeting && !q.is_duplicate);
+  // Apply clasificacion filter only if ANY question in this batch has been classified.
+  // Otherwise show everything (legacy / not-yet-classified behavior).
+  const anyClassified = questions.some(q => q.clasificacion);
+  const validQuestions = questions.filter(q => {
+    if (q.is_greeting || q.is_duplicate) return false;
+    if (anyClassified && q.clasificacion !== "pregunta") return false;
+    return true;
+  });
   const undistributed = validQuestions.filter(q => !q.program_id);
 
   return (
