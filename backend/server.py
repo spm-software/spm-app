@@ -1429,6 +1429,41 @@ async def confirm_question_name(question_id: str):
     return {"message": "Nombre confirmado", "real_name": question.get("real_name")}
 
 
+@api_router.post("/questions/confirm-derived-names/{batch_id}")
+async def confirm_derived_names(batch_id: str):
+    """Bulk-confirm all questions in the batch where the real_name equals the
+    youtube_username (case and @-insensitive). Those are users whose handle is
+    effectively their name — mark them as manually confirmed so they stop showing
+    as 'sin nombre'.
+    """
+    questions = await db.questions.find(
+        {
+            "import_batch_id": batch_id,
+            "real_name_confirmed": {"$ne": True}
+        },
+        {"_id": 0, "id": 1, "youtube_username": 1, "real_name": 1}
+    ).to_list(length=None)
+    
+    to_confirm: List[str] = []
+    for q in questions:
+        uname_clean = (q.get("youtube_username") or "").lstrip('@').lower().strip()
+        rn_clean = (q.get("real_name") or "").lstrip('@').lower().strip()
+        if rn_clean and uname_clean and rn_clean == uname_clean:
+            to_confirm.append(q["id"])
+    
+    if to_confirm:
+        await db.questions.update_many(
+            {"id": {"$in": to_confirm}},
+            {"$set": {"real_name_confirmed": True}}
+        )
+    
+    return {
+        "confirmed_count": len(to_confirm),
+        "total_checked": len(questions)
+    }
+
+
+
 @api_router.post("/questions/clean-orphan-duplicates")
 async def clean_orphan_duplicates():
     """Remove is_duplicate flag from questions whose original was deleted"""

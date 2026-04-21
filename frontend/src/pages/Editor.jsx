@@ -43,15 +43,15 @@ const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 /**
  * Returns one of three states for a question's real_name:
  *   - "confirmed" → green: real_name_confirmed === true
- *   - "auto"      → yellow: real_name set & different from username, not confirmed
- *   - "missing"   → red: real_name null/empty OR equals youtube_username
+ *   - "missing"   → red: NOT confirmed AND real_name equals youtube_username (strict, without @)
+ *                       — also treats empty/null real_name as missing for robustness
+ *   - "auto"      → yellow: real_name set to something different from username, not confirmed
  */
 export const getNameState = (q) => {
   if (q?.real_name_confirmed === true) return "confirmed";
-  const rn = (q?.real_name || "").trim();
-  if (!rn) return "missing";
   const unameClean = (q?.youtube_username || "").replace(/^@+/, "").toLowerCase().trim();
-  const rnClean = rn.replace(/^@+/, "").toLowerCase().trim();
+  const rnClean = (q?.real_name || "").replace(/^@+/, "").toLowerCase().trim();
+  if (!rnClean) return "missing";
   if (rnClean === unameClean) return "missing";
   return "auto";
 };
@@ -1119,6 +1119,36 @@ export default function Editor() {
     }
   };
 
+  const handleConfirmName = async (questionId) => {
+    try {
+      await axios.post(`${API}/questions/${questionId}/confirm-name`);
+      setQuestions(prev => prev.map(q =>
+        q.id === questionId ? { ...q, real_name_confirmed: true } : q
+      ));
+      toast.success("Nombre confirmado");
+    } catch (error) {
+      console.error("Error confirming name:", error);
+      toast.error("Error al confirmar nombre");
+    }
+  };
+
+  const handleConfirmDerivedNames = async () => {
+    if (!selectedBatch) return;
+    try {
+      const res = await axios.post(`${API}/questions/confirm-derived-names/${selectedBatch}`);
+      const n = res.data.confirmed_count || 0;
+      if (n > 0) {
+        toast.success(`${n} nombres derivados confirmados`);
+        await fetchQuestions();
+      } else {
+        toast.info("Ningún nombre coincidía con el @username");
+      }
+    } catch (error) {
+      console.error("Error confirming derived names:", error);
+      toast.error("Error al confirmar nombres derivados");
+    }
+  };
+
   const validQuestions = questions.filter(q => !q.is_greeting && !q.is_duplicate);
 
   return (
@@ -1321,6 +1351,19 @@ export default function Editor() {
           Actualizar nombres
         </Button>
 
+        {/* 5b. Confirmar nombres derivados */}
+        <Button
+          variant="outline"
+          onClick={handleConfirmDerivedNames}
+          disabled={questions.length === 0}
+          size="lg"
+          className="rounded-sm uppercase tracking-wide text-xs"
+          data-testid="confirm-derived-names-button"
+        >
+          <Check className="w-4 h-4 mr-2" />
+          Confirmar nombres derivados
+        </Button>
+
         {/* 6. Buscar en todo */}
         <Button
           variant="outline"
@@ -1493,6 +1536,20 @@ export default function Editor() {
                   <span className="text-muted-foreground flex-shrink-0">→</span>
                   
                   <EditableName question={question} onSave={handleUpdateQuestion} />
+                  
+                  {!question.real_name_confirmed && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => handleConfirmName(question.id)}
+                      className="h-6 px-2 rounded-sm text-xs text-green-700 hover:bg-green-50 hover:text-green-800 border border-green-200"
+                      title="Confirmar que este nombre es correcto"
+                      data-testid={`confirm-name-btn-${question.id}`}
+                    >
+                      <Check className="w-3 h-3 mr-1" />
+                      Nombre
+                    </Button>
+                  )}
                   
                   <div className="flex gap-2 ml-auto flex-shrink-0">
                     {(() => {
