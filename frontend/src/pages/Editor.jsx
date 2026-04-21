@@ -40,6 +40,22 @@ import {
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
+/**
+ * Returns one of three states for a question's real_name:
+ *   - "confirmed" → green: real_name_confirmed === true
+ *   - "auto"      → yellow: real_name set & different from username, not confirmed
+ *   - "missing"   → red: real_name null/empty OR equals youtube_username
+ */
+export const getNameState = (q) => {
+  if (q?.real_name_confirmed === true) return "confirmed";
+  const rn = (q?.real_name || "").trim();
+  if (!rn) return "missing";
+  const unameClean = (q?.youtube_username || "").replace(/^@+/, "").toLowerCase().trim();
+  const rnClean = rn.replace(/^@+/, "").toLowerCase().trim();
+  if (rnClean === unameClean) return "missing";
+  return "auto";
+};
+
 // Componente separado para editar nombre
 const EditableName = ({ question, onSave }) => {
   const [isEditing, setIsEditing] = useState(false);
@@ -923,11 +939,17 @@ export default function Editor() {
 
   const handleUpdateQuestion = async (questionId, field, value) => {
     try {
-      await axios.put(`${API}/questions/${questionId}`, {
-        [field]: value
-      });
-      setQuestions(prev => prev.map(q => 
-        q.id === questionId ? { ...q, [field]: value } : q
+      // When the user manually edits the real_name, mark it as confirmed so the app
+      // knows it was reviewed (even if the value equals the youtube_username).
+      const payload = { [field]: value };
+      if (field === "real_name") {
+        payload.real_name_confirmed = true;
+      }
+      await axios.put(`${API}/questions/${questionId}`, payload);
+      setQuestions(prev => prev.map(q =>
+        q.id === questionId
+          ? { ...q, ...payload }
+          : q
       ));
     } catch (error) {
       console.error("Error updating question:", error);
@@ -1319,14 +1341,7 @@ export default function Editor() {
             <span><strong>{validQuestions.length}</strong> válidas</span>
           </div>
           {(() => {
-            const noNameCount = questions.filter(q => {
-              const username = (q.youtube_username || '').replace('@', '').toLowerCase();
-              const realName = (q.real_name || '').toLowerCase().trim();
-              const hasRealName = q.real_name && 
-                                  q.real_name.trim() !== '' && 
-                                  (realName !== username || q.real_name_confirmed);
-              return !hasRealName;
-            }).length;
+            const noNameCount = questions.filter(q => getNameState(q) === "missing").length;
             return noNameCount > 0 ? (
               <button
                 onClick={() => {
@@ -1446,19 +1461,12 @@ export default function Editor() {
           </Card>
         ) : (
           (() => {
-            // Helper function to check if a question has no real name
-            const hasNoRealName = (q) => {
-              const username = (q.youtube_username || '').replace('@', '').toLowerCase();
-              const realName = (q.real_name || '').toLowerCase().trim();
-              return !q.real_name || q.real_name.trim() === '' || (realName === username && !q.real_name_confirmed);
-            };
-            
-            // Apply filters
+            // Apply filters (uses centralized getNameState for consistency)
             let filteredQuestions = questions;
             if (showOnlyDuplicates) {
               filteredQuestions = questions.filter(q => q.is_duplicate);
             } else if (showOnlyNoName) {
-              filteredQuestions = questions.filter(hasNoRealName);
+              filteredQuestions = questions.filter(q => getNameState(q) === "missing");
             } else if (clasificationFilter !== "all" && questions.some(q => q.clasificacion)) {
               filteredQuestions = questions.filter(q => q.clasificacion === clasificationFilter);
             }
@@ -1488,32 +1496,51 @@ export default function Editor() {
                   
                   <div className="flex gap-2 ml-auto flex-shrink-0">
                     {(() => {
-                      // Check if real_name is just the username without @
-                      const username = (question.youtube_username || '').replace('@', '').toLowerCase();
-                      const realName = (question.real_name || '').toLowerCase().trim();
-                      const hasRealName = question.real_name && 
-                                          question.real_name.trim() !== '' && 
-                                          (realName !== username || question.real_name_confirmed);
-                      return !hasRealName ? (
-                        <Badge 
-                          variant="outline" 
-                          className="text-xs text-yellow-700 border-yellow-500 bg-yellow-50 cursor-pointer hover:bg-yellow-100"
-                          onClick={async () => {
-                            if (window.confirm(`¿Confirmar que "${question.real_name || question.youtube_username}" es el nombre real correcto?`)) {
-                              try {
-                                await axios.post(`${API}/questions/${question.id}/confirm-name`);
-                                toast.success("Nombre confirmado");
-                                fetchQuestions();
-                              } catch (error) {
-                                toast.error("Error al confirmar nombre");
-                              }
-                            }
-                          }}
-                          title="Click para confirmar que este nombre es correcto"
+                      const state = getNameState(question);
+                      const styleMap = {
+                        confirmed: {
+                          cls: "text-green-700 border-green-500 bg-green-50",
+                          label: "Nombre confirmado",
+                          dot: "bg-green-500",
+                          title: "Nombre real confirmado"
+                        },
+                        auto: {
+                          cls: "text-yellow-700 border-yellow-500 bg-yellow-50 cursor-pointer hover:bg-yellow-100",
+                          label: "Nombre auto",
+                          dot: "bg-yellow-500",
+                          title: "Nombre sustituido por la app — click para confirmar"
+                        },
+                        missing: {
+                          cls: "text-red-700 border-red-500 bg-red-50 cursor-pointer hover:bg-red-100",
+                          label: "Sin nombre",
+                          dot: "bg-red-500",
+                          title: "Sigue con @username — click para confirmar igualmente"
+                        }
+                      };
+                      const s = styleMap[state];
+                      const handleConfirm = async () => {
+                        if (state === "confirmed") return;
+                        if (!window.confirm(`¿Confirmar "${question.real_name || question.youtube_username}" como nombre correcto?`)) return;
+                        try {
+                          await axios.post(`${API}/questions/${question.id}/confirm-name`);
+                          toast.success("Nombre confirmado");
+                          fetchQuestions();
+                        } catch (error) {
+                          toast.error("Error al confirmar nombre");
+                        }
+                      };
+                      return (
+                        <Badge
+                          variant="outline"
+                          className={`text-xs ${s.cls}`}
+                          onClick={state !== "confirmed" ? handleConfirm : undefined}
+                          title={s.title}
+                          data-testid={`name-state-${state}-${question.id}`}
                         >
-                          Sin nombre ✓
+                          <div className={`w-2 h-2 rounded-full ${s.dot} mr-1.5`} />
+                          {s.label}
                         </Badge>
-                      ) : null;
+                      );
                     })()}
                     {question.is_corrected && (
                       <Badge variant="secondary" className="text-xs bg-green-100 text-green-700 border-green-300">

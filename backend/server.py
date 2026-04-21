@@ -99,6 +99,7 @@ class QuestionUpdate(BaseModel):
     is_greeting: Optional[bool] = None
     is_duplicate: Optional[bool] = None
     real_name: Optional[str] = None
+    real_name_confirmed: Optional[bool] = None
     clasificacion: Optional[str] = None
     motivo_clasificacion: Optional[str] = None
 
@@ -2025,7 +2026,7 @@ async def update_names_from_mappings(batch_id: str):
         if stored_name and stored_name != question.get("real_name"):
             await db.questions.update_one(
                 {"id": question["id"]},
-                {"$set": {"real_name": stored_name}}
+                {"$set": {"real_name": stored_name, "real_name_confirmed": True}}
             )
             updated += 1
     
@@ -2372,9 +2373,13 @@ async def get_batches():
         # Attach classification counts
         bid = b.get("id")
         if bid:
+            # Unified "preguntas confirmadas" count — same formula used everywhere:
+            # clasificacion == "pregunta" AND NOT is_duplicate AND NOT is_greeting
             preguntas_confirmadas = await db.questions.count_documents({
                 "import_batch_id": bid,
-                "clasificacion": "pregunta"
+                "clasificacion": "pregunta",
+                "is_duplicate": {"$ne": True},
+                "is_greeting": {"$ne": True}
             })
             any_classified = await db.questions.find_one(
                 {"import_batch_id": bid, "clasificacion": {"$ne": None}},

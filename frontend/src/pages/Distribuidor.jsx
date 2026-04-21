@@ -23,6 +23,17 @@ import {
   ArrowRightLeft
 } from "lucide-react";
 
+// Mirror of Editor's getNameState for visual consistency
+const getNameState = (q) => {
+  if (q?.real_name_confirmed === true) return "confirmed";
+  const rn = (q?.real_name || "").trim();
+  if (!rn) return "missing";
+  const unameClean = (q?.youtube_username || "").replace(/^@+/, "").toLowerCase().trim();
+  const rnClean = rn.replace(/^@+/, "").toLowerCase().trim();
+  if (rnClean === unameClean) return "missing";
+  return "auto";
+};
+
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
 export default function Distribuidor() {
@@ -318,25 +329,22 @@ export default function Distribuidor() {
                       ) : (
                         <div className="space-y-2">
                           {programQuestions.map((q, idx) => {
-                            const username = (q.youtube_username || '').replace('@', '').toLowerCase();
-                            const realName = (q.real_name || '').toLowerCase().trim();
-                            const hasRealName = q.real_name && 
-                                                q.real_name.trim() !== '' && 
-                                                (realName !== username || q.real_name_confirmed);
+                            const nameState = getNameState(q);
+                            const isMissing = nameState === "missing";
                             return (
                               <div 
                                 key={q.id}
-                                className={`p-3 rounded-sm ${!hasRealName ? 'bg-yellow-500/10 border border-yellow-500/30' : 'bg-secondary/30'}`}
+                                className={`p-3 rounded-sm ${isMissing ? 'bg-red-500/10 border border-red-500/30' : 'bg-secondary/30'}`}
                               >
                                 <div className="flex items-center gap-2 mb-1">
                                   <span className="w-5 h-5 rounded-full bg-primary/10 text-primary text-xs flex items-center justify-center font-bold">
                                     {idx + 1}
                                   </span>
-                                  <span className={`text-xs font-medium truncate ${!hasRealName ? 'text-yellow-600' : ''}`}>
+                                  <span className={`text-xs font-medium truncate ${isMissing ? 'text-red-600' : ''}`}>
                                     {q.real_name || q.youtube_username}
                                   </span>
-                                  {!hasRealName && (
-                                    <AlertCircle className="w-3 h-3 text-yellow-500 flex-shrink-0" title="Sin nombre real registrado" />
+                                  {isMissing && (
+                                    <AlertCircle className="w-3 h-3 text-red-500 flex-shrink-0" title="Sin nombre real — sigue con @username" />
                                   )}
                                 </div>
                                 <p className="text-xs text-muted-foreground line-clamp-2 ml-7">
@@ -395,15 +403,12 @@ export default function Distribuidor() {
                     <ScrollArea className="max-h-[500px]">
                       <div className="space-y-2">
                         {reserveQuestions.map((q, idx) => {
-                          const username = (q.youtube_username || '').replace('@', '').toLowerCase();
-                          const realName = (q.real_name || '').toLowerCase().trim();
-                          const hasRealName = q.real_name &&
-                                              q.real_name.trim() !== '' &&
-                                              (realName !== username || q.real_name_confirmed);
+                          const nameState = getNameState(q);
+                          const isMissing = nameState === "missing";
                           return (
                             <div
                               key={q.id}
-                              className={`p-3 rounded-sm flex items-start gap-3 ${!hasRealName ? 'bg-yellow-500/10 border border-yellow-500/30' : 'bg-secondary/30'}`}
+                              className={`p-3 rounded-sm flex items-start gap-3 ${isMissing ? 'bg-red-500/10 border border-red-500/30' : 'bg-secondary/30'}`}
                               data-testid={`reserve-question-${q.id}`}
                             >
                               <div className="flex-1 min-w-0">
@@ -411,11 +416,11 @@ export default function Distribuidor() {
                                   <span className="w-5 h-5 rounded-full bg-yellow-500/20 text-yellow-700 text-xs flex items-center justify-center font-bold">
                                     {idx + 1}
                                   </span>
-                                  <span className={`text-xs font-medium truncate ${!hasRealName ? 'text-yellow-600' : ''}`}>
+                                  <span className={`text-xs font-medium truncate ${isMissing ? 'text-red-600' : ''}`}>
                                     {q.real_name || q.youtube_username}
                                   </span>
-                                  {!hasRealName && (
-                                    <AlertCircle className="w-3 h-3 text-yellow-500 flex-shrink-0" />
+                                  {isMissing && (
+                                    <AlertCircle className="w-3 h-3 text-red-500 flex-shrink-0" />
                                   )}
                                 </div>
                                 <p className="text-xs text-muted-foreground line-clamp-2 ml-7">
