@@ -1468,9 +1468,14 @@ export default function Editor() {
             return pills.map(p => (
               <button
                 key={p.value}
-                onClick={() => setClasificationFilter(p.value)}
+                onClick={() => {
+                  setClasificationFilter(p.value);
+                  // Classification pills take precedence — clear mutex filters
+                  setShowOnlyDuplicates(false);
+                  setShowOnlyNoName(false);
+                }}
                 className={`flex items-center gap-2 px-3 py-1.5 rounded-sm border text-xs transition-colors ${
-                  clasificationFilter === p.value
+                  clasificationFilter === p.value && !showOnlyDuplicates && !showOnlyNoName
                     ? 'bg-foreground text-background border-foreground'
                     : 'border-border hover:bg-secondary/50'
                 }`}
