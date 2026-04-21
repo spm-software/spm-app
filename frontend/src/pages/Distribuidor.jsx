@@ -208,9 +208,10 @@ export default function Distribuidor() {
 
             <div className="flex-1" />
 
-            <div className="text-right text-sm">
+            <div className="text-right text-sm" data-testid="distribute-summary">
               <p className="text-muted-foreground">
-                Preguntas válidas: <span className="font-bold text-foreground">{validQuestions.length}</span>
+                <span className="font-bold text-foreground">{validQuestions.length}</span>{" "}
+                {anyClassified ? "preguntas confirmadas listas para distribuir" : "preguntas válidas"}
               </p>
               {undistributed.length > 0 && (
                 <p className="text-yellow-600">

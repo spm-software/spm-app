@@ -2363,11 +2363,25 @@ async def export_all_programs(batch_id: str):
 
 @api_router.get("/batches")
 async def get_batches():
-    """Get all import batches"""
+    """Get all import batches with classification counts."""
     batches = await db.import_batches.find({}, {"_id": 0}).sort("created_at", -1).to_list(50)
     for b in batches:
         if isinstance(b.get('created_at'), str):
             b['created_at'] = deserialize_datetime(b['created_at'])
+        
+        # Attach classification counts
+        bid = b.get("id")
+        if bid:
+            preguntas_confirmadas = await db.questions.count_documents({
+                "import_batch_id": bid,
+                "clasificacion": "pregunta"
+            })
+            any_classified = await db.questions.find_one(
+                {"import_batch_id": bid, "clasificacion": {"$ne": None}},
+                {"_id": 1}
+            )
+            b["preguntas_confirmadas"] = preguntas_confirmadas
+            b["is_classified"] = any_classified is not None
     return batches
 
 @api_router.delete("/batches/{batch_id}")

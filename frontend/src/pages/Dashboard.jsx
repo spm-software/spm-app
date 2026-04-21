@@ -344,9 +344,19 @@ export default function Dashboard() {
                         {batch.id.slice(0, 8)}...
                       </p>
                     </div>
-                    <Badge variant="secondary" className="text-sm">
-                      {batch.question_count} preguntas
-                    </Badge>
+                    {batch.is_classified ? (
+                      <Badge variant="secondary" className="text-sm" data-testid={`batch-preguntas-${batch.id}`}>
+                        {batch.preguntas_confirmadas ?? 0} preguntas confirmadas
+                      </Badge>
+                    ) : (
+                      <Badge
+                        variant="outline"
+                        className="text-sm text-orange-600 border-orange-400 bg-orange-50"
+                        data-testid={`batch-preguntas-${batch.id}`}
+                      >
+                        {batch.question_count} comentarios (sin clasificar)
+                      </Badge>
+                    )}
                   </div>
 
                   {/* Status */}
