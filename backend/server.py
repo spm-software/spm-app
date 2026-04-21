@@ -2190,24 +2190,56 @@ async def distribute_questions(data: DistributeRequest):
     program_questions: List[List[dict]] = [[] for _ in range(num_programs)]
     reserve_questions: List[dict] = []
     
+    # Equity target: ceil(total / num_programs)
+    import math
+    target_per_program = math.ceil(len(questions) / num_programs) if num_programs > 0 else 0
+    
     def get_user_key(q: dict) -> str:
         name = (q.get("real_name") or q.get("youtube_username") or "").strip().lower()
         return name
     
-    # Walk chronologically; assign each question to the first program where
-    # the user still has room (< max_per_user). Otherwise → Reserva.
+    # Walk chronologically. For each question, try programs 1→N:
+    # - assign to program if user has < max_per_user AND program below target size
+    # - otherwise try next program
+    # - if no program fits → Reserva
+    # The "target" cap ensures equitable distribution across programs.
+    current_prog = 0
     for q in questions:
         user_key = get_user_key(q)
         if user_key not in user_count_per_program:
             user_count_per_program[user_key] = {}
         
         assigned = False
-        for prog_idx in range(num_programs):
-            if user_count_per_program[user_key].get(prog_idx, 0) < max_per_user:
+        attempts = 0
+        start_prog = current_prog
+        
+        while attempts < num_programs:
+            prog_idx = current_prog
+            user_count = user_count_per_program[user_key].get(prog_idx, 0)
+            prog_size = len(program_questions[prog_idx])
+            
+            if user_count < max_per_user and prog_size < target_per_program:
                 program_questions[prog_idx].append(q)
-                user_count_per_program[user_key][prog_idx] = user_count_per_program[user_key].get(prog_idx, 0) + 1
+                user_count_per_program[user_key][prog_idx] = user_count + 1
                 assigned = True
+                # Advance to next program for round-robin fairness
+                current_prog = (current_prog + 1) % num_programs
                 break
+            
+            current_prog = (current_prog + 1) % num_programs
+            attempts += 1
+        
+        if not assigned:
+            # Last resort: try ignoring the target cap (keep per-user cap), to fill
+            # programs that still have room under max_per_user. This prevents
+            # sending to Reserva prematurely when the target is tight.
+            for prog_idx in range(num_programs):
+                user_count = user_count_per_program[user_key].get(prog_idx, 0)
+                if user_count < max_per_user:
+                    program_questions[prog_idx].append(q)
+                    user_count_per_program[user_key][prog_idx] = user_count + 1
+                    assigned = True
+                    break
         
         if not assigned:
             reserve_questions.append(q)
