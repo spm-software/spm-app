@@ -2091,12 +2091,12 @@ async def get_programs(batch_id: Optional[str] = None):
 
 @api_router.post("/programs/distribute")
 async def distribute_questions(data: DistributeRequest):
-    """Distribute questions into programs following the rules:
-    1. Maintain chronological order
-    2. Max 2 questions per user per program
-    3. Equal distribution between programs
-    4. Ángela Silva special rule: max 2 per program, never opens a program
-    5. Excess goes to Reserva
+    """Distribute questions into programs following these rules:
+    
+    1. Chronological order preserved (oldest first)
+    2. Max `max_per_user` (default 2) questions per person per program
+    3. Overflow (questions that would exceed the per-person cap in ALL programs) → Reserva
+    4. Reserva has NO limits (neither total nor per-person)
     """
     clasif_filter = await build_clasificacion_filter(data.batch_id)
     questions = await db.questions.find(
@@ -2125,7 +2125,7 @@ async def distribute_questions(data: DistributeRequest):
         {"$set": {"program_id": None, "program_number": None, "order_in_program": None}}
     )
     
-    # Create programs
+    # Create normal programs
     programs = []
     for i in range(num_programs):
         program = Program(
@@ -2138,7 +2138,7 @@ async def distribute_questions(data: DistributeRequest):
         await db.programs.insert_one(doc)
         programs.append(program)
     
-    # Create reserve program
+    # Create Reserva (unlimited)
     reserve = Program(
         name="Reserva",
         number=num_programs + 1,
@@ -2149,127 +2149,34 @@ async def distribute_questions(data: DistributeRequest):
     reserve_doc['created_at'] = serialize_datetime(reserve_doc['created_at'])
     await db.programs.insert_one(reserve_doc)
     
-    # Calculate target questions per program (for equity)
-    total_questions = len(questions)
-    base_per_program = total_questions // num_programs
-    remainder = total_questions % num_programs
-    
-    # Create target limits for each program (distribute remainder)
-    program_limits = []
-    for i in range(num_programs):
-        limit = base_per_program + (1 if i < remainder else 0)
-        program_limits.append(limit)
-    
-    logger.info(f"Distributing {total_questions} questions into {num_programs} programs")
-    logger.info(f"Target per program: {program_limits}")
-    
-    # Track state
-    user_count_per_program: Dict[str, Dict[int, int]] = {}  # username -> {program_idx: count}
-    program_questions: List[List[dict]] = [[] for _ in range(num_programs)]  # Questions assigned to each program
+    # Track per-user counts per program
+    user_count_per_program: Dict[str, Dict[int, int]] = {}
+    program_questions: List[List[dict]] = [[] for _ in range(num_programs)]
     reserve_questions: List[dict] = []
     
-    # Special users that need placement rules (in the middle of the block)
-    special_users = {"ángela silva", "angela silva"}  # Normalized names
-    
-    def normalize_name(name: str) -> str:
-        if not name:
-            return ""
-        return name.lower().strip()
-    
     def get_user_key(q: dict) -> str:
-        """Get normalized user identifier for a question"""
-        return normalize_name(q.get("real_name") or q.get("youtube_username", ""))
+        name = (q.get("real_name") or q.get("youtube_username") or "").strip().lower()
+        return name
     
-    def is_special_user(q: dict) -> bool:
-        """Check if question is from a special user (Ángela Silva)"""
-        user = get_user_key(q)
-        return any(special in user for special in special_users)
-    
-    # First pass: Distribute normal questions (not special users)
-    # We'll insert special user questions in the middle later
-    normal_questions = []
-    special_user_questions = []
-    
+    # Walk chronologically; assign each question to the first program where
+    # the user still has room (< max_per_user). Otherwise → Reserva.
     for q in questions:
-        if is_special_user(q):
-            special_user_questions.append(q)
-        else:
-            normal_questions.append(q)
-    
-    logger.info(f"Normal questions: {len(normal_questions)}, Special user questions: {len(special_user_questions)}")
-    
-    # Distribute normal questions maintaining chronological order
-    current_program = 0
-    
-    for q in normal_questions:
         user_key = get_user_key(q)
         if user_key not in user_count_per_program:
             user_count_per_program[user_key] = {}
         
         assigned = False
-        attempts = 0
-        start_program = current_program
-        
-        while attempts < num_programs:
-            prog_idx = current_program
-            user_count = user_count_per_program[user_key].get(prog_idx, 0)
-            current_count = len(program_questions[prog_idx])
-            
-            # Check if user can have more questions in this program
-            # and program is not at capacity
-            if user_count < max_per_user and current_count < program_limits[prog_idx]:
-                program_questions[prog_idx].append(q)
-                user_count_per_program[user_key][prog_idx] = user_count + 1
-                assigned = True
-                
-                # Move to next program for round-robin distribution
-                current_program = (current_program + 1) % num_programs
-                break
-            
-            # Try next program
-            current_program = (current_program + 1) % num_programs
-            attempts += 1
-        
-        if not assigned:
-            reserve_questions.append(q)
-    
-    # Now insert special user questions in the middle of each program block
-    # Only if there are already questions in the program
-    for q in special_user_questions:
-        user_key = get_user_key(q)
-        if user_key not in user_count_per_program:
-            user_count_per_program[user_key] = {}
-        
-        assigned = False
-        
-        # Try each program
         for prog_idx in range(num_programs):
-            user_count = user_count_per_program[user_key].get(prog_idx, 0)
-            current_count = len(program_questions[prog_idx])
-            
-            # Check limits (2 per user per program, and room in program)
-            # Also require at least 2 questions already in program to avoid opening
-            if user_count < max_per_user and current_count < program_limits[prog_idx]:
-                # Insert in the middle of the program, but NEVER at position 0
-                if current_count >= 2:
-                    # Insert approximately in the middle
-                    insert_pos = current_count // 2
-                    # Make sure we're not at position 0
-                    insert_pos = max(1, insert_pos)
-                else:
-                    # If program has fewer than 2 questions, append at the end
-                    # This ensures Ángela doesn't open the program
-                    insert_pos = current_count
-                
-                program_questions[prog_idx].insert(insert_pos, q)
-                user_count_per_program[user_key][prog_idx] = user_count + 1
+            if user_count_per_program[user_key].get(prog_idx, 0) < max_per_user:
+                program_questions[prog_idx].append(q)
+                user_count_per_program[user_key][prog_idx] = user_count_per_program[user_key].get(prog_idx, 0) + 1
                 assigned = True
                 break
         
         if not assigned:
             reserve_questions.append(q)
     
-    # Now save all assignments to database
+    # Persist assignments
     for prog_idx, prog_qs in enumerate(program_questions):
         program = programs[prog_idx]
         for order, q in enumerate(prog_qs, 1):
@@ -2282,7 +2189,6 @@ async def distribute_questions(data: DistributeRequest):
                 }}
             )
     
-    # Save reserve questions
     for order, q in enumerate(reserve_questions, 1):
         await db.questions.update_one(
             {"id": q["id"]},
@@ -2293,15 +2199,12 @@ async def distribute_questions(data: DistributeRequest):
             }}
         )
     
-    # Update program question counts
+    # Update counts
     for prog_idx, program in enumerate(programs):
-        count = len(program_questions[prog_idx])
         await db.programs.update_one(
             {"id": program.id},
-            {"$set": {"question_count": count}}
+            {"$set": {"question_count": len(program_questions[prog_idx])}}
         )
-    
-    # Update reserve count
     await db.programs.update_one(
         {"id": reserve.id},
         {"$set": {"question_count": len(reserve_questions)}}
@@ -2313,15 +2216,65 @@ async def distribute_questions(data: DistributeRequest):
         {"$set": {"is_distributed": True, "num_programs": num_programs}}
     )
     
-    # Build distribution summary
     distribution = {programs[i].name: len(program_questions[i]) for i in range(num_programs)}
     distribution["Reserva"] = len(reserve_questions)
     
     logger.info(f"Distribution complete: {distribution}")
     
     return {
-        "programs_created": num_programs + 1,  # Including reserve
+        "programs_created": num_programs + 1,
         "distribution": distribution
+    }
+
+
+class MoveQuestionRequest(BaseModel):
+    target_program_id: str
+
+
+@api_router.post("/questions/{question_id}/move")
+async def move_question_between_programs(question_id: str, data: MoveQuestionRequest):
+    """Move a question from its current program to another program (typically Reserva → normal)."""
+    question = await db.questions.find_one({"id": question_id}, {"_id": 0})
+    if not question:
+        raise HTTPException(status_code=404, detail="Pregunta no encontrada")
+    
+    target_program = await db.programs.find_one({"id": data.target_program_id}, {"_id": 0})
+    if not target_program:
+        raise HTTPException(status_code=404, detail="Programa destino no encontrado")
+    
+    source_program_id = question.get("program_id")
+    if source_program_id == data.target_program_id:
+        return {"message": "La pregunta ya está en ese programa"}
+    
+    # Append to target: next order = current count + 1
+    target_count = await db.questions.count_documents({"program_id": data.target_program_id})
+    new_order = target_count + 1
+    
+    await db.questions.update_one(
+        {"id": question_id},
+        {"$set": {
+            "program_id": data.target_program_id,
+            "program_number": target_program.get("number"),
+            "order_in_program": new_order
+        }}
+    )
+    
+    # Refresh counts on both sides
+    if source_program_id:
+        src_count = await db.questions.count_documents({"program_id": source_program_id})
+        await db.programs.update_one(
+            {"id": source_program_id},
+            {"$set": {"question_count": src_count}}
+        )
+    await db.programs.update_one(
+        {"id": data.target_program_id},
+        {"$set": {"question_count": new_order}}
+    )
+    
+    return {
+        "message": "Pregunta movida",
+        "target_program": target_program.get("name"),
+        "new_order": new_order
     }
 
 

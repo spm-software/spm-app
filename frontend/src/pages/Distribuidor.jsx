@@ -19,7 +19,8 @@ import {
   Archive,
   BarChart3,
   Trash2,
-  AlertCircle
+  AlertCircle,
+  ArrowRightLeft
 } from "lucide-react";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -70,6 +71,19 @@ export default function Distribuidor() {
       setPrograms(response.data);
     } catch (error) {
       console.error("Error fetching programs:", error);
+    }
+  };
+
+  const handleMoveFromReserve = async (questionId, targetProgramId) => {
+    try {
+      await axios.post(`${API}/questions/${questionId}/move`, {
+        target_program_id: targetProgramId
+      });
+      await Promise.all([fetchPrograms(), fetchQuestions()]);
+      toast.success("Pregunta movida");
+    } catch (error) {
+      console.error("Error moving question:", error);
+      toast.error(error.response?.data?.detail || "Error al mover la pregunta");
     }
   };
 
@@ -272,82 +286,172 @@ export default function Distribuidor() {
 
       {/* Programs Grid */}
       {programs.length > 0 ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 stagger-children">
-          {programs.map((program) => {
-            const programQuestions = getQuestionsForProgram(program.id);
+        <>
+          {/* Normal programs */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 stagger-children mb-8">
+            {programs.filter(p => !p.is_reserve).map((program) => {
+              const programQuestions = getQuestionsForProgram(program.id);
+              return (
+                <Card 
+                  key={program.id} 
+                  className="bg-card border border-border rounded-sm"
+                  data-testid={`program-card-${program.number}`}
+                >
+                  <CardHeader className="pb-3">
+                    <div className="flex items-center justify-between">
+                      <CardTitle className="font-heading text-lg uppercase tracking-tight flex items-center gap-2">
+                        <BarChart3 className="w-5 h-5 text-primary" />
+                        {program.name}
+                      </CardTitle>
+                      <Badge variant="secondary" className="rounded-full">
+                        {program.question_count} preguntas
+                      </Badge>
+                    </div>
+                  </CardHeader>
+                  <CardContent className="pt-0">
+                    <ScrollArea className="h-64">
+                      {programQuestions.length === 0 ? (
+                        <p className="text-sm text-muted-foreground text-center py-8">
+                          Sin preguntas asignadas
+                        </p>
+                      ) : (
+                        <div className="space-y-2">
+                          {programQuestions.map((q, idx) => {
+                            const username = (q.youtube_username || '').replace('@', '').toLowerCase();
+                            const realName = (q.real_name || '').toLowerCase().trim();
+                            const hasRealName = q.real_name && 
+                                                q.real_name.trim() !== '' && 
+                                                (realName !== username || q.real_name_confirmed);
+                            return (
+                              <div 
+                                key={q.id}
+                                className={`p-3 rounded-sm ${!hasRealName ? 'bg-yellow-500/10 border border-yellow-500/30' : 'bg-secondary/30'}`}
+                              >
+                                <div className="flex items-center gap-2 mb-1">
+                                  <span className="w-5 h-5 rounded-full bg-primary/10 text-primary text-xs flex items-center justify-center font-bold">
+                                    {idx + 1}
+                                  </span>
+                                  <span className={`text-xs font-medium truncate ${!hasRealName ? 'text-yellow-600' : ''}`}>
+                                    {q.real_name || q.youtube_username}
+                                  </span>
+                                  {!hasRealName && (
+                                    <AlertCircle className="w-3 h-3 text-yellow-500 flex-shrink-0" title="Sin nombre real registrado" />
+                                  )}
+                                </div>
+                                <p className="text-xs text-muted-foreground line-clamp-2 ml-7">
+                                  {q.corrected_text || q.original_text}
+                                </p>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </ScrollArea>
+                  </CardContent>
+                </Card>
+              );
+            })}
+          </div>
+
+          {/* Reserva — separate visually, at the end, full-width */}
+          {programs.filter(p => p.is_reserve).map((program) => {
+            const reserveQuestions = getQuestionsForProgram(program.id);
+            const uniquePeople = new Set(
+              reserveQuestions.map(q => (q.real_name || q.youtube_username || "").trim().toLowerCase()).filter(Boolean)
+            );
+            const normalPrograms = programs.filter(p => !p.is_reserve);
             return (
-              <Card 
-                key={program.id} 
-                className={`bg-card border rounded-sm ${
-                  program.is_reserve 
-                    ? "border-yellow-500/50 bg-yellow-500/5" 
-                    : "border-border"
-                }`}
+              <Card
+                key={program.id}
+                className="bg-yellow-500/5 border-2 border-yellow-500/50 border-dashed rounded-sm"
                 data-testid={`program-card-${program.number}`}
               >
                 <CardHeader className="pb-3">
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-center justify-between flex-wrap gap-2">
                     <CardTitle className="font-heading text-lg uppercase tracking-tight flex items-center gap-2">
-                      {program.is_reserve ? (
-                        <Archive className="w-5 h-5 text-yellow-500" />
-                      ) : (
-                        <BarChart3 className="w-5 h-5 text-primary" />
-                      )}
+                      <Archive className="w-5 h-5 text-yellow-500" />
                       {program.name}
                     </CardTitle>
-                    <Badge 
-                      variant={program.is_reserve ? "outline" : "secondary"}
-                      className="rounded-full"
-                    >
-                      {program.question_count} preguntas
-                    </Badge>
+                    <div className="flex items-center gap-2">
+                      <Badge variant="outline" className="rounded-full border-yellow-500/50 text-yellow-700 bg-yellow-500/10" data-testid="reserve-count-badge">
+                        {reserveQuestions.length} preguntas
+                      </Badge>
+                      <Badge variant="outline" className="rounded-full border-yellow-500/50 text-yellow-700 bg-yellow-500/10">
+                        {uniquePeople.size} personas distintas
+                      </Badge>
+                    </div>
                   </div>
+                  <p className="text-xs text-muted-foreground mt-2">
+                    Preguntas que exceden el máximo por persona. La Reserva no tiene límite. Muévelas manualmente a cualquier programa si quieres incluirlas.
+                  </p>
                 </CardHeader>
                 <CardContent className="pt-0">
-                  <ScrollArea className="h-64">
-                    {programQuestions.length === 0 ? (
-                      <p className="text-sm text-muted-foreground text-center py-8">
-                        Sin preguntas asignadas
-                      </p>
-                    ) : (
+                  {reserveQuestions.length === 0 ? (
+                    <p className="text-sm text-muted-foreground text-center py-8">
+                      Sin preguntas en Reserva
+                    </p>
+                  ) : (
+                    <ScrollArea className="max-h-[500px]">
                       <div className="space-y-2">
-                        {programQuestions.map((q, idx) => {
-                          // Check if real_name is just the username without @
+                        {reserveQuestions.map((q, idx) => {
                           const username = (q.youtube_username || '').replace('@', '').toLowerCase();
                           const realName = (q.real_name || '').toLowerCase().trim();
-                          const hasRealName = q.real_name && 
-                                              q.real_name.trim() !== '' && 
+                          const hasRealName = q.real_name &&
+                                              q.real_name.trim() !== '' &&
                                               (realName !== username || q.real_name_confirmed);
                           return (
-                            <div 
+                            <div
                               key={q.id}
-                              className={`p-3 rounded-sm ${!hasRealName ? 'bg-yellow-500/10 border border-yellow-500/30' : 'bg-secondary/30'}`}
+                              className={`p-3 rounded-sm flex items-start gap-3 ${!hasRealName ? 'bg-yellow-500/10 border border-yellow-500/30' : 'bg-secondary/30'}`}
+                              data-testid={`reserve-question-${q.id}`}
                             >
-                              <div className="flex items-center gap-2 mb-1">
-                                <span className="w-5 h-5 rounded-full bg-primary/10 text-primary text-xs flex items-center justify-center font-bold">
-                                  {idx + 1}
-                                </span>
-                                <span className={`text-xs font-medium truncate ${!hasRealName ? 'text-yellow-600' : ''}`}>
-                                  {q.real_name || q.youtube_username}
-                                </span>
-                                {!hasRealName && (
-                                  <AlertCircle className="w-3 h-3 text-yellow-500 flex-shrink-0" title="Sin nombre real registrado" />
-                                )}
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2 mb-1">
+                                  <span className="w-5 h-5 rounded-full bg-yellow-500/20 text-yellow-700 text-xs flex items-center justify-center font-bold">
+                                    {idx + 1}
+                                  </span>
+                                  <span className={`text-xs font-medium truncate ${!hasRealName ? 'text-yellow-600' : ''}`}>
+                                    {q.real_name || q.youtube_username}
+                                  </span>
+                                  {!hasRealName && (
+                                    <AlertCircle className="w-3 h-3 text-yellow-500 flex-shrink-0" />
+                                  )}
+                                </div>
+                                <p className="text-xs text-muted-foreground line-clamp-2 ml-7">
+                                  {q.corrected_text || q.original_text}
+                                </p>
                               </div>
-                              <p className="text-xs text-muted-foreground line-clamp-2 ml-7">
-                                {q.corrected_text || q.original_text}
-                              </p>
+                              <div className="flex items-center gap-1 flex-shrink-0">
+                                <Select
+                                  onValueChange={(targetId) => handleMoveFromReserve(q.id, targetId)}
+                                >
+                                  <SelectTrigger
+                                    className="h-8 w-[130px] text-xs rounded-sm"
+                                    data-testid={`move-select-${q.id}`}
+                                  >
+                                    <ArrowRightLeft className="w-3 h-3 mr-1" />
+                                    <SelectValue placeholder="Mover a…" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {normalPrograms.map(p => (
+                                      <SelectItem key={p.id} value={p.id} className="text-xs">
+                                        {p.name}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              </div>
                             </div>
                           );
                         })}
                       </div>
-                    )}
-                  </ScrollArea>
+                    </ScrollArea>
+                  )}
                 </CardContent>
               </Card>
             );
           })}
-        </div>
+        </>
       ) : (
         <Card className="bg-card border border-border rounded-sm">
           <CardContent className="py-16 text-center">
