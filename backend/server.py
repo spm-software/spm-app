@@ -3454,6 +3454,8 @@ async def auth_google_url(redirect_uri: str):
         redirect_uri=redirect_uri,
         autogenerate_code_verifier=False,
     )
+    # Belt-and-suspenders: explicitly disable PKCE
+    flow.code_verifier = None
     auth_url, state = flow.authorization_url(
         access_type="online",
         prompt="select_account",
@@ -3484,9 +3486,12 @@ async def auth_google_callback(data: GoogleCallbackRequest):
             redirect_uri=data.redirect_uri,
             autogenerate_code_verifier=False,
         )
+        # Belt-and-suspenders: explicitly disable PKCE
+        flow.code_verifier = None
+        logger.info(f"[Auth] google-callback: exchanging code (redirect_uri={data.redirect_uri})")
         flow.fetch_token(code=data.code)
     except Exception as e:
-        logger.error(f"[Auth] fetch_token failed: {e}")
+        logger.error(f"[Auth] fetch_token failed: {type(e).__name__}: {e}")
         raise HTTPException(status_code=400, detail=f"Error al intercambiar código: {e}")
     
     credentials = flow.credentials
