@@ -1,192 +1,174 @@
 <analysis>**original_problem_statement:**
-The user manages a Q&A YouTube channel and needs a tool to automate their workflow. Currently, they manually collect comments, clean them up, correct grammar, and group them for upcoming videos.
+The user manages a Q&A YouTube channel and needs a tool to automate their workflow. 
+PRODUCT REQUIREMENTS:
+1. Import: Collect comments from various text formats, and directly via YouTube Data API integration.
+2. Data Cleaning: Automatically remove greetings/timestamps, correct grammar via AI, and extract real user names. Clean HTML entities.
+3. Content Management: AI classification (Questions, Doubtful, Greetings). Group questions into programs (chronological, max 2 per user, reserve overflow, duplicate detection). Blacklist recurring spam comments.
+4. Output: Export organized programs into a single plain text file.
+5. Auth: Google OAuth login strictly restricted to the user's specific email address.
 
-**PRODUCT REQUIREMENTS:**
-1.  **Import:** Collect comments from various text formats.
-2.  **Data Cleaning:**
-    *   Automatically remove greetings and timestamps.
-    *   Correct grammar, spelling, and punctuation using AI.
-    *   Extract real user names from their YouTube handles and remember them.
-3.  **Content Management:**
-    *   Group questions into programs.
-    *   Detect and manage duplicate questions from the **same user**, both within the current import and against historical questions, using both simple and advanced AI-powered semantic matching.
-    *   Edit batch names, dates, question text, and usernames.
-4.  **Output:** Export organized programs into a single plain text file.
+**User's preferred language**: Spanish (You MUST automatically detect the user's primary language from their messages inside the <trajectory> tag and INSTRUCT next agent to respond in Spanish ONLY)
 
-**User's preferred language**: Spanish
-
-**what currently exists?**
-A full-stack application (React + FastAPI) for managing YouTube Q&A comments. Key features include:
--   **Dashboard**: Displays all imported batches with editable names and dates.
--   **Importer**: A robust text parser that handles multiple formats from copied YouTube comments and TXT files.
--   **Editor**: The main workspace to view, edit, and manage questions.
-    -   All text fields (username, real name, question text) are editable.
-    -   **Advanced Duplicate Detection**:
-        -   A fast search for word-based similarities (now case/accent insensitive).
-        -   An **AI-powered semantic search** that finds topically similar questions from the *same user*.
-        -   A dropdown menu to select the AI model (GPT-5.2, GPT-4o, Claude Sonnet 4.5, Gemini 3 Flash) for the search.
-    -   **Duplicate Management UI**:
-        -   A filter to show only duplicate questions.
-        -   A clear side-by-side comparison modal to decide which question to keep.
-        -   The modal shows the exact source batch for each question.
--   **AI Correction**: A feature to correct grammar and spelling on individual questions.
+**what currently exists?** 
+A full-stack application (React + FastAPI + MongoDB) for managing YouTube Q&A comments. Features include a Dashboard, YouTube API Importer (with raw comment anchoring and deduplication by ID), an Editor (AI classification, AI duplicates, tricolor real-name confirmation), a Distributor (ceil(total/programs) algorithm with Reserve for overflow), a Config page (Backup, YouTube Auth popup, Blocked comments list), and a restricted Google Auth Login system.
 
 **Last working item**:
-    - Last item agent was working: The user reported that the duplicate comparison modal sometimes shows Desconocido as the location for a duplicate question. The agent was investigating the backend logic in  to understand why the batch information is not being correctly fetched and passed to the frontend, especially after an AI-powered search.
+    - Last item agent was working: Debugging a Google Login OAuth  / scope mismatch error. The user noticed that the OAuth login flow is incorrectly mixing basic auth scopes with YouTube scopes. The agent was investigating  where  is still present in the login flow (), which is causing Google to demand YouTube scopes during the basic login process.
     - Status: IN PROGRESS
     - Agent Testing Done: N
-    - Which testing method agent to use? backend testing agent
+    - Which testing method agent to use? both
     - User Testing Done: N
 
 **All Pending/In progress Issue list**:
-  Issue 1: Duplicate comparison modal shows Desconocido as batch location. (Priority: P0)
-  Issue 2: AI-powered duplicate search is slow and can time out on large batches. (Priority: P1)
+  Issue 1: Fix Google Login OAuth Scope Mismatch (Priority: P0)
+  Issue 2: Implement OpenAI API retry logic (Priority: P1)
 
   Issues Detail:
-  - Issue 1: 
-     - Attempted fixes: The agent started investigating the backend code and added logging to trace how batch information is handled when constructing the duplicate pairs list. The issue seems to be that the historical question object doesn't have its batch information pre-loaded when the AI search returns a match.
+  - Issue 1: Fix Google Login OAuth Scope Mismatch
+     - Attempted fixes: The agent disabled PKCE and separated  from , but left  in the  endpoint (around line 3462 in ), causing the scope mismatch.
      - Next debug checklist: 
-        1. In , within the  function, inspect the  object after it's identified as a potential duplicate.
-        2. Ensure that its  is used to fetch the corresponding batch details (name and date).
-        3. Modify the logic to explicitly look up the batch information for every historical duplicate found, rather than relying on pre-loaded data.
-        4. Test the  endpoint with a known duplicate pair and verify the JSON response contains correct batch info for both questions.
-     - Why fix this issue and what will be achieved with the fix? The user needs to know the source of each duplicate to make an informed decision. Fixing this is critical for the usability of the duplicate management feature.
-     - Status:  IN PROGRESS
+        1. In , locate .
+        2. Remove  from the  call for the login flow.
+        3. Ensure the callback correctly handles the JWT generation without requiring YouTube tokens.
+        4. Explain the callback and token storage to the user as requested in their last message.
+     - Why fix this issue and what will be achieved with the fix? Currently, the user cannot log in to the application, rendering it completely inaccessible.
+     - Status: IN PROGRESS
      - Is recurring issue? N
-     - Should Test frontend/backend/both after fix? backend
-     - Blocked on other issue: None
-
-  - Issue 2: 
-     - Attempted fixes: The agent optimized the AI search to only process users who have more than one question in the combined dataset. However, this is not a complete solution, as a single user with many questions can still cause a timeout.
-     - Next debug checklist: 
-        1. Implement a background task mechanism (e.g., using FastAPI's ) for the AI duplicate search.
-        2. The endpoint () should immediately return a task ID.
-        3. Create a new endpoint () for the frontend to poll for progress and results.
-        4. Update the frontend  to show a progress bar and poll the status endpoint instead of waiting for the initial call to finish.
-     - Why fix this issue and what will be achieved with the fix? This will prevent proxy timeouts and provide a much better user experience when running a long and computationally expensive operation.
-     - Status:  IN PROGRESS
-     - Is recurring issue? Y
      - Should Test frontend/backend/both after fix? both
      - Blocked on other issue: None
 
+  - Issue 2: Transient OpenAI API errors
+     - Attempted fixes: None yet.
+     - Next debug checklist: Wrap  / OpenAI calls in a try/except block with a retry mechanism (2-3 times) for network-related errors like .
+     - Why fix this issue and what will be achieved with the fix? Improves stability during AI classification, duplicate checks, and corrections.
+     - Status: NOT STARTED
+     - Is recurring issue? Y
+     - Should Test frontend/backend/both after fix? backend
+     - Blocked on other issue: None
+
 **In progress Task List**:
-- None.
+  None.
 
 **Upcoming and Future Tasks**
-- **Upcoming Tasks:**
-  - **P0**: Add automatic retries for transient OpenAI API errors (e.g., ) to improve the reliability of all AI features (correction and duplicate detection). This involves wrapping API calls in a simple retry loop.
-  - **P1**: Refactor the  component to break it down into smaller, manageable child components and custom hooks (e.g., , ). It currently handles too much state and logic.
-- **Future Tasks:**
-  - **P2**: Implement a final AI-powered formatting step during the **export** process. This would apply the user's SPM style rules to the approved questions automatically, creating a ready-to-use script.
+  Upcoming Tasks:
+  - P2: Refactor  into multiple routers (, , , etc.) to solve the >3500 line monolith issue.
+  - P2: Refactor  to break it down into smaller child components.
+  
+  Future Tasks:
+  - P3: Add a cron-like scheduler (e.g., every 15 days) to auto-download YouTube comments and notify the user via email.
 
 **Completed work in this session**
-- **Feature: Editable Batch Info**: Implemented functionality to edit both the name and date of import batches directly from the Dashboard.
-- **Feature: Advanced Duplicate Detection**:
-    - Built an AI-powered semantic duplicate search that only compares questions from the **same user**.
-    - Added a UI dropdown to allow the user to select the AI model for the search (GPT-5.2, GPT-4o, Claude, Gemini).
-    - Improved the basic word-based search to be case and accent insensitive.
-- **Feature: Robust Import Parser**: Massively improved the import parser in  to handle a wide variety of inconsistent formats from user-provided TXT files and direct YouTube copy-pastes.
-- **Feature: Editable Content**: Made question text and usernames () directly editable in the Editor view.
-- **UI/UX for Duplicate Management**:
-    - Created a clear, side-by-side comparison modal for resolving duplicates.
-    - The duplicate count badge in the Editor now functions as a toggle filter to show only duplicated questions.
-    - Improved the comparison modal to show the exact source batch name/date for each question.
-- **Bug Fixes**:
-    - Resolved a navigation bug where the Editor would incorrectly default to the first batch.
-    - Fixed an issue where the page would scroll to the top after an AI correction or question deletion.
-    - Implemented a server-side cleanup function to remove orphan duplicates pointing to deleted questions.
-    - Ensured the batch question count updates correctly on the Dashboard after a question is deleted.
+- Switched YouTube Auth to a manual popup flow in Configuración (DONE)
+- Fixed Google Auth PyJWT/PKCE  bugs by disabling PKCE (DONE)
+- Re-wrote YouTube fetcher to deduplicate by  instead of cutoff dates (DONE)
+- Added Background Task AI Classification (, , ) (DONE)
+- Added classification filters and updated all downstream endpoints (correct, update-names, distribute, export) to strictly process only  (DONE)
+- Implemented HTML Entity Cleaning ( + regex) for all imports (DONE)
+- Implemented  Blacklist (auto-delete spam, seeded with specific user) (DONE)
+- Unified X preguntas confirmadas counter across the entire app (DONE)
+- Added Tricolor Name Confirmation UI (Confirmed, Auto, Missing) with single-click bulk processing (DONE)
+- Re-wrote Distributor algorithm to strictly use , chronological order, max 2 per user, and automatic overflow to a visual Reserva UI (DONE)
+- Implemented Google Auth Login strictly locked to  with JWT Middleware protecting  (DONE)
 
 **Earlier issues found/mentioned but not fixed**
-   - Issue 1: Transient OpenAI API errors (like ) are not handled.
-     - Debug checklist: In , wrap the  calls within a try/except block that catches specific network-related exceptions and retries the request 2-3 times with a short delay.
-     - Why to solve this issue and what will be achieved with this? This will make the AI features more resilient and prevent failures due to temporary network or service issues on OpenAI's side.
-     - Should Test frontend/backend/both after fix: backend
-     - Is recurring issue? Y
+   Issue 1: Monolithic backend and frontend files.
+   - Debug checklist:  is over 3500 lines.  is over 1700 lines.
+   - Why to solve this issue and what will be achieved with this? Maintainability is severely degraded.
+   - Should Test frontend/backend/both after fix: both
+   - Is recurring issue? Y
 
 **Known issue recurrence from previous fork**
-  - None.
+  - OAuth PKCE &  /  issues keep occurring across both YouTube Auth and Google Login Auth flows. Remember to keep PKCE strictly disabled (, ) and ensure exact URI matching without trailing slashes.
 
 **Code Architecture**
 
 
 **Key Technical Concepts**
-- **Backend**: FastAPI, Pydantic, Motor (async MongoDB driver).
-- **Frontend**: React, TailwindCSS, shadcn/ui.
-- **Database**: MongoDB.
-- **Integrations**: OpenAI API, Anthropic API, Google Gemini API (all via Emergent LLM Key) for semantic search and text correction.
-- **Architecture**: Monolithic FastAPI backend serving a React SPA.
+- Backend: FastAPI, Pydantic, Motor (async MongoDB), PyJWT, .
+- Frontend: React, TailwindCSS, shadcn/ui, Axios Interceptors.
+- Database: MongoDB.
+- Integrations: Emergent LLM Key (GPT-5.2), YouTube Data API v3 (OAuth), Google Identity/Login OAuth.
 
 **key DB schema**
-  - **users**: 
-  - **batches**: 
-  - **questions**: 
+  - : 
+  - : 
+  - : 
+  - : 
+  - : 
+  - : 
 
 **changes in tech stack**
-  - None.
+  - Added  for custom stateless authentication.
 
 **All files of reference**
-- : Heavily modified to add new endpoints (, ), a much more robust import parser, AI model selection logic, and duplicate detection restricted to the same user.
-- : The most changed file. Contains logic for AI model selection, duplicate filtering, triggering the new comparison modal, and handling timeouts and loading states.
-- : Completely redesigned to provide a clear, actionable side-by-side view for resolving duplicates.
-- : Updated to make the username and question text editable and to include the Click to compare badge logic for duplicates.
-- : Updated to support editing batch names and dates.
+- : Enormous file containing all DB models, Background Tasks, YouTube API logic, Classification AI, Distribution logic, and Google Auth.
+- : Intercepts 401/403 and manages  JWT.
+- : Public login page.
+- : Heavy UI component with AI filters, tricolor name confirmation, and duplicate management.
+- : Implements the  display block and drag-and-drop/move logic.
 
 **Areas that need refactoring**:
-- The  file has become extremely large and should be broken down into multiple routers (e.g., , , ).
-- The  component is overly complex and manages excessive state. It should be refactored into smaller components and custom hooks to improve maintainability.
+-  MUST be split into routers (auth, youtube, questions, batches, programs, blocked_comments).
+-  MUST be split into smaller components (e.g., , , ).
 
 **key api endpoints**
-- : **(New)** Performs semantic duplicate search using a user-selected AI model, restricted to questions from the same user.
-- : **(New)** Fetches a single question by its ID, used for the duplicate comparison modal.
-- : **(Updated)** Now handles updates for both  and Sun Mar 15 17:41:38 UTC 2026.
-- : **(Updated)** Parser logic was completely overhauled to support multiple inconsistent text formats.
-- : **(Updated)** Now correctly triggers a refresh of the batch question counts.
-- : **(New)** A utility endpoint to clean up invalid duplicate flags.
+- : Generates login URL (Public).
+- : Verifies user email, issues JWT.
+-  & : YouTube specific OAuth (requires JWT).
+- : Background task AI classification.
+- : Ceil-based distribution algorithm with overflow to Reserva.
+- : Deduplicates YouTube imports by ID.
+- : Blacklist CRUD.
 
 **Critical Info for New Agent**
-- **MUST communicate in Spanish.**
-- The highest priority is fixing the Desconocido bug in the duplicate comparison modal.
-- The AI-powered duplicate search is a critical feature but is slow and can time out. The next step is to move it to a background task with polling from the frontend.
-- The duplicate detection logic has a strict requirement from the user: **it must only find duplicates from the same user**.
-- The import parser is now very complex to handle messy user input. Be cautious when modifying it.
+- **Language**: MUST communicate in Spanish.
+- **Login Strictness**: The app is strictly hardcoded to only allow  via the   key. Do not modify this security restriction.
+- **Scope Mismatch**: Google Login is currently failing because  includes . This forces Google to merge previously granted YouTube scopes into the basic login request, causing  / scope mismatch errors. Remove it.
+- **Data Integrity**: NEVER modify  in the backend once fetched, EXCEPT for the  HTML entity cleaning logic added.
 
 **documents and test reports created in this job**
-- None.
+  - /app/test_reports/iteration_4.json
 
 **Last 10 User Messages and any pending HUMAN messages** 
- 1.  - Reported error finding original duplicate question. (Status: Completed, fixed by adding a cleanup for orphan duplicates).
- 2.  - Reported that the question count on the dashboard doesn't update after deletion. (Status: Completed).
- 3.  - Requested a way to switch AI models for duplicate detection. (Status: Completed, model selector was added).
- 4.  - Reported the page scrolls to the top after AI correction. (Status: Completed).
- 5.  - Requested the duplicate modal show the specific batch name/date. (Status: Completed).
- 6.  - Requested the ability to edit question text and usernames. (Status: Completed).
- 7.  - Reported that the import parser was incorrectly splitting single questions into multiple. (Status: Completed, parser was fixed).
- 8.  - Provided a clear rule for the import parser logic. (Status: Completed, logic was simplified based on this).
- 9.  - Approval to proceed after the parser fix. (Status: Completed).
- 10.  - The current active bug report: the duplicate modal shows Desconocido as the location. (Status: **In Progress**).
+ -  - Requested bulk/single name confirmations. (Status: COMPLETED)
+ -  - Filter mutual exclusion bug. (Status: COMPLETED)
+ -  - Requested equitable ceil(total/programs) algorithm. (Status: COMPLETED)
+ -  - Requested Login system. (Status: COMPLETED)
+ -  - URI debugging. (Status: COMPLETED)
+ -  - URI debugging. (Status: COMPLETED)
+ -  - PKCE bug debugging. (Status: COMPLETED)
+ -  - Scope debugging. (Status: **IN PROGRESS**)
+ -  - User investigating the auth token storage and callback logic. (Status: **IN PROGRESS / PENDING RESPONSE**)
 
 **Project Health Check:**
-- **Broken**:
-    - The duplicate comparison modal sometimes fails to show the source batch (Desconocido).
-    - The AI-powered duplicate search is prone to timeouts on large batches of questions.
-- **Mocked**: Direct integration with the YouTube API for automatically fetching comments is still not implemented. The workflow relies on manual copy-pasting.
+Broken (Google Auth Login failing due to scope mismatch / , blocking all UI access).
+Mocked: None.
 
 **3rd Party Integrations**
-- **OpenAI (GPT-5.2, GPT-4o)**: Powers AI text correction and semantic duplicate search. Uses Emergent LLM Key.
-- **Anthropic (Claude Sonnet 4.5)**: Alternative model for semantic duplicate search. Uses Emergent LLM Key.
-- **Google (Gemini 3 Flash)**: Alternative model for semantic duplicate search. Uses Emergent LLM Key.
-- **YouTube Data API v3**: Credentials exist, but it is not actively used in the application.
+  - OpenAI GPT-5.2 (Semantic Search/Classification/Corrections) — uses Emergent LLM Key
+  - Claude Sonnet 4.5 / Gemini 3 — uses Emergent LLM Key
+  - YouTube Data API v3 — requires User OAuth
+  - Google Login API (Identity) — requires User OAuth
 
 **Testing status**
-  - Testing agent used after significant changes: NO
+  - Testing agent used after significant changes: YES
   - Troubleshoot agent used after agent stuck in loop: NO
-  - Test files created: []
-  - Known regressions: None
+  - Test files created: [/app/test_reports/iteration_4.json]
+  - Known regressions: Google Login OAuth scope mismatch.
 
 **Credentials to test flow:**
-N/A (No application-level login)
+Login strictly restricted to . The user tests this manually.
 
 **What agent forgot to execute**
-- The agent did not implement the planned retry mechanism for transient OpenAI API errors, which was identified as a necessary reliability improvement in the initial handoff summary.
-- The agent started addressing the AI search timeout issue by optimizing the query but did not implement a full solution (like background tasks and a progress bar) before moving on to the user's next request.</analysis>
+- The agent forgot to actually remove  from  inside  before showing the user the code. This is causing the exact scope mismatch the user reported.
+
+**Debugging checklist for current issue**
+    Issue: Google Login OAuth Scope Mismatch
+    
+    Backend files to check:
+    - 
+      - Search for .
+      - Look at .
+      - Remove . (This flag asks Google to merge the login scopes with the previously granted YouTube scopes, triggering the mismatch).
+      - Ensure the  logic clearly reads the  without failing. Show this logic to the user in Spanish as requested in their final message.
+    </analysis>
