@@ -75,11 +75,13 @@
 
       try {
         const redirectUri = window.location.origin + '/youtube-callback.html';
+        const jwt = localStorage.getItem('spm_jwt');
         
         const response = await fetch('/api/youtube/callback', {
           method: 'POST',
           headers: {
-            'Content-Type': 'application/json'
+            'Content-Type': 'application/json',
+            ...(jwt ? { 'Authorization': 'Bearer ' + jwt } : {})
           },
           body: JSON.stringify({
             code: code,
