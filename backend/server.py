@@ -3,6 +3,10 @@ from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
+# Relax oauthlib scope validation: Google may return additional previously-granted
+# scopes (e.g. YouTube) alongside the requested login scopes. Without this flag,
+# oauthlib raises "Scope has changed" and breaks the login flow.
+os.environ.setdefault("OAUTHLIB_RELAX_TOKEN_SCOPE", "1")
 import logging
 from pathlib import Path
 from pydantic import BaseModel, Field, ConfigDict
@@ -3459,7 +3463,6 @@ async def auth_google_url(redirect_uri: str):
     auth_url, state = flow.authorization_url(
         access_type="online",
         prompt="select_account",
-        include_granted_scopes="true",
     )
     logger.info(f"[Auth] google-url generated, redirect_uri={redirect_uri}")
     return {"auth_url": auth_url, "state": state}
