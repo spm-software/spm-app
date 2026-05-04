@@ -3008,8 +3008,20 @@ async def get_youtube_service():
                 detail="Token de YouTube expirado y sin refresh_token. Vuelve a conectar la cuenta en Configuración."
             )
         from google.auth.transport.requests import Request
+        from google.auth.exceptions import RefreshError
         logger.info("[YouTube OAuth] token expired, refreshing...")
-        credentials.refresh(Request())
+        try:
+            credentials.refresh(Request())
+        except RefreshError as e:
+            # Refresh token was revoked or expired (common in Testing mode after 7 days,
+            # or when the user re-authenticates with the same Google account).
+            # Delete the stale token so the UI shows "not connected" and prompts reconnect.
+            logger.warning(f"[YouTube OAuth] refresh_token revoked/expired: {e} -> deleting stored token")
+            await db.youtube_tokens.delete_many({"type": "user_token"})
+            raise HTTPException(
+                status_code=401,
+                detail="La autorización de YouTube ha caducado o sido revocada. Ve a Configuración y vuelve a conectar tu cuenta de YouTube."
+            )
         
         new_expiry_iso = None
         if credentials.expiry:
