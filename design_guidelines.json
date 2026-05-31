@@ -1,0 +1,169 @@
+{
+  "identity": {
+    "name": "E1: The Anti-AI Designer",
+    "archetype": "Swiss & High-Contrast",
+    "vibe": "Authority, Clarity, Truth - The 'Newsroom' Aesthetic",
+    "principles": [
+      "Fusion over Imitation: Mix Editorial Layouts with Technical Dashboards.",
+      "Content is King: The question text is the hero. Everything else is support.",
+      "Negative Space: White space is active, not passive.",
+      "Contrast: High contrast for readability. No grey-on-grey text."
+    ]
+  },
+  "typography": {
+    "headings": {
+      "family": "Oswald, sans-serif",
+      "weights": ["500", "700"],
+      "usage": "Page titles, Section headers, Key metrics",
+      "letterSpacing": "tracking-tight"
+    },
+    "body": {
+      "family": "Manrope, sans-serif",
+      "weights": ["400", "500", "600"],
+      "usage": "General text, Inputs, Labels",
+      "letterSpacing": "tracking-normal"
+    },
+    "mono": {
+      "family": "JetBrains Mono, monospace",
+      "usage": "IDs, Usernames, Timecodes",
+      "letterSpacing": "tracking-wide"
+    }
+  },
+  "colors": {
+    "palette_name": "Swiss High-Contrast",
+    "light": {
+      "background": "#FFFFFF",
+      "foreground": "#0A0A0A",
+      "card": "#FAFAFA",
+      "card_foreground": "#0A0A0A",
+      "popover": "#FFFFFF",
+      "popover_foreground": "#0A0A0A",
+      "primary": "#E62117",
+      "primary_foreground": "#FFFFFF",
+      "secondary": "#F0F0F0",
+      "secondary_foreground": "#0A0A0A",
+      "muted": "#F0F0F0",
+      "muted_foreground": "#666666",
+      "accent": "#000000",
+      "accent_foreground": "#FFFFFF",
+      "destructive": "#E62117",
+      "destructive_foreground": "#FFFFFF",
+      "border": "#E5E5E5",
+      "input": "#E5E5E5",
+      "ring": "#0A0A0A"
+    },
+    "dark": {
+      "background": "#0A0A0A",
+      "foreground": "#FAFAFA",
+      "card": "#111111",
+      "card_foreground": "#FAFAFA",
+      "popover": "#111111",
+      "popover_foreground": "#FAFAFA",
+      "primary": "#E62117",
+      "primary_foreground": "#FFFFFF",
+      "secondary": "#1F1F1F",
+      "secondary_foreground": "#FAFAFA",
+      "muted": "#1F1F1F",
+      "muted_foreground": "#888888",
+      "accent": "#FFFFFF",
+      "accent_foreground": "#000000",
+      "destructive": "#991B1B",
+      "destructive_foreground": "#FAFAFA",
+      "border": "#262626",
+      "input": "#262626",
+      "ring": "#FAFAFA"
+    }
+  },
+  "spacing": {
+    "scale": "Generous (2-3x standard)",
+    "container_padding": "p-8 md:p-12",
+    "item_gap": "gap-6 md:gap-8",
+    "grid_gap": "gap-8"
+  },
+  "layout": {
+    "dashboard": "Bento Grid Mode B (High Density)",
+    "editor": "Split View (Left: Raw, Right: Edited)",
+    "container_width": "max-w-7xl mx-auto"
+  },
+  "components": {
+    "buttons": {
+      "style": "Sharp edges (rounded-sm), Uppercase text",
+      "classes": "rounded-sm uppercase tracking-wide font-medium shadow-none hover:shadow-md transition-all active:scale-95"
+    },
+    "cards": {
+      "style": "Swiss Minimalist",
+      "classes": "bg-card border border-border shadow-none rounded-sm p-6 hover:border-foreground/20 transition-colors"
+    },
+    "inputs": {
+      "style": "Understated",
+      "classes": "border-input bg-background rounded-sm focus:ring-1 focus:ring-ring"
+    },
+    "badges": {
+      "style": "Pill-shaped but bold",
+      "classes": "rounded-full px-3 py-1 text-xs font-bold uppercase tracking-wider"
+    }
+  },
+  "visual_enhancers": {
+    "tracing_beam": {
+      "description": "A glowing gradient line that travels around the active question card.",
+      "usage": "Active item in the Editor list"
+    },
+    "grid_borders": {
+      "description": "Visible grid lines for data tables and dashboard widgets.",
+      "usage": "Dashboard overview"
+    },
+    "glassmorphism": {
+      "usage": "Sticky headers and toast notifications only",
+      "classes": "backdrop-blur-xl bg-background/80 border-b border-border/50"
+    }
+  },
+  "motion": {
+    "hover": "transform -translate-y-1 transition-transform duration-200",
+    "page_load": "opacity-0 animate-in fade-in duration-500 slide-in-from-bottom-4",
+    "list_item": "staggered entrance"
+  },
+  "icons": {
+    "library": "lucide-react",
+    "style": "Stroke width 1.5px (Light/Elegant)",
+    "usage": "Navigation, Action buttons, Status indicators"
+  },
+  "image_urls": {
+    "backgrounds": [
+      {
+        "url": "https://images.unsplash.com/photo-1748536749269-640e4f6e6017?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDQ2NDJ8MHwxfHNlYXJjaHwzfHxhYnN0cmFjdCUyMHN3aXNzJTIwc3R5bGUlMjBnZW9tZXRyaWMlMjBzaGFwZXMlMjBtaW5pbWFsJTIwcmVkJTIwd2hpdGV8ZW58MHx8fHwxNzczMDkzMzA3fDA&ixlib=rb-4.1.0&q=85",
+        "description": "Red wall with white lines - Use for Login Screen Background or Hero Section"
+      },
+      {
+        "url": "https://images.unsplash.com/photo-1771440047889-c684f6bb5755?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDQ2NDJ8MHwxfHNlYXJjaHwxfHxhYnN0cmFjdCUyMHN3aXNzJTIwc3R5bGUlMjBnZW9tZXRyaWMlMjBzaGFwZXMlMjBtaW5pbWFsJTIwcmVkJTIwd2hpdGV8ZW58MHx8fHwxNzczMDkzMzA3fDA&ixlib=rb-4.1.0&q=85",
+        "description": "Red paper shapes - Use for decorative accents or 404 page"
+      }
+    ],
+    "logos": [
+      {
+        "url": "https://images.unsplash.com/photo-1618243357602-ccba303a3fd6?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDQ2MzR8MHwxfHNlYXJjaHwxfHx5b3V0dWJlJTIwbG9nbyUyMG1pbmltYWwlMjB3aGl0ZSUyMGJhY2tncm91bmR8ZW58MHx8fHwxNzczMDkzMzA4fDA&ixlib=rb-4.1.0&q=85",
+        "description": "YouTube Logo Button - Use for 'Connect YouTube' action card"
+      }
+    ]
+  },
+  "universal_guidelines": [
+    "Do not converge toward generic AI slop.",
+    "Dark colors look good when used independently without gradients. DO NOT use dark colors as gradients.",
+    "Don't make generic centered layouts. Use grids and asymmetry.",
+    "Create depth through layered design elements with z-index hierarchy.",
+    "Use glass-morphism effects with backdrop filters (12-24px blur) for overlays.",
+    "MUST NOT apply universal transition (transition: all). Use specific properties.",
+    "MUST NOT center align the app container (.App { text-align: center; }).",
+    "Always use modern button styles (pill or sharp).",
+    "NEVER use AI assistant Emoji characters like 🤖🧠 for icons.",
+    "Every interaction needs micro-animations.",
+    "Use 2-3x more spacing than feels comfortable.",
+    "Main agent relies on provided image URLs. Do not use placeholders."
+  ],
+  "instructions_to_main_agent": [
+    "1. Setup Tailwind Colors: Update tailwind.config.js with the Swiss Palette defined above.",
+    "2. Install Fonts: Add Oswald and Manrope via Google Fonts in index.css.",
+    "3. Create Layouts: Build the Bento Grid Dashboard and Split View Editor using standard divs and grid classes.",
+    "4. Components: Customize Shadcn components to match the 'Sharp & Swiss' aesthetic (remove heavy rounded corners).",
+    "5. Theme: Implement Light/Dark mode toggle using next-themes (already in package.json). Default to Light Mode (Swiss Style)."
+  ]
+}

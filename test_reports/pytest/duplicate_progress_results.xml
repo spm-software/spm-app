@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="1" failures="2" skipped="1" tests="10" time="909.553" timestamp="2026-03-15T18:01:18.724366+00:00" hostname="agent-env-04d87442-78e1-4cfe-b600-7b854826f3e6"><testcase classname="backend.tests.test_duplicate_progress.TestStartAIDuplicateCheck" name="test_start_returns_task_id" time="7.404" /><testcase classname="backend.tests.test_duplicate_progress.TestStartAIDuplicateCheck" name="test_start_with_default_model" time="6.420" /><testcase classname="backend.tests.test_duplicate_progress.TestStartAIDuplicateCheck" name="test_start_with_different_models" time="225.500" /><testcase classname="backend.tests.test_duplicate_progress.TestGetDuplicateCheckStatus" name="test_status_returns_progress_fields" time="60.195"><error message="failed on setup with &quot;requests.exceptions.JSONDecodeError: Expecting value: line 1 column 1 (char 0)&quot;">/root/.venv/lib/python3.11/site-packages/requests/models.py:976: in json
+    return complexjson.loads(self.text, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/__init__.py:346: in loads
+    return _default_decoder.decode(s)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/decoder.py:337: in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/decoder.py:355: in raw_decode
+    raise JSONDecodeError("Expecting value", s, err.value) from None
+E   json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+
+During handling of the above exception, another exception occurred:
+backend/tests/test_duplicate_progress.py:94: in running_task
+    task_id = response.json()["task_id"]
+              ^^^^^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/requests/models.py:980: in json
+    raise RequestsJSONDecodeError(e.msg, e.doc, e.pos)
+E   requests.exceptions.JSONDecodeError: Expecting value: line 1 column 1 (char 0)</error></testcase><testcase classname="backend.tests.test_duplicate_progress.TestGetDuplicateCheckStatus" name="test_status_404_for_nonexistent_task" time="60.244"><failure message="AssertionError: Expected 404, got 502&#10;assert 502 == 404&#10; +  where 502 = &lt;Response [502]&gt;.status_code">backend/tests/test_duplicate_progress.py:133: in test_status_404_for_nonexistent_task
+    assert response.status_code == 404, f"Expected 404, got {response.status_code}"
+E   AssertionError: Expected 404, got 502
+E   assert 502 == 404
+E    +  where 502 = &lt;Response [502]&gt;.status_code</failure></testcase><testcase classname="backend.tests.test_duplicate_progress.TestGetDuplicateCheckStatus" name="test_status_shows_progress_over_time" time="126.519" /><testcase classname="backend.tests.test_duplicate_progress.TestDeleteDuplicateCheckStatus" name="test_delete_removes_task" time="81.087" /><testcase classname="backend.tests.test_duplicate_progress.TestDeleteDuplicateCheckStatus" name="test_delete_404_for_nonexistent_task" time="15.834" /><testcase classname="backend.tests.test_duplicate_progress.TestCompletedTaskResults" name="test_completed_task_has_duplicates" time="326.006"><failure message="requests.exceptions.JSONDecodeError: Expecting value: line 1 column 1 (char 0)">/root/.venv/lib/python3.11/site-packages/requests/models.py:976: in json
+    return complexjson.loads(self.text, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/__init__.py:346: in loads
+    return _default_decoder.decode(s)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/decoder.py:337: in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/decoder.py:355: in raw_decode
+    raise JSONDecodeError("Expecting value", s, err.value) from None
+E   json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+
+During handling of the above exception, another exception occurred:
+backend/tests/test_duplicate_progress.py:205: in test_completed_task_has_duplicates
+    status = status_response.json()
+             ^^^^^^^^^^^^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/requests/models.py:980: in json
+    raise RequestsJSONDecodeError(e.msg, e.doc, e.pos)
+E   requests.exceptions.JSONDecodeError: Expecting value: line 1 column 1 (char 0)</failure></testcase><testcase classname="backend.tests.test_duplicate_progress.TestLegacySynchronousEndpoint" name="test_legacy_endpoint_still_works" time="0.145"><skipped type="pytest.skip" message="Legacy endpoint returned 502 - may need async version for large batches">/app/backend/tests/test_duplicate_progress.py:261: Legacy endpoint returned 502 - may need async version for large batches</skipped></testcase></testsuite></testsuites>

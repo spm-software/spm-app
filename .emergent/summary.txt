@@ -1,0 +1,174 @@
+<analysis>**original_problem_statement:**
+The user manages a Q&A YouTube channel and needs a tool to automate their workflow. 
+PRODUCT REQUIREMENTS:
+1. Import: Collect comments from various text formats, and directly via YouTube Data API integration.
+2. Data Cleaning: Automatically remove greetings/timestamps, correct grammar via AI, and extract real user names. Clean HTML entities.
+3. Content Management: AI classification (Questions, Doubtful, Greetings). Group questions into programs (chronological, max 2 per user, reserve overflow, duplicate detection). Blacklist recurring spam comments.
+4. Output: Export organized programs into a single plain text file.
+5. Auth: Google OAuth login strictly restricted to the user's specific email address.
+
+**User's preferred language**: Spanish (You MUST automatically detect the user's primary language from their messages inside the <trajectory> tag and INSTRUCT next agent to respond in Spanish ONLY)
+
+**what currently exists?** 
+A full-stack application (React + FastAPI + MongoDB) for managing YouTube Q&A comments. Features include a Dashboard, YouTube API Importer (with raw comment anchoring and deduplication by ID), an Editor (AI classification, AI duplicates, tricolor real-name confirmation), a Distributor (ceil(total/programs) algorithm with Reserve for overflow), a Config page (Backup, YouTube Auth popup, Blocked comments list), and a restricted Google Auth Login system.
+
+**Last working item**:
+    - Last item agent was working: Debugging a Google Login OAuth  / scope mismatch error. The user noticed that the OAuth login flow is incorrectly mixing basic auth scopes with YouTube scopes. The agent was investigating  where  is still present in the login flow (), which is causing Google to demand YouTube scopes during the basic login process.
+    - Status: IN PROGRESS
+    - Agent Testing Done: N
+    - Which testing method agent to use? both
+    - User Testing Done: N
+
+**All Pending/In progress Issue list**:
+  Issue 1: Fix Google Login OAuth Scope Mismatch (Priority: P0)
+  Issue 2: Implement OpenAI API retry logic (Priority: P1)
+
+  Issues Detail:
+  - Issue 1: Fix Google Login OAuth Scope Mismatch
+     - Attempted fixes: The agent disabled PKCE and separated  from , but left  in the  endpoint (around line 3462 in ), causing the scope mismatch.
+     - Next debug checklist: 
+        1. In , locate .
+        2. Remove  from the  call for the login flow.
+        3. Ensure the callback correctly handles the JWT generation without requiring YouTube tokens.
+        4. Explain the callback and token storage to the user as requested in their last message.
+     - Why fix this issue and what will be achieved with the fix? Currently, the user cannot log in to the application, rendering it completely inaccessible.
+     - Status: IN PROGRESS
+     - Is recurring issue? N
+     - Should Test frontend/backend/both after fix? both
+     - Blocked on other issue: None
+
+  - Issue 2: Transient OpenAI API errors
+     - Attempted fixes: None yet.
+     - Next debug checklist: Wrap  / OpenAI calls in a try/except block with a retry mechanism (2-3 times) for network-related errors like .
+     - Why fix this issue and what will be achieved with the fix? Improves stability during AI classification, duplicate checks, and corrections.
+     - Status: NOT STARTED
+     - Is recurring issue? Y
+     - Should Test frontend/backend/both after fix? backend
+     - Blocked on other issue: None
+
+**In progress Task List**:
+  None.
+
+**Upcoming and Future Tasks**
+  Upcoming Tasks:
+  - P2: Refactor  into multiple routers (, , , etc.) to solve the >3500 line monolith issue.
+  - P2: Refactor  to break it down into smaller child components.
+  
+  Future Tasks:
+  - P3: Add a cron-like scheduler (e.g., every 15 days) to auto-download YouTube comments and notify the user via email.
+
+**Completed work in this session**
+- Switched YouTube Auth to a manual popup flow in Configuración (DONE)
+- Fixed Google Auth PyJWT/PKCE  bugs by disabling PKCE (DONE)
+- Re-wrote YouTube fetcher to deduplicate by  instead of cutoff dates (DONE)
+- Added Background Task AI Classification (, , ) (DONE)
+- Added classification filters and updated all downstream endpoints (correct, update-names, distribute, export) to strictly process only  (DONE)
+- Implemented HTML Entity Cleaning ( + regex) for all imports (DONE)
+- Implemented  Blacklist (auto-delete spam, seeded with specific user) (DONE)
+- Unified X preguntas confirmadas counter across the entire app (DONE)
+- Added Tricolor Name Confirmation UI (Confirmed, Auto, Missing) with single-click bulk processing (DONE)
+- Re-wrote Distributor algorithm to strictly use , chronological order, max 2 per user, and automatic overflow to a visual Reserva UI (DONE)
+- Implemented Google Auth Login strictly locked to  with JWT Middleware protecting  (DONE)
+
+**Earlier issues found/mentioned but not fixed**
+   Issue 1: Monolithic backend and frontend files.
+   - Debug checklist:  is over 3500 lines.  is over 1700 lines.
+   - Why to solve this issue and what will be achieved with this? Maintainability is severely degraded.
+   - Should Test frontend/backend/both after fix: both
+   - Is recurring issue? Y
+
+**Known issue recurrence from previous fork**
+  - OAuth PKCE &  /  issues keep occurring across both YouTube Auth and Google Login Auth flows. Remember to keep PKCE strictly disabled (, ) and ensure exact URI matching without trailing slashes.
+
+**Code Architecture**
+
+
+**Key Technical Concepts**
+- Backend: FastAPI, Pydantic, Motor (async MongoDB), PyJWT, .
+- Frontend: React, TailwindCSS, shadcn/ui, Axios Interceptors.
+- Database: MongoDB.
+- Integrations: Emergent LLM Key (GPT-5.2), YouTube Data API v3 (OAuth), Google Identity/Login OAuth.
+
+**key DB schema**
+  - : 
+  - : 
+  - : 
+  - : 
+  - : 
+  - : 
+
+**changes in tech stack**
+  - Added  for custom stateless authentication.
+
+**All files of reference**
+- : Enormous file containing all DB models, Background Tasks, YouTube API logic, Classification AI, Distribution logic, and Google Auth.
+- : Intercepts 401/403 and manages  JWT.
+- : Public login page.
+- : Heavy UI component with AI filters, tricolor name confirmation, and duplicate management.
+- : Implements the  display block and drag-and-drop/move logic.
+
+**Areas that need refactoring**:
+-  MUST be split into routers (auth, youtube, questions, batches, programs, blocked_comments).
+-  MUST be split into smaller components (e.g., , , ).
+
+**key api endpoints**
+- : Generates login URL (Public).
+- : Verifies user email, issues JWT.
+-  & : YouTube specific OAuth (requires JWT).
+- : Background task AI classification.
+- : Ceil-based distribution algorithm with overflow to Reserva.
+- : Deduplicates YouTube imports by ID.
+- : Blacklist CRUD.
+
+**Critical Info for New Agent**
+- **Language**: MUST communicate in Spanish.
+- **Login Strictness**: The app is strictly hardcoded to only allow  via the   key. Do not modify this security restriction.
+- **Scope Mismatch**: Google Login is currently failing because  includes . This forces Google to merge previously granted YouTube scopes into the basic login request, causing  / scope mismatch errors. Remove it.
+- **Data Integrity**: NEVER modify  in the backend once fetched, EXCEPT for the  HTML entity cleaning logic added.
+
+**documents and test reports created in this job**
+  - /app/test_reports/iteration_4.json
+
+**Last 10 User Messages and any pending HUMAN messages** 
+ -  - Requested bulk/single name confirmations. (Status: COMPLETED)
+ -  - Filter mutual exclusion bug. (Status: COMPLETED)
+ -  - Requested equitable ceil(total/programs) algorithm. (Status: COMPLETED)
+ -  - Requested Login system. (Status: COMPLETED)
+ -  - URI debugging. (Status: COMPLETED)
+ -  - URI debugging. (Status: COMPLETED)
+ -  - PKCE bug debugging. (Status: COMPLETED)
+ -  - Scope debugging. (Status: **IN PROGRESS**)
+ -  - User investigating the auth token storage and callback logic. (Status: **IN PROGRESS / PENDING RESPONSE**)
+
+**Project Health Check:**
+Broken (Google Auth Login failing due to scope mismatch / , blocking all UI access).
+Mocked: None.
+
+**3rd Party Integrations**
+  - OpenAI GPT-5.2 (Semantic Search/Classification/Corrections) — uses Emergent LLM Key
+  - Claude Sonnet 4.5 / Gemini 3 — uses Emergent LLM Key
+  - YouTube Data API v3 — requires User OAuth
+  - Google Login API (Identity) — requires User OAuth
+
+**Testing status**
+  - Testing agent used after significant changes: YES
+  - Troubleshoot agent used after agent stuck in loop: NO
+  - Test files created: [/app/test_reports/iteration_4.json]
+  - Known regressions: Google Login OAuth scope mismatch.
+
+**Credentials to test flow:**
+Login strictly restricted to . The user tests this manually.
+
+**What agent forgot to execute**
+- The agent forgot to actually remove  from  inside  before showing the user the code. This is causing the exact scope mismatch the user reported.
+
+**Debugging checklist for current issue**
+    Issue: Google Login OAuth Scope Mismatch
+    
+    Backend files to check:
+    - 
+      - Search for .
+      - Look at .
+      - Remove . (This flag asks Google to merge the login scopes with the previously granted YouTube scopes, triggering the mismatch).
+      - Ensure the  logic clearly reads the  without failing. Show this logic to the user in Spanish as requested in their final message.
+    </analysis>
