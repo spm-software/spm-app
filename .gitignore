@@ -18,6 +18,8 @@ node_modules/
 
 # Testing
 /coverage
+.coverage
+**/.coverage
 
 # Next.js
 /.next/
@@ -77,9 +79,14 @@ agenthub/agents/youtube/db
 .cache/
 
 # Mobile development
-android-sdk/ frontend/node_modules/.cache/default-development/0.pack
-frontend/node_modules/.cache/default-development/0.pack
--e 
+android-sdk/
+
+# Generated local test/build artifacts
+.emergent/
+test_reports/
+test_result.md
+frontend/test-results/
+frontend/node_modules/.cache/
 # Environment and credential files
 .env
 .env.*
