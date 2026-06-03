@@ -1677,7 +1677,9 @@ export default function Editor() {
                     ) : (
                       <Wand2 className="w-3.5 h-3.5" />
                     )}
-                    <span className="ml-1.5 hidden sm:inline">Corregir IA</span>
+                    <span className="ml-1.5 hidden sm:inline">
+                      {question.is_corrected ? "Recorregir IA" : "Corregir IA"}
+                    </span>
                   </Button>
                   
                   <Button

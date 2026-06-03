@@ -1755,7 +1755,7 @@ async def correct_questions(data: CorrectionRequest):
                     {"$set": {"real_name": stored_name}}
                 )
 
-            text_to_correct = question.get("original_text", "")
+            text_to_correct = question.get("corrected_text") or question.get("original_text", "")
             corrected_text = await correct_text_with_ai(text_to_correct, settings.llm_provider)
 
             await db.questions.update_one(
