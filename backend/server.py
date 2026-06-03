@@ -870,10 +870,12 @@ def apply_basic_question_punctuation_fallback(text: str) -> str:
     if "?" in body:
         if not body.startswith("¿") and "¿" not in body:
             body = f"¿{body}"
-    elif "¿" not in body:
+    elif "¿" not in body and has_explicit_question_cue(body):
         body = f"¿{body}?"
 
     body = apply_question_initial_accent_fallback(body)
+    if "?" not in body and "¿" not in body and not body.endswith((".", "!", "?")):
+        body = f"{body}."
     return f"{lead} {body} {closing}"
 
 
@@ -896,6 +898,15 @@ def apply_mi_pregunta_es_fallback(text: str) -> str:
     if prefix:
         return f"{prefix}. mi pregunta es: {question}"
     return f"mi pregunta es: {question}"
+
+
+def has_explicit_question_cue(text: str) -> bool:
+    normalized = normalize_text(text or "")
+    return bool(re.match(
+        r"^(que|quien|quienes|cuando|como|donde|cual|cuales|por que|"
+        r"puede|pueden|podria|podrian|debe|deben|es|son|hay|existe|existen)\b",
+        normalized
+    ))
 
 
 def apply_question_initial_accent_fallback(text: str) -> str:
@@ -921,7 +932,7 @@ async def correct_text_with_ai(text: str, model: str = None) -> str:
     try:
         system_message = """Instrucciones obligatorias para corregir el texto:
 
-1. Corrige la ortografía, acentuación, signos de puntuación, mayúsculas, minúsculas y capitalización.
+1. Corrige la ortografía, acentuación, puntuación mecánica, mayúsculas, minúsculas y capitalización.
 2. No cambies el contenido, el sentido ni la intención de lo que ha escrito la persona.
 3. No resumas, no reorganices las ideas y no elimines partes del texto.
 4. No inventes información.
@@ -937,14 +948,17 @@ async def correct_text_with_ai(text: str, model: str = None) -> str:
 14. Después de un signo de interrogación de apertura (¿), la primera letra debe ir siempre en mayúscula.
 15. Después de un signo de interrogación de cierre (?), si continúa una nueva frase o pregunta, la primera letra debe ir en mayúscula cuando corresponda.
 16. Corrige tildes de nombres propios también, por ejemplo: Ramón, Óscar, Ángela, Iván, etc.
-17. No añadas frases de introducción ni de cierre.
-18. Elimina la palabra "(editado)" si aparece en el texto.
-19. Elimina frases de YouTube como "Se suscribió a tu canal de forma pública", "Se suscribió a tu canal", "Miembro desde hace X", "Suscriptor desde hace X" y similares.
-20. Devuélveme SOLO el texto ya corregido.
-21. Mantén el contenido intacto, limitándote a corregir ortografía, puntuación y capitalización.
+17. No conviertas una afirmación en pregunta ni una pregunta en afirmación.
+18. No añadas signos de interrogación si el texto original no formula claramente una pregunta.
+19. No añadas frases de introducción ni de cierre.
+20. Elimina la palabra "(editado)" si aparece en el texto.
+21. Elimina frases de YouTube como "Se suscribió a tu canal de forma pública", "Se suscribió a tu canal", "Miembro desde hace X", "Suscriptor desde hace X" y similares.
+22. Devuélveme SOLO el texto ya corregido.
+23. Mantén el contenido intacto, limitándote a corregir ortografía, puntuación mecánica y capitalización.
 
 Aplica estas preferencias fijas del estilo SPM:
 - Si hay dudas de puntuación, corrige lo mínimo necesario para que se lea bien, sin alterar el contenido.
+- No modifiques la estructura de la frase para hacerla sonar más clara o más teológica.
 - Respeta el estilo coloquial del autor si lo tiene."""
         response = await call_openai_text(system_message, text, model)
         corrected = response.strip() if response else text
