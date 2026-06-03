@@ -1359,6 +1359,7 @@ async def get_questions(
         query["program_id"] = program_id
     if not include_greetings:
         query["is_greeting"] = {"$ne": True}
+        query["clasificacion"] = {"$ne": "saludo"}
 
     questions = await db.questions.find(query, {"_id": 0}).sort("created_at", 1).to_list(2000)
     for q in questions:
@@ -1730,16 +1731,18 @@ async def run_clasificacion_background(task_id: str, batch_id: str):
         counts = {"pregunta": 0, "dudoso": 0, "saludo": 0}
         classified_count = 0
         for r in results:
+            clasificacion = r["clasificacion"]
             upd = await db.questions.update_one(
                 {"id": r["id"]},
                 {"$set": {
-                    "clasificacion": r["clasificacion"],
-                    "motivo_clasificacion": r["motivo"]
+                    "clasificacion": clasificacion,
+                    "motivo_clasificacion": r["motivo"],
+                    "is_greeting": clasificacion == "saludo"
                 }}
             )
             if upd.modified_count > 0:
                 classified_count += 1
-                counts[r["clasificacion"]] = counts.get(r["clasificacion"], 0) + 1
+                counts[clasificacion] = counts.get(clasificacion, 0) + 1
 
         background_tasks_status[task_id].update({
             "status": "completed",

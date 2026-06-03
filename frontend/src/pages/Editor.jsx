@@ -53,6 +53,8 @@ export const getNameState = (q) => {
   return "auto";
 };
 
+const isGreetingQuestion = (q) => q?.is_greeting === true || q?.clasificacion === "saludo";
+
 // Componente separado para editar nombre
 const EditableName = ({ question, onSave }) => {
   const [isEditing, setIsEditing] = useState(false);
@@ -611,7 +613,7 @@ export default function Editor() {
     setLoading(true);
     try {
       const response = await axios.get(`${API}/questions`, {
-        params: { batch_id: selectedBatch, include_greetings: true }
+        params: { batch_id: selectedBatch }
       });
       setQuestions(response.data);
     } catch (error) {
@@ -922,13 +924,26 @@ export default function Editor() {
 
   const handleToggleGreeting = async (question) => {
     try {
+      const nextIsGreeting = !isGreetingQuestion(question);
+      const payload = nextIsGreeting
+        ? {
+            is_greeting: true,
+            clasificacion: "saludo",
+            motivo_clasificacion: "Marcado manualmente como saludo"
+          }
+        : {
+            is_greeting: false,
+            clasificacion: "dudoso",
+            motivo_clasificacion: "Desmarcado manualmente como saludo"
+          };
       await axios.put(`${API}/questions/${question.id}`, {
-        is_greeting: !question.is_greeting
+        ...payload
       });
-      setQuestions(prev => prev.map(q => 
-        q.id === question.id ? { ...q, is_greeting: !q.is_greeting } : q
-      ));
-      toast.success(question.is_greeting ? "Desmarcado como saludo" : "Marcado como saludo");
+      setQuestions(prev => nextIsGreeting
+        ? prev.filter(q => q.id !== question.id)
+        : prev.map(q => q.id === question.id ? { ...q, ...payload } : q)
+      );
+      toast.success(nextIsGreeting ? "Marcado como saludo" : "Desmarcado como saludo");
     } catch (error) {
       console.error("Error updating question:", error);
     }
@@ -1079,11 +1094,12 @@ export default function Editor() {
     try {
       await axios.put(`${API}/questions/${questionId}`, {
         clasificacion: "pregunta",
-        motivo_clasificacion: "Confirmado manualmente"
+        motivo_clasificacion: "Confirmado manualmente",
+        is_greeting: false
       });
       setQuestions(prev => prev.map(q =>
         q.id === questionId
-          ? { ...q, clasificacion: "pregunta", motivo_clasificacion: "Confirmado manualmente" }
+          ? { ...q, clasificacion: "pregunta", motivo_clasificacion: "Confirmado manualmente", is_greeting: false }
           : q
       ));
       toast.success("Confirmada como pregunta");
@@ -1146,7 +1162,7 @@ export default function Editor() {
     }
   };
 
-  const validQuestions = questions.filter(q => !q.is_greeting && !q.is_duplicate);
+  const validQuestions = questions.filter(q => !isGreetingQuestion(q) && !q.is_duplicate);
 
   return (
     <div className="p-6 md:p-10 animate-fade-in">
@@ -1402,12 +1418,6 @@ export default function Editor() {
               </button>
             ) : null;
           })()}
-          {questions.filter(q => q.is_greeting).length > 0 && (
-            <div className="flex items-center gap-2">
-              <div className="w-3 h-3 rounded-full bg-gray-400" />
-              <span><strong>{questions.filter(q => q.is_greeting).length}</strong> saludos</span>
-            </div>
-          )}
           {questions.filter(q => q.is_duplicate).length > 0 && (
             <button
               onClick={() => {
@@ -1460,7 +1470,6 @@ export default function Editor() {
               { value: "all", label: "Todas", count: questions.length, dot: "bg-foreground" },
               { value: "pregunta", label: "Preguntas", count: cCounts.pregunta || 0, dot: "bg-green-500" },
               { value: "dudoso", label: "Dudosas", count: cCounts.dudoso || 0, dot: "bg-yellow-500" },
-              { value: "saludo", label: "Saludos", count: cCounts.saludo || 0, dot: "bg-red-500" },
             ];
             return pills.map(p => (
               <button
@@ -1701,7 +1710,7 @@ export default function Editor() {
                     size="sm"
                     onClick={() => handleToggleGreeting(question)}
                     className={`rounded-sm text-xs ${
-                      question.is_greeting 
+                      isGreetingQuestion(question)
                         ? "text-yellow-700 border-yellow-500 bg-yellow-50" 
                         : "text-muted-foreground"
                     }`}
@@ -1709,7 +1718,7 @@ export default function Editor() {
                   >
                     <AlertTriangle className="w-3.5 h-3.5" />
                     <span className="ml-1.5 hidden sm:inline">
-                      {question.is_greeting ? "Es saludo" : "Saludo"}
+                      {isGreetingQuestion(question) ? "Es saludo" : "Saludo"}
                     </span>
                   </Button>
                   
