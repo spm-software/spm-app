@@ -194,11 +194,24 @@ const EditableText = ({ question, onSave }) => {
     setLocalText(question.corrected_text || question.original_text);
   }, [question.corrected_text, question.original_text]);
 
+  const resizeTextarea = () => {
+    if (!textareaRef.current) return;
+    textareaRef.current.style.height = "auto";
+    textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`;
+  };
+
   useEffect(() => {
     if (isEditing && textareaRef.current) {
       textareaRef.current.focus();
+      resizeTextarea();
     }
   }, [isEditing]);
+
+  useEffect(() => {
+    if (isEditing) {
+      resizeTextarea();
+    }
+  }, [isEditing, localText]);
 
   const handleSave = () => {
     const field = question.corrected_text ? "corrected_text" : "original_text";
@@ -215,7 +228,7 @@ const EditableText = ({ question, onSave }) => {
         value={localText}
         onChange={(e) => setLocalText(e.target.value)}
         onBlur={handleSave}
-        className="rounded-sm text-base leading-relaxed min-h-[100px] w-full"
+        className="rounded-sm text-base leading-relaxed min-h-[100px] w-full resize-none overflow-hidden"
         data-testid={`text-textarea-${question.id}`}
       />
     );
