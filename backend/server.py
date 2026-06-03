@@ -1839,13 +1839,15 @@ async def correct_all_questions(batch_id: str, force: bool = False):
     Only operates on questions classified as 'pregunta' (or all, if none in the
     batch has been classified yet).
     """
-    clasif_filter = await build_clasificacion_filter(batch_id)
     query = {
         "import_batch_id": batch_id,
         "is_greeting": {"$ne": True},
-        **clasif_filter
+        "is_duplicate": {"$ne": True},
+        "clasificacion": {"$ne": "saludo"}
     }
     if not force:
+        clasif_filter = await build_clasificacion_filter(batch_id)
+        query.update(clasif_filter)
         query["is_corrected"] = {"$ne": True}
 
     questions = await db.questions.find(
