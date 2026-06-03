@@ -79,6 +79,8 @@ class Question(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     youtube_username: str
     youtube_comment_id: Optional[str] = None  # Para deduplicar por ID del comentario de YouTube
+    youtube_video_id: Optional[str] = None
+    youtube_video_title: Optional[str] = None
     real_name: Optional[str] = None
     real_name_confirmed: bool = False  # True if the real_name was manually confirmed
     original_text: str
@@ -108,6 +110,8 @@ class QuestionUpdate(BaseModel):
     real_name_confirmed: Optional[bool] = None
     clasificacion: Optional[str] = None
     motivo_clasificacion: Optional[str] = None
+    youtube_video_id: Optional[str] = None
+    youtube_video_title: Optional[str] = None
 
 class Program(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -3582,6 +3586,8 @@ async def youtube_import_comments(request: YouTubeImportCommentsRequest):
 
         text = clean_html_to_plain_text((c.get("text") or "").strip())
         username = c.get("youtube_username") or ""
+        video_id = c.get("video_id")
+        video_title = c.get("video_title")
         if not text or not username:
             continue
 
@@ -3607,7 +3613,9 @@ async def youtube_import_comments(request: YouTubeImportCommentsRequest):
                 {"youtube_comment_id": yt_id},
                 {"$set": {
                     "original_text": text,
-                    "youtube_username": username
+                    "youtube_username": username,
+                    "youtube_video_id": video_id,
+                    "youtube_video_title": video_title
                 }}
             )
             updated_count += 1
@@ -3627,6 +3635,8 @@ async def youtube_import_comments(request: YouTubeImportCommentsRequest):
             question = Question(
                 youtube_username=username,
                 youtube_comment_id=yt_id,
+                youtube_video_id=video_id,
+                youtube_video_title=video_title,
                 real_name=real_name,
                 original_text=text,
                 import_batch_id=batch_id

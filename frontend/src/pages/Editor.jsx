@@ -33,7 +33,8 @@ import {
   Users,
   Sparkles,
   Filter,
-  Ban
+  Ban,
+  Video
 } from "lucide-react";
 import { API_BASE_URL as API } from "@/lib/api";
 
@@ -54,6 +55,24 @@ export const getNameState = (q) => {
 };
 
 const isGreetingQuestion = (q) => q?.is_greeting === true || q?.clasificacion === "saludo";
+
+const getYoutubeVideoUrl = (videoId) => (
+  videoId ? `https://www.youtube.com/watch?v=${videoId}` : null
+);
+
+const copyVideoSource = async (question) => {
+  const videoTitle = question.youtube_video_title || "Video de YouTube";
+  const videoUrl = getYoutubeVideoUrl(question.youtube_video_id);
+  const value = videoUrl ? `${videoTitle}\n${videoUrl}` : videoTitle;
+
+  try {
+    await navigator.clipboard.writeText(value);
+    toast.success("Origen del video copiado");
+  } catch (error) {
+    console.error("Error copying video source:", error);
+    toast.error("No se pudo copiar el origen");
+  }
+};
 
 // Componente separado para editar nombre
 const EditableName = ({ question, onSave }) => {
@@ -1662,6 +1681,20 @@ export default function Editor() {
                       <Badge variant="secondary" className="text-xs bg-green-100 text-green-700 border-green-300">
                         <Check className="w-3 h-3 mr-1" />
                         Corregido
+                      </Badge>
+                    )}
+                    {(question.youtube_video_title || question.youtube_video_id) && (
+                      <Badge
+                        variant="outline"
+                        className="text-xs cursor-pointer max-w-full sm:max-w-[360px] border-blue-300 bg-blue-50 text-blue-700 hover:bg-blue-100"
+                        onClick={() => copyVideoSource(question)}
+                        title="Click para copiar el título y enlace del video"
+                        data-testid={`video-source-${question.id}`}
+                      >
+                        <Video className="w-3 h-3 mr-1 flex-shrink-0" />
+                        <span className="truncate">
+                          {question.youtube_video_title || question.youtube_video_id}
+                        </span>
                       </Badge>
                     )}
                     {question.clasificacion && (() => {
