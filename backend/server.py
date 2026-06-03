@@ -958,6 +958,33 @@ Aplica estas preferencias fijas del estilo SPM:
         return text
 
 
+IMPLICIT_QUESTION_PATTERNS = [
+    r"\bse\s+podr[ií]a\s+decir\s+que\b",
+    r"\bpodr[ií]amos\s+decir\s+que\b",
+    r"\bpodr[ií]a\s+decirse\s+que\b",
+    r"\bse\s+puede\s+decir\s+que\b",
+    r"\bpodemos\s+decir\s+que\b",
+    r"\bser[ií]a\s+correcto\s+decir\s+que\b",
+    r"\bes\s+correcto\s+decir\s+que\b",
+    r"\bse\s+podr[ií]a\s+afirmar\s+que\b",
+    r"\bpodr[ií]amos\s+afirmar\s+que\b",
+]
+
+
+def infer_local_classification(text: str) -> Optional[Dict[str, str]]:
+    normalized = normalize_text(text or "")
+    if not normalized:
+        return None
+
+    if any(re.search(pattern, normalized) for pattern in IMPLICIT_QUESTION_PATTERNS):
+        return {
+            "clasificacion": "pregunta",
+            "motivo": "Pregunta implícita"
+        }
+
+    return None
+
+
 async def clasificar_comentarios_con_ia(comentarios: List[Dict], task_id: str = None, model: str = None) -> List[Dict]:
     """Clasifica comentarios en pregunta/dudoso/saludo usando OpenAI.
 
@@ -977,6 +1004,15 @@ Clasifica cada comentario en: "pregunta", "dudoso" o "saludo".
 - "dudoso": es un comentario pero no una pregunta clara (opinión, anécdota, sugerencia)
 - "saludo": saludo, felicitación, comentario irrelevante, muy corto, spam
 
+Contexto: es un canal de consultas teológicas; ante la duda, si el comentario plantea
+una tesis para validar o confirmar, clasifícalo como "pregunta".
+
+Ejemplos de "pregunta" aunque no lleven signos de interrogación:
+- "Se podría decir que Satanás fue el primer envidioso."
+- "Sería correcto decir que el pecado entró por Adán."
+- "Podríamos afirmar que el diezmo no es obligatorio hoy."
+- "Es correcto decir que Dios escucha siempre las oraciones."
+
 Responde SOLO con JSON: [{"id": "...", "clasificacion": "pregunta|dudoso|saludo", "motivo": "..."}]
 El motivo debe ser muy corto (máx 10 palabras). No añadas texto antes ni después del JSON."""
 
@@ -985,8 +1021,24 @@ El motivo debe ser muy corto (máx 10 palabras). No añadas texto antes ni despu
     valid_labels = {"pregunta", "dudoso", "saludo"}
     total = len(comentarios)
 
+    locally_classified: List[Dict] = []
+    pending_comentarios: List[Dict] = []
+    for comentario in comentarios:
+        local = infer_local_classification(comentario.get("text", ""))
+        if local:
+            locally_classified.append({
+                "id": comentario["id"],
+                "clasificacion": local["clasificacion"],
+                "motivo": local["motivo"]
+            })
+        else:
+            pending_comentarios.append(comentario)
+
+    results.extend(locally_classified)
+    total = len(pending_comentarios)
+
     for i in range(0, total, BATCH):
-        chunk = comentarios[i:i + BATCH]
+        chunk = pending_comentarios[i:i + BATCH]
         user_payload = "\n".join(
             f'[{c["id"]}] {c["text"][:800]}' for c in chunk
         )
