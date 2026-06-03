@@ -76,8 +76,9 @@
       try {
         const redirectUri = window.location.origin + '/youtube-callback.html';
         const jwt = localStorage.getItem('spm_jwt');
+        const apiBase = localStorage.getItem('spm_api_base') || '/api';
         
-        const response = await fetch('/api/youtube/callback', {
+        const response = await fetch(apiBase + '/youtube/callback', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -89,7 +90,15 @@
           })
         });
 
-        const data = await response.json();
+        const rawBody = await response.text();
+        let data = {};
+        if (rawBody) {
+          try {
+            data = JSON.parse(rawBody);
+          } catch (parseError) {
+            throw new Error('Respuesta no válida del servidor');
+          }
+        }
 
         if (response.ok) {
           spinner.style.display = 'none';

@@ -97,6 +97,7 @@ export default function Configuracion() {
     setConnecting(true);
     try {
       const redirectUri = `${window.location.origin}/youtube-callback.html`;
+      localStorage.setItem('spm_api_base', API);
       const response = await axios.get(`${API}/youtube/auth-url`, {
         params: { redirect_uri: redirectUri }
       });
