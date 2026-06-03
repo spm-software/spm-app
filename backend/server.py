@@ -781,6 +781,65 @@ async def call_openai_text(system_message: str, user_message: str, model: Option
     return (response.choices[0].message.content or "").strip()
 
 
+CASE_FALLBACK_ACRONYMS = {
+    "spm", "iva", "dni", "nie", "irpf", "aeat", "inss", "sepe", "boe", "ue"
+}
+
+CASE_FALLBACK_PROPER_WORDS = {
+    "dios": "Dios",
+    "jesus": "Jesús",
+    "jesús": "Jesús",
+    "jesucristo": "Jesucristo",
+    "cristo": "Cristo",
+    "senor": "Señor",
+    "señor": "Señor",
+}
+
+CASE_FALLBACK_ABBREVIATIONS = {
+    "hno": "Hno.",
+    "hna": "Hna.",
+}
+
+
+def is_mostly_uppercase_text(text: str) -> bool:
+    letters = [ch for ch in text if ch.isalpha()]
+    if len(letters) < 8:
+        return False
+    uppercase_count = sum(1 for ch in letters if ch.isupper())
+    return uppercase_count / len(letters) >= 0.75
+
+
+def apply_basic_case_fallback(text: str) -> str:
+    """Normalize obvious all-caps text when the AI returns it unchanged."""
+    normalized = re.sub(r"\s+", " ", text.strip())
+
+    def normalize_word(match):
+        word = match.group(0)
+        lower = word.lower()
+        if lower in CASE_FALLBACK_ACRONYMS:
+            return lower.upper()
+        if lower in CASE_FALLBACK_ABBREVIATIONS:
+            return CASE_FALLBACK_ABBREVIATIONS[lower]
+        if lower in CASE_FALLBACK_PROPER_WORDS:
+            return CASE_FALLBACK_PROPER_WORDS[lower]
+        return lower
+
+    normalized = re.sub(r"\b[\wÁÉÍÓÚÜÑáéíóúüñ]+\b", normalize_word, normalized)
+    normalized = re.sub(r"\b(Hno|Hna)\.\.", r"\1.", normalized)
+
+    chars = list(normalized)
+    capitalize_next = True
+    for i, ch in enumerate(chars):
+        if ch.isalpha():
+            if capitalize_next:
+                chars[i] = ch.upper()
+                capitalize_next = False
+        elif ch in ".!?¿¡":
+            capitalize_next = True
+
+    return "".join(chars)
+
+
 async def correct_text_with_ai(text: str, model: str = None) -> str:
     """Correct text grammar using OpenAI."""
     try:
@@ -812,9 +871,14 @@ Aplica estas preferencias fijas del estilo SPM:
 - Si hay dudas de puntuación, corrige lo mínimo necesario para que se lea bien, sin alterar el contenido.
 - Respeta el estilo coloquial del autor si lo tiene."""
         response = await call_openai_text(system_message, text, model)
-        return response.strip() if response else text
+        corrected = response.strip() if response else text
+        if corrected.strip() == text.strip() and is_mostly_uppercase_text(text):
+            return apply_basic_case_fallback(text)
+        return corrected
     except Exception as e:
         logger.error(f"Error correcting text: {e}")
+        if is_mostly_uppercase_text(text):
+            return apply_basic_case_fallback(text)
         return text
 
 
