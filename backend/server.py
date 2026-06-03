@@ -826,6 +826,7 @@ def apply_basic_case_fallback(text: str) -> str:
 
     normalized = re.sub(r"\b[\wÁÉÍÓÚÜÑáéíóúüñ]+\b", normalize_word, normalized)
     normalized = re.sub(r"\b(Hno|Hna)\.\.", r"\1.", normalized)
+    normalized = apply_basic_question_punctuation_fallback(normalized)
 
     chars = list(normalized)
     capitalize_next = True
@@ -838,6 +839,81 @@ def apply_basic_case_fallback(text: str) -> str:
             capitalize_next = True
 
     return "".join(chars)
+
+
+def apply_basic_question_punctuation_fallback(text: str) -> str:
+    lead_pattern = r"(bendiciones(?:\s+Hno\.|\s+Hna\.)?)"
+    closing_pattern = r"(gracias(?:\s+saludos)?|saludos)"
+    match = re.match(
+        rf"^{lead_pattern}\s+(?P<body>.+?)\s+{closing_pattern}\.?$",
+        text,
+        flags=re.IGNORECASE
+    )
+    if not match:
+        return text
+
+    body = match.group("body").strip(" .")
+    if not body:
+        return text
+
+    lead = match.group(1).strip()
+    closing = match.group(3).lower()
+    if closing == "gracias saludos":
+        closing = "gracias, saludos"
+
+    if not lead.endswith("."):
+        lead = f"{lead}."
+
+    body = re.sub(r"\s+([?!.:,;])", r"\1", body)
+    body = re.sub(r"([¿¡])\s+", r"\1", body)
+    body = apply_mi_pregunta_es_fallback(body)
+    if "?" in body:
+        if not body.startswith("¿") and "¿" not in body:
+            body = f"¿{body}"
+    elif "¿" not in body:
+        body = f"¿{body}?"
+
+    body = apply_question_initial_accent_fallback(body)
+    return f"{lead} {body} {closing}"
+
+
+def apply_mi_pregunta_es_fallback(text: str) -> str:
+    match = re.search(r"\bmi pregunta es\s+(?P<question>.+)$", text, flags=re.IGNORECASE)
+    if not match:
+        return text
+
+    question = match.group("question").strip(" .")
+    if not question:
+        return text
+
+    prefix = text[:match.start()].strip(" .")
+    question = re.sub(r"\s+([?!.:,;])", r"\1", question)
+    if "?" not in question:
+        question = f"¿{question}?"
+    elif not question.startswith("¿"):
+        question = f"¿{question}"
+
+    if prefix:
+        return f"{prefix}. mi pregunta es: {question}"
+    return f"mi pregunta es: {question}"
+
+
+def apply_question_initial_accent_fallback(text: str) -> str:
+    replacements = {
+        "¿cuando ": "¿cuándo ",
+        "¿como ": "¿cómo ",
+        "¿donde ": "¿dónde ",
+        "¿que ": "¿qué ",
+        "¿quien ": "¿quién ",
+        "¿quienes ": "¿quiénes ",
+        "¿cual ": "¿cuál ",
+        "¿cuales ": "¿cuáles ",
+    }
+    lower = text.lower()
+    for source, target in replacements.items():
+        if lower.startswith(source):
+            return target + text[len(source):]
+    return text
 
 
 async def correct_text_with_ai(text: str, model: str = None) -> str:
