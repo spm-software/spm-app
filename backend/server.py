@@ -786,7 +786,7 @@ async def correct_text_with_ai(text: str, model: str = None) -> str:
     try:
         system_message = """Instrucciones obligatorias para corregir el texto:
 
-1. Corrige la ortografía, acentuación, signos de puntuación y mayúsculas.
+1. Corrige la ortografía, acentuación, signos de puntuación, mayúsculas, minúsculas y capitalización.
 2. No cambies el contenido, el sentido ni la intención de lo que ha escrito la persona.
 3. No resumas, no reorganices las ideas y no elimines partes del texto.
 4. No inventes información.
@@ -795,14 +795,18 @@ async def correct_text_with_ai(text: str, model: str = None) -> str:
 7. No uses viñetas.
 8. No uses negritas.
 9. No uses la arroba @ en los nombres.
-10. Después de un signo de interrogación de apertura (¿), la primera letra debe ir siempre en mayúscula.
-11. Después de un signo de interrogación de cierre (?), si continúa una nueva frase o pregunta, la primera letra debe ir en mayúscula cuando corresponda.
-12. Corrige tildes de nombres propios también, por ejemplo: Ramón, Óscar, Ángela, Iván, etc.
-13. No añadas frases de introducción ni de cierre.
-14. Elimina la palabra "(editado)" si aparece en el texto.
-15. Elimina frases de YouTube como "Se suscribió a tu canal de forma pública", "Se suscribió a tu canal", "Miembro desde hace X", "Suscriptor desde hace X" y similares.
-16. Devuélveme SOLO el texto ya corregido.
-17. Mantén el contenido intacto, limitándote a corregir ortografía.
+10. Si el texto viene todo en mayúsculas o con mayúsculas/minúsculas mal puestas, normalízalo a escritura natural.
+11. Usa mayúscula inicial al comienzo de frase, después de punto y en nombres propios.
+12. Usa minúsculas donde corresponda en palabras comunes, artículos, preposiciones y frases que no sean nombres propios.
+13. Conserva siglas y acrónimos en mayúsculas cuando sean correctos, por ejemplo: SPM, IVA, DNI.
+14. Después de un signo de interrogación de apertura (¿), la primera letra debe ir siempre en mayúscula.
+15. Después de un signo de interrogación de cierre (?), si continúa una nueva frase o pregunta, la primera letra debe ir en mayúscula cuando corresponda.
+16. Corrige tildes de nombres propios también, por ejemplo: Ramón, Óscar, Ángela, Iván, etc.
+17. No añadas frases de introducción ni de cierre.
+18. Elimina la palabra "(editado)" si aparece en el texto.
+19. Elimina frases de YouTube como "Se suscribió a tu canal de forma pública", "Se suscribió a tu canal", "Miembro desde hace X", "Suscriptor desde hace X" y similares.
+20. Devuélveme SOLO el texto ya corregido.
+21. Mantén el contenido intacto, limitándote a corregir ortografía, puntuación y capitalización.
 
 Aplica estas preferencias fijas del estilo SPM:
 - Si hay dudas de puntuación, corrige lo mínimo necesario para que se lea bien, sin alterar el contenido.
