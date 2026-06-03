@@ -15,7 +15,10 @@ if not BASE_URL:
     except Exception:
         pass
 
-assert BASE_URL, "REACT_APP_BACKEND_URL not configured"
+pytestmark = pytest.mark.skipif(
+    not BASE_URL,
+    reason="Integration test requires REACT_APP_BACKEND_URL",
+)
 
 
 @pytest.fixture

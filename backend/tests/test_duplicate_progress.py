@@ -15,6 +15,10 @@ import os
 import time
 
 BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', '').rstrip('/')
+pytestmark = pytest.mark.skipif(
+    not BASE_URL,
+    reason="Integration test requires REACT_APP_BACKEND_URL",
+)
 
 # Test batch with questions
 TEST_BATCH_ID = "d5b36186-e03d-45da-8792-0e6661aac562"  # "Hasta 28-02-26" - 141 questions
@@ -27,7 +31,7 @@ class TestStartAIDuplicateCheck:
         """Verify start endpoint returns task_id and status 'started'"""
         response = requests.post(
             f"{BASE_URL}/api/questions/check-duplicates-ai-start/{TEST_BATCH_ID}",
-            json={"model": "gpt-5.2"}
+            json={"model": "gpt-5.4-mini"}
         )
         assert response.status_code == 200, f"Failed to start task: {response.text}"
         
@@ -58,7 +62,7 @@ class TestStartAIDuplicateCheck:
     
     def test_start_with_different_models(self):
         """Test start endpoint accepts different AI model options"""
-        models = ["gpt-5.2", "gpt-4o", "claude-sonnet-4-5", "gemini-3-flash"]
+        models = ["gpt-5.4-mini", "gpt-5.4", "gpt-5.2", "gpt-4o-mini"]
         
         for model in models:
             response = requests.post(
@@ -89,7 +93,7 @@ class TestGetDuplicateCheckStatus:
         """Create a task and return its ID"""
         response = requests.post(
             f"{BASE_URL}/api/questions/check-duplicates-ai-start/{TEST_BATCH_ID}",
-            json={"model": "gpt-5.2"}
+            json={"model": "gpt-5.4-mini"}
         )
         task_id = response.json()["task_id"]
         yield task_id
@@ -162,7 +166,7 @@ class TestDeleteDuplicateCheckStatus:
         # Create a task
         start_response = requests.post(
             f"{BASE_URL}/api/questions/check-duplicates-ai-start/{TEST_BATCH_ID}",
-            json={"model": "gpt-5.2"}
+            json={"model": "gpt-5.4-mini"}
         )
         task_id = start_response.json()["task_id"]
         
@@ -194,7 +198,7 @@ class TestCompletedTaskResults:
         # Start a task
         start_response = requests.post(
             f"{BASE_URL}/api/questions/check-duplicates-ai-start/{TEST_BATCH_ID}",
-            json={"model": "gpt-5.2"}
+            json={"model": "gpt-5.4-mini"}
         )
         task_id = start_response.json()["task_id"]
         
@@ -246,7 +250,7 @@ class TestLegacySynchronousEndpoint:
         # For large batches, this may timeout, so we just check it starts
         response = requests.post(
             f"{BASE_URL}/api/questions/check-duplicates-ai/{TEST_BATCH_ID}",
-            json={"model": "gpt-5.2"},
+            json={"model": "gpt-5.4-mini"},
             timeout=300  # 5 minute timeout
         )
         

@@ -9,6 +9,10 @@ import requests
 import os
 
 BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', '').rstrip('/')
+pytestmark = pytest.mark.skipif(
+    not BASE_URL,
+    reason="Integration test requires REACT_APP_BACKEND_URL",
+)
 
 # Test batch IDs from existing data
 BATCH_WITH_DUPLICATES = "d5b36186-e03d-45da-8792-0e6661aac562"  # "Hasta 28-02-26" - 141 questions with duplicates
