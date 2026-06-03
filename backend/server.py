@@ -1833,20 +1833,23 @@ async def correct_questions(data: CorrectionRequest):
     return {"corrected": corrected}
 
 @api_router.post("/questions/correct-all/{batch_id}")
-async def correct_all_questions(batch_id: str):
+async def correct_all_questions(batch_id: str, force: bool = False):
     """Get list of questions to correct (does not correct them, just returns IDs).
 
     Only operates on questions classified as 'pregunta' (or all, if none in the
     batch has been classified yet).
     """
     clasif_filter = await build_clasificacion_filter(batch_id)
+    query = {
+        "import_batch_id": batch_id,
+        "is_greeting": {"$ne": True},
+        **clasif_filter
+    }
+    if not force:
+        query["is_corrected"] = {"$ne": True}
+
     questions = await db.questions.find(
-        {
-            "import_batch_id": batch_id,
-            "is_greeting": {"$ne": True},
-            "is_corrected": {"$ne": True},
-            **clasif_filter
-        },
+        query,
         {"_id": 0, "id": 1, "youtube_username": 1}
     ).to_list(500)
 
@@ -1865,7 +1868,7 @@ async def correct_all_questions(batch_id: str):
     }
 
 @api_router.post("/questions/correct-batch")
-async def correct_batch_questions(data: CorrectionRequest):
+async def correct_batch_questions(data: CorrectionRequest, force: bool = False):
     """Correct a small batch of questions (for progress tracking)"""
     settings = await get_settings()
     corrected = []
@@ -1874,7 +1877,7 @@ async def correct_batch_questions(data: CorrectionRequest):
     for qid in data.question_ids:
         try:
             question = await db.questions.find_one({"id": qid}, {"_id": 0})
-            if question and not question.get("is_corrected"):
+            if question and (force or not question.get("is_corrected")):
                 # Update real_name from user mappings if available
                 stored_name = await get_real_name(question.get("youtube_username", ""))
                 if stored_name and stored_name != question.get("real_name"):
@@ -1883,7 +1886,7 @@ async def correct_batch_questions(data: CorrectionRequest):
                         {"$set": {"real_name": stored_name}}
                     )
 
-                text_to_correct = question.get("original_text", "")
+                text_to_correct = question.get("corrected_text") or question.get("original_text", "")
                 corrected_text = await correct_text_with_ai(text_to_correct, settings.llm_provider)
 
                 await db.questions.update_one(

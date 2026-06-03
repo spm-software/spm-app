@@ -552,6 +552,7 @@ export default function Editor() {
   const [questions, setQuestions] = useState([]);
   const [loading, setLoading] = useState(false);
   const [correcting, setCorrecting] = useState(false);
+  const [correctingMode, setCorrectingMode] = useState(null);
   const [correctingProgress, setCorrectingProgress] = useState({ current: 0, total: 0 });
   const [correctingId, setCorrectingId] = useState(null);
   const [checkingDuplicates, setCheckingDuplicates] = useState(false);
@@ -633,18 +634,25 @@ export default function Editor() {
     }
   }, [selectedBatch, fetchQuestions]);
 
-  const handleCorrectAll = async () => {
+  const handleCorrectAll = async (force = false) => {
+    if (force && !window.confirm("¿Recorregir todas las preguntas válidas de este lote? Esto volverá a consumir créditos IA.")) {
+      return;
+    }
+
     setCorrecting(true);
+    setCorrectingMode(force ? "recorrect" : "correct");
     setCorrectingProgress({ current: 0, total: 0 });
     
     try {
       // First, get the list of questions to correct
-      const initResponse = await axios.post(`${API}/questions/correct-all/${selectedBatch}`);
+      const initResponse = await axios.post(`${API}/questions/correct-all/${selectedBatch}`, null, {
+        params: { force }
+      });
       const questionIds = initResponse.data.question_ids;
       const total = questionIds.length;
       
       if (total === 0) {
-        toast.info("No hay preguntas pendientes de corregir");
+        toast.info(force ? "No hay preguntas válidas para recorregir" : "No hay preguntas pendientes de corregir");
         setCorrecting(false);
         fetchQuestions();
         return;
@@ -663,6 +671,8 @@ export default function Editor() {
         try {
           const response = await axios.post(`${API}/questions/correct-batch`, {
             question_ids: batch
+          }, {
+            params: { force }
           });
           correctedCount += response.data.corrected.length;
           errorCount += response.data.errors.length;
@@ -675,9 +685,9 @@ export default function Editor() {
       }
       
       if (errorCount > 0) {
-        toast.warning(`${correctedCount} corregidas, ${errorCount} errores`);
+        toast.warning(`${correctedCount} ${force ? "recorregidas" : "corregidas"}, ${errorCount} errores`);
       } else {
-        toast.success(`${correctedCount} preguntas corregidas`);
+        toast.success(`${correctedCount} preguntas ${force ? "recorregidas" : "corregidas"}`);
       }
       
       fetchQuestions();
@@ -686,6 +696,7 @@ export default function Editor() {
       toast.error("Error al iniciar corrección");
     } finally {
       setCorrecting(false);
+      setCorrectingMode(null);
       setCorrectingProgress({ current: 0, total: 0 });
     }
   };
@@ -1314,13 +1325,13 @@ export default function Editor() {
 
         {/* 4. Corregir todo con IA */}
         <Button
-          onClick={handleCorrectAll}
+          onClick={() => handleCorrectAll(false)}
           disabled={correcting || questions.length === 0}
           size="lg"
           className="rounded-sm uppercase tracking-wide text-xs min-w-[200px]"
           data-testid="correct-all-button"
         >
-          {correcting ? (
+          {correcting && correctingMode === "correct" ? (
             <>
               <Loader2 className="w-4 h-4 mr-2 animate-spin" />
               {correctingProgress.total > 0 
@@ -1332,6 +1343,30 @@ export default function Editor() {
             <>
               <Wand2 className="w-4 h-4 mr-2" />
               Corregir todo con IA
+            </>
+          )}
+        </Button>
+
+        <Button
+          onClick={() => handleCorrectAll(true)}
+          disabled={correcting || questions.length === 0}
+          size="lg"
+          variant="outline"
+          className="rounded-sm uppercase tracking-wide text-xs min-w-[210px]"
+          data-testid="recorrect-all-button"
+        >
+          {correcting && correctingMode === "recorrect" ? (
+            <>
+              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+              {correctingProgress.total > 0
+                ? `Procesando ${correctingProgress.current}/${correctingProgress.total}...`
+                : "Iniciando..."
+              }
+            </>
+          ) : (
+            <>
+              <Wand2 className="w-4 h-4 mr-2" />
+              Recorregir todo con IA
             </>
           )}
         </Button>
