@@ -31,8 +31,7 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
-
-const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+import { API_BASE_URL as API } from "@/lib/api";
 
 export default function Dashboard() {
   const navigate = useNavigate();

@@ -31,11 +31,12 @@ export default function Layout() {
         {/* Logo */}
         <div className="p-6 border-b border-border">
           <div className="flex items-center gap-3">
-            <img 
-              src="https://customer-assets.emergentagent.com/job_youtube-qna-manager/artifacts/369twhb0_Logo%20SPM.jpg" 
-              alt="Samuel Pérez Millos"
-              className="w-12 h-12 rounded-full object-cover"
-            />
+            <div
+              className="w-12 h-12 rounded-full bg-primary text-primary-foreground flex items-center justify-center font-heading text-lg font-bold tracking-wide"
+              aria-label="Samuel Pérez Millos"
+            >
+              SPM
+            </div>
             <div>
               <h1 className="font-heading text-base font-bold tracking-tight leading-tight">
                 GESTOR Q&A

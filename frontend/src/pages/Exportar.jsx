@@ -1,9 +1,8 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import axios from "axios";
 import { toast } from "sonner";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { 
   Select,
@@ -19,8 +18,7 @@ import {
   FileText,
   Check
 } from "lucide-react";
-
-const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+import { API_BASE_URL as API } from "@/lib/api";
 
 export default function Exportar() {
   const [batches, setBatches] = useState([]);
@@ -31,19 +29,7 @@ export default function Exportar() {
   const [loading, setLoading] = useState(false);
   const [copied, setCopied] = useState(false);
 
-  useEffect(() => {
-    fetchBatches();
-  }, []);
-
-  useEffect(() => {
-    if (selectedBatch) {
-      fetchPrograms();
-      setExportContent("");
-      setSelectedProgram("");
-    }
-  }, [selectedBatch]);
-
-  const fetchBatches = async () => {
+  const fetchBatches = useCallback(async () => {
     try {
       const response = await axios.get(`${API}/batches`);
       setBatches(response.data);
@@ -58,9 +44,9 @@ export default function Exportar() {
     } catch (error) {
       console.error("Error fetching batches:", error);
     }
-  };
+  }, []);
 
-  const fetchPrograms = async () => {
+  const fetchPrograms = useCallback(async () => {
     try {
       const response = await axios.get(`${API}/programs`, {
         params: { batch_id: selectedBatch }
@@ -69,7 +55,19 @@ export default function Exportar() {
     } catch (error) {
       console.error("Error fetching programs:", error);
     }
-  };
+  }, [selectedBatch]);
+
+  useEffect(() => {
+    fetchBatches();
+  }, [fetchBatches]);
+
+  useEffect(() => {
+    if (selectedBatch) {
+      fetchPrograms();
+      setExportContent("");
+      setSelectedProgram("");
+    }
+  }, [selectedBatch, fetchPrograms]);
 
   const handleExportProgram = async (programId) => {
     setLoading(true);

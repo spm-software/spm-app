@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import axios from "axios";
 import { toast } from "sonner";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -22,6 +22,7 @@ import {
   AlertCircle,
   ArrowRightLeft
 } from "lucide-react";
+import { API_BASE_URL as API } from "@/lib/api";
 
 // Mirror of Editor's getNameState for visual consistency
 const getNameState = (q) => {
@@ -34,30 +35,16 @@ const getNameState = (q) => {
   return "auto";
 };
 
-const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
-
 export default function Distribuidor() {
   const [batches, setBatches] = useState([]);
   const [selectedBatch, setSelectedBatch] = useState("");
   const [numPrograms, setNumPrograms] = useState("4");
   const [programs, setPrograms] = useState([]);
   const [questions, setQuestions] = useState([]);
-  const [loading, setLoading] = useState(false);
   const [distributing, setDistributing] = useState(false);
   const [clearing, setClearing] = useState(false);
 
-  useEffect(() => {
-    fetchBatches();
-  }, []);
-
-  useEffect(() => {
-    if (selectedBatch) {
-      fetchPrograms();
-      fetchQuestions();
-    }
-  }, [selectedBatch]);
-
-  const fetchBatches = async () => {
+  const fetchBatches = useCallback(async () => {
     try {
       const response = await axios.get(`${API}/batches`);
       setBatches(response.data);
@@ -72,9 +59,9 @@ export default function Distribuidor() {
     } catch (error) {
       console.error("Error fetching batches:", error);
     }
-  };
+  }, []);
 
-  const fetchPrograms = async () => {
+  const fetchPrograms = useCallback(async () => {
     try {
       const response = await axios.get(`${API}/programs`, {
         params: { batch_id: selectedBatch }
@@ -83,7 +70,7 @@ export default function Distribuidor() {
     } catch (error) {
       console.error("Error fetching programs:", error);
     }
-  };
+  }, [selectedBatch]);
 
   const handleMoveFromReserve = async (questionId, targetProgramId) => {
     try {
@@ -98,8 +85,7 @@ export default function Distribuidor() {
     }
   };
 
-  const fetchQuestions = async () => {
-    setLoading(true);
+  const fetchQuestions = useCallback(async () => {
     try {
       const response = await axios.get(`${API}/questions`, {
         params: { batch_id: selectedBatch }
@@ -107,10 +93,19 @@ export default function Distribuidor() {
       setQuestions(response.data);
     } catch (error) {
       console.error("Error fetching questions:", error);
-    } finally {
-      setLoading(false);
     }
-  };
+  }, [selectedBatch]);
+
+  useEffect(() => {
+    fetchBatches();
+  }, [fetchBatches]);
+
+  useEffect(() => {
+    if (selectedBatch) {
+      fetchPrograms();
+      fetchQuestions();
+    }
+  }, [selectedBatch, fetchPrograms, fetchQuestions]);
 
   const handleDistribute = async () => {
     setDistributing(true);

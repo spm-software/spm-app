@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from "react";
+import { useCallback, useEffect, useState, useRef } from "react";
 import axios from "axios";
 import { toast } from "sonner";
 import { Card, CardContent } from "@/components/ui/card";
@@ -30,15 +30,12 @@ import {
   Pencil,
   CheckCircle,
   Copy,
-  X,
-  ArrowRight,
   Users,
   Sparkles,
   Filter,
   Ban
 } from "lucide-react";
-
-const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+import { API_BASE_URL as API } from "@/lib/api";
 
 /**
  * Returns one of three states for a question's real_name:
@@ -428,7 +425,7 @@ const SearchModal = ({ open, onClose }) => {
     setSearching(true);
     setHasSearched(true);
     try {
-      const response = await axios.get(`${process.env.REACT_APP_BACKEND_URL}/api/questions/search`, {
+      const response = await axios.get(`${API}/questions/search`, {
         params: { q: searchTerm }
       });
       setResults(response.data.results);
@@ -566,15 +563,15 @@ export default function Editor() {
   const [clasifying, setClasifying] = useState(false);
   const [clasifyProgress, setClasifyProgress] = useState({ current: 0, total: 0, percentage: 0 });
   const clasifyPollRef = useRef(null);
-  const [aiModel, setAiModel] = useState("gpt-5.2");
+  const [aiModel, setAiModel] = useState("gpt-5.4-mini");
   const initialBatchLoaded = useRef(false);
   const pollingIntervalRef = useRef(null);
 
   const AI_MODELS = [
-    { value: "gpt-5.2", label: "GPT-5.2 (OpenAI)", provider: "openai" },
-    { value: "gpt-4o", label: "GPT-4o (OpenAI)", provider: "openai" },
-    { value: "claude-sonnet-4-5", label: "Claude Sonnet 4.5", provider: "anthropic" },
-    { value: "gemini-3-flash", label: "Gemini 3 Flash", provider: "gemini" },
+    { value: "gpt-5.4-mini", label: "GPT-5.4 Mini", provider: "openai" },
+    { value: "gpt-5.4", label: "GPT-5.4", provider: "openai" },
+    { value: "gpt-5.2", label: "GPT-5.2", provider: "openai" },
+    { value: "gpt-4o-mini", label: "GPT-4o Mini", provider: "openai" },
   ];
 
   // Cleanup polling on unmount
@@ -589,17 +586,7 @@ export default function Editor() {
     };
   }, []);
 
-  useEffect(() => {
-    fetchBatches();
-  }, []);
-
-  useEffect(() => {
-    if (selectedBatch) {
-      fetchQuestions();
-    }
-  }, [selectedBatch]);
-
-  const fetchBatches = async () => {
+  const fetchBatches = useCallback(async () => {
     try {
       const response = await axios.get(`${API}/batches`);
       setBatches(response.data);
@@ -611,16 +598,16 @@ export default function Editor() {
         if (storedBatch && response.data.some(b => b.id === storedBatch)) {
           setSelectedBatch(storedBatch);
           sessionStorage.removeItem('selectedBatch');
-        } else if (response.data.length > 0 && !selectedBatch) {
-          setSelectedBatch(response.data[0].id);
+        } else if (response.data.length > 0) {
+          setSelectedBatch(currentBatch => currentBatch || response.data[0].id);
         }
       }
     } catch (error) {
       console.error("Error fetching batches:", error);
     }
-  };
+  }, []);
 
-  const fetchQuestions = async () => {
+  const fetchQuestions = useCallback(async () => {
     setLoading(true);
     try {
       const response = await axios.get(`${API}/questions`, {
@@ -632,7 +619,17 @@ export default function Editor() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [selectedBatch]);
+
+  useEffect(() => {
+    fetchBatches();
+  }, [fetchBatches]);
+
+  useEffect(() => {
+    if (selectedBatch) {
+      fetchQuestions();
+    }
+  }, [selectedBatch, fetchQuestions]);
 
   const handleCorrectAll = async () => {
     setCorrecting(true);
@@ -1587,7 +1584,7 @@ export default function Editor() {
                           await axios.post(`${API}/questions/${question.id}/confirm-name`);
                           toast.success("Nombre confirmado");
                           fetchQuestions();
-                        } catch (error) {
+                        } catch {
                           toast.error("Error al confirmar nombre");
                         }
                       };

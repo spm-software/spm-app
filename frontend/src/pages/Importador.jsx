@@ -12,13 +12,12 @@ import {
   Upload, 
   CheckCircle, 
   Loader2, 
-  Youtube,
+  CirclePlay as Youtube,
   Link2,
   Download,
   History
 } from "lucide-react";
-
-const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+import { API_BASE_URL as API } from "@/lib/api";
 
 export default function Importador() {
   // Manual import state

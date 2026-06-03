@@ -23,12 +23,11 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import { 
-  Settings, 
+import {
   Save, 
   Loader2,
   Cpu,
-  Youtube,
+  CirclePlay as Youtube,
   Hash,
   Trash2,
   AlertTriangle,
@@ -41,14 +40,13 @@ import {
   Link2,
   Ban
 } from "lucide-react";
-
-const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+import { API_BASE_URL as API } from "@/lib/api";
 
 export default function Configuracion() {
   const [settings, setSettings] = useState({
     num_programs: 4,
     max_questions_per_user_per_program: 2,
-    llm_provider: "openai",
+    llm_provider: "gpt-5.4-mini",
     youtube_client_id: "",
     youtube_client_secret: ""
   });
@@ -140,7 +138,7 @@ export default function Configuracion() {
       await axios.delete(`${API}/youtube/disconnect`);
       setYoutubeAuth({ authenticated: false, loading: false });
       toast.success("Cuenta de YouTube desconectada");
-    } catch (error) {
+    } catch {
       toast.error("Error al desconectar");
     }
   };
@@ -163,7 +161,7 @@ export default function Configuracion() {
       await axios.delete(`${API}/comentarios-bloqueados/${id}`);
       setBlockedComments(prev => prev.filter(b => b.id !== id));
       toast.success("Entrada eliminada");
-    } catch (error) {
+    } catch {
       toast.error("Error al eliminar entrada");
     }
   };
@@ -171,7 +169,10 @@ export default function Configuracion() {
   const fetchSettings = async () => {
     try {
       const response = await axios.get(`${API}/settings`);
-      setSettings(response.data);
+      setSettings({
+        ...response.data,
+        llm_provider: response.data.llm_provider === "openai" ? "gpt-5.4-mini" : response.data.llm_provider
+      });
     } catch (error) {
       console.error("Error fetching settings:", error);
     } finally {
@@ -393,7 +394,7 @@ export default function Configuracion() {
           <CardContent className="space-y-6">
             <div>
               <Label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                Proveedor de IA
+                Modelo de IA
               </Label>
               <Select 
                 value={settings.llm_provider} 
@@ -403,13 +404,14 @@ export default function Configuracion() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="openai">OpenAI GPT-5.2</SelectItem>
-                  <SelectItem value="anthropic">Claude Sonnet 4.5</SelectItem>
-                  <SelectItem value="gemini">Gemini 3 Flash</SelectItem>
+                  <SelectItem value="gpt-5.4-mini">GPT-5.4 Mini</SelectItem>
+                  <SelectItem value="gpt-5.4">GPT-5.4</SelectItem>
+                  <SelectItem value="gpt-5.2">GPT-5.2</SelectItem>
+                  <SelectItem value="gpt-4o-mini">GPT-4o Mini</SelectItem>
                 </SelectContent>
               </Select>
               <p className="text-xs text-muted-foreground mt-2">
-                Usando Emergent LLM Key universal
+                Usando OpenAI API Key
               </p>
             </div>
           </CardContent>
