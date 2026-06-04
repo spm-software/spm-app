@@ -2469,6 +2469,14 @@ async def distribute_questions(data: DistributeRequest):
         {"_id": 0}
     ).sort("created_at", 1).to_list(2000)
 
+    current_existing_programs = await db.programs.find(
+        {"batch_id": data.batch_id},
+        {"id": 1, "_id": 0}
+    ).to_list(100)
+    current_existing_program_ids = [
+        p["id"] for p in current_existing_programs if p.get("id")
+    ]
+
     def parse_batch_created_at(batch: Dict) -> Optional[datetime]:
         value = batch.get("created_at")
         if isinstance(value, datetime):
@@ -2510,8 +2518,41 @@ async def distribute_questions(data: DistributeRequest):
             {"_id": 0}
         ).sort("created_at", 1).to_list(2000)
 
+    existing_carried_questions = []
+    if current_existing_program_ids:
+        existing_carried_questions = await db.questions.find(
+            {
+                "program_id": {"$in": current_existing_program_ids},
+                "import_batch_id": {"$ne": data.batch_id},
+                "is_greeting": {"$ne": True},
+                "is_duplicate": {"$ne": True},
+                "clasificacion": {"$ne": "saludo"}
+            },
+            {"_id": 0}
+        ).sort("created_at", 1).to_list(2000)
+
+    existing_program_ids = [
+        p["id"] for p in await db.programs.find({}, {"id": 1, "_id": 0}).to_list(5000)
+        if p.get("id")
+    ]
+    orphaned_carried_questions = await db.questions.find(
+        {
+            "program_id": {"$exists": True, "$ne": None, "$nin": existing_program_ids},
+            "import_batch_id": {"$ne": data.batch_id},
+            "is_greeting": {"$ne": True},
+            "is_duplicate": {"$ne": True},
+            "clasificacion": {"$ne": "saludo"}
+        },
+        {"_id": 0}
+    ).sort("created_at", 1).to_list(2000)
+
     questions_by_id = {}
-    for q in carry_reserve_questions + current_batch_questions:
+    all_carried_questions = (
+        carry_reserve_questions
+        + existing_carried_questions
+        + orphaned_carried_questions
+    )
+    for q in all_carried_questions + current_batch_questions:
         if q.get("id"):
             questions_by_id[q["id"]] = q
 
@@ -2528,7 +2569,11 @@ async def distribute_questions(data: DistributeRequest):
                 pass
         return datetime.min.replace(tzinfo=timezone.utc)
 
-    questions = sorted(questions_by_id.values(), key=question_created_at)
+    carry_reserve_ids = {q["id"] for q in all_carried_questions if q.get("id")}
+    questions = sorted(
+        questions_by_id.values(),
+        key=lambda q: (0 if q.get("id") in carry_reserve_ids else 1, question_created_at(q))
+    )
 
     if not questions:
         raise HTTPException(status_code=400, detail="No hay preguntas para distribuir")
@@ -2672,14 +2717,14 @@ async def distribute_questions(data: DistributeRequest):
         "Distribution complete: %s (current_batch=%s, carried_reserve=%s)",
         distribution,
         len(current_batch_questions),
-        len(carry_reserve_questions)
+        len(carry_reserve_ids)
     )
 
     return {
         "programs_created": num_programs + 1,
         "distribution": distribution,
         "current_batch_questions": len(current_batch_questions),
-        "carried_reserve_questions": len(carry_reserve_questions)
+        "carried_reserve_questions": len(carry_reserve_ids)
     }
 
 
