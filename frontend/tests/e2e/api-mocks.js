@@ -38,11 +38,17 @@ export async function mockCoreApi(page, options = {}) {
     }
 
     if (method === "GET" && path === "/api/stats") {
+      const reserveProgramIds = state.programs
+        .filter((program) => program.is_reserve)
+        .map((program) => program.id);
       return json(route, {
         total_questions: 12,
         total_users: 4,
         total_batches: state.batches.length,
         recent_questions: 7,
+        reserve_questions: state.questions.filter((question) =>
+          reserveProgramIds.includes(question.program_id)
+        ).length,
       });
     }
 
@@ -109,6 +115,16 @@ export async function mockCoreApi(page, options = {}) {
         batchId
           ? state.questions.filter((question) => question.import_batch_id === batchId)
           : state.questions,
+      );
+    }
+
+    if (method === "GET" && path === "/api/questions/reserve") {
+      const reserveProgramIds = state.programs
+        .filter((program) => program.is_reserve)
+        .map((program) => program.id);
+      return json(
+        route,
+        state.questions.filter((question) => reserveProgramIds.includes(question.program_id)),
       );
     }
 

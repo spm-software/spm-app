@@ -1608,6 +1608,31 @@ async def get_questions(
             q['created_at'] = deserialize_datetime(q['created_at'])
     return questions
 
+@api_router.get("/questions/reserve", response_model=List[Question])
+async def get_reserve_questions():
+    """Get all valid questions currently assigned to any Reserva program."""
+    reserve_programs = await db.programs.find(
+        {"is_reserve": True},
+        {"id": 1, "_id": 0}
+    ).to_list(1000)
+    reserve_program_ids = [p["id"] for p in reserve_programs if p.get("id")]
+    if not reserve_program_ids:
+        return []
+
+    questions = await db.questions.find(
+        {
+            "program_id": {"$in": reserve_program_ids},
+            "is_greeting": {"$ne": True},
+            "is_duplicate": {"$ne": True},
+            "clasificacion": {"$ne": "saludo"}
+        },
+        {"_id": 0}
+    ).sort("created_at", 1).to_list(2000)
+    for q in questions:
+        if isinstance(q.get('created_at'), str):
+            q['created_at'] = deserialize_datetime(q['created_at'])
+    return questions
+
 @api_router.post("/questions", response_model=Question)
 async def create_question(data: QuestionCreate):
     real_name = await get_real_name(data.youtube_username)
@@ -2998,6 +3023,19 @@ async def get_stats():
     total_questions = await db.questions.count_documents({"is_greeting": {"$ne": True}})
     total_users = len(await db.user_mappings.distinct("youtube_username"))
     total_batches = await db.import_batches.count_documents({})
+    reserve_programs = await db.programs.find(
+        {"is_reserve": True},
+        {"id": 1, "_id": 0}
+    ).to_list(1000)
+    reserve_program_ids = [p["id"] for p in reserve_programs if p.get("id")]
+    reserve_questions = 0
+    if reserve_program_ids:
+        reserve_questions = await db.questions.count_documents({
+            "program_id": {"$in": reserve_program_ids},
+            "is_greeting": {"$ne": True},
+            "is_duplicate": {"$ne": True},
+            "clasificacion": {"$ne": "saludo"}
+        })
 
     # Last 30 days
     cutoff = datetime.now(timezone.utc) - timedelta(days=30)
@@ -3010,7 +3048,8 @@ async def get_stats():
         "total_questions": total_questions,
         "total_users": total_users,
         "total_batches": total_batches,
-        "recent_questions": recent_questions
+        "recent_questions": recent_questions,
+        "reserve_questions": reserve_questions
     }
 
 # ----- CLEANUP -----

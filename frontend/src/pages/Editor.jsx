@@ -583,6 +583,9 @@ export default function Editor() {
   const [selectedBatch, setSelectedBatch] = useState("");
   const [questions, setQuestions] = useState([]);
   const [programs, setPrograms] = useState([]);
+  const [globalReserveMode, setGlobalReserveMode] = useState(() => (
+    typeof window !== "undefined" && sessionStorage.getItem('editorGlobalReserve') === 'true'
+  ));
   const [loading, setLoading] = useState(false);
   const [correcting, setCorrecting] = useState(false);
   const [correctingMode, setCorrectingMode] = useState(null);
@@ -596,7 +599,11 @@ export default function Editor() {
   const [showSearchModal, setShowSearchModal] = useState(false);
   const [showOnlyDuplicates, setShowOnlyDuplicates] = useState(false);
   const [showOnlyNoName, setShowOnlyNoName] = useState(false);
-  const [assignmentFilter, setAssignmentFilter] = useState("all"); // "all" | "included" | "reserve" | "unassigned"
+  const [assignmentFilter, setAssignmentFilter] = useState(() => (
+    typeof window !== "undefined"
+      ? sessionStorage.getItem('editorAssignmentFilter') || "all"
+      : "all"
+  )); // "all" | "included" | "reserve" | "unassigned"
   const [clasificationFilter, setClasificationFilter] = useState("dudoso"); // "all" | "pregunta" | "dudoso" | "saludo"
   const [clasifying, setClasifying] = useState(false);
   const [clasifyProgress, setClasifyProgress] = useState({ current: 0, total: 0, percentage: 0 });
@@ -624,6 +631,11 @@ export default function Editor() {
     };
   }, []);
 
+  useEffect(() => {
+    sessionStorage.removeItem('editorGlobalReserve');
+    sessionStorage.removeItem('editorAssignmentFilter');
+  }, []);
+
   const fetchBatches = useCallback(async () => {
     try {
       const response = await axios.get(`${API}/batches`);
@@ -633,6 +645,10 @@ export default function Editor() {
       if (!initialBatchLoaded.current) {
         initialBatchLoaded.current = true;
         const storedBatch = sessionStorage.getItem('selectedBatch');
+        if (globalReserveMode) {
+          return;
+        }
+
         if (storedBatch && response.data.some(b => b.id === storedBatch)) {
           setSelectedBatch(storedBatch);
           sessionStorage.removeItem('selectedBatch');
@@ -643,49 +659,57 @@ export default function Editor() {
     } catch (error) {
       console.error("Error fetching batches:", error);
     }
-  }, []);
+  }, [globalReserveMode]);
 
   const fetchQuestions = useCallback(async () => {
     setLoading(true);
     try {
-      const response = await axios.get(`${API}/questions`, {
-        params: { batch_id: selectedBatch, include_program_assignments: true }
-      });
+      const response = globalReserveMode
+        ? await axios.get(`${API}/questions/reserve`)
+        : await axios.get(`${API}/questions`, {
+            params: { batch_id: selectedBatch, include_program_assignments: true }
+          });
       setQuestions(response.data);
     } catch (error) {
       console.error("Error fetching questions:", error);
     } finally {
       setLoading(false);
     }
-  }, [selectedBatch]);
+  }, [selectedBatch, globalReserveMode]);
 
   const fetchPrograms = useCallback(async () => {
-    if (!selectedBatch) {
+    if (!selectedBatch && !globalReserveMode) {
       setPrograms([]);
       return;
     }
 
     try {
       const response = await axios.get(`${API}/programs`, {
-        params: { batch_id: selectedBatch }
+        params: globalReserveMode ? {} : { batch_id: selectedBatch }
       });
       setPrograms(response.data);
     } catch (error) {
       console.error("Error fetching programs:", error);
       setPrograms([]);
     }
-  }, [selectedBatch]);
+  }, [selectedBatch, globalReserveMode]);
 
   useEffect(() => {
     fetchBatches();
   }, [fetchBatches]);
 
   useEffect(() => {
-    if (selectedBatch) {
+    if (selectedBatch || globalReserveMode) {
       fetchPrograms();
       fetchQuestions();
     }
-  }, [selectedBatch, fetchPrograms, fetchQuestions]);
+  }, [selectedBatch, globalReserveMode, fetchPrograms, fetchQuestions]);
+
+  const handleSelectBatch = (batchId) => {
+    setGlobalReserveMode(false);
+    setAssignmentFilter("all");
+    setSelectedBatch(batchId);
+  };
 
   const handleCorrectAll = async (force = false) => {
     if (force && !window.confirm("¿Recorregir todas las preguntas válidas de este lote? Esto volverá a consumir créditos IA.")) {
@@ -1234,6 +1258,11 @@ export default function Editor() {
   const normalPrograms = programs
     .filter(p => !p.is_reserve)
     .sort((a, b) => (a.question_count || 0) - (b.question_count || 0));
+  const getCandidatePrograms = (question) => (
+    normalPrograms.filter(program => (
+      !globalReserveMode || program.batch_id === question.import_batch_id
+    ))
+  );
   const getAssignmentState = (question) => {
     if (!question.program_id) return "unassigned";
     return reserveProgramIds.has(question.program_id) ? "reserve" : "included";
@@ -1243,17 +1272,20 @@ export default function Editor() {
   const unassignedCount = questions.filter(q => getAssignmentState(q) === "unassigned").length;
   const validQuestions = questions.filter(q => !isGreetingQuestion(q) && !q.is_duplicate);
 
-  const handleIncludeReserveQuestion = async (questionId) => {
-    if (normalPrograms.length === 0) {
+  const handleIncludeReserveQuestion = async (question) => {
+    const candidatePrograms = getCandidatePrograms(question);
+
+    if (candidatePrograms.length === 0) {
       toast.error("No hay programas creados para incluir esta pregunta");
       return;
     }
 
+    const questionId = question.id;
     setMovingQuestionId(questionId);
     let lastError = null;
 
     try {
-      for (const program of normalPrograms) {
+      for (const program of candidatePrograms) {
         try {
           const response = await axios.post(`${API}/questions/${questionId}/move`, {
             target_program_id: program.id
@@ -1292,9 +1324,9 @@ export default function Editor() {
         </div>
         
         <div className="flex items-center gap-3">
-          <Select value={selectedBatch} onValueChange={setSelectedBatch}>
+          <Select value={selectedBatch} onValueChange={handleSelectBatch}>
             <SelectTrigger className="w-56 rounded-sm" data-testid="batch-selector">
-              <SelectValue placeholder="Seleccionar lote" />
+              <SelectValue placeholder={globalReserveMode ? "Reserva global" : "Seleccionar lote"} />
             </SelectTrigger>
             <SelectContent>
               {batches.map((batch) => (
@@ -1306,6 +1338,25 @@ export default function Editor() {
           </Select>
         </div>
       </div>
+
+      {globalReserveMode && (
+        <div className="mb-6 p-4 border border-amber-300 bg-amber-50 text-amber-800 rounded-sm flex items-center justify-between gap-3">
+          <div>
+            <p className="text-sm font-semibold">Reserva global</p>
+            <p className="text-xs">Mostrando preguntas en Reserva de todos los lotes.</p>
+          </div>
+          {batches.length > 0 && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => handleSelectBatch(batches[0].id)}
+              className="rounded-sm text-xs border-amber-400 text-amber-800 hover:bg-amber-100"
+            >
+              Ver lote reciente
+            </Button>
+          )}
+        </div>
+      )}
 
       {/* Actions Bar */}
       <div className="flex flex-wrap items-center gap-4 mb-8 p-5 bg-card border border-border rounded-sm">
@@ -1939,8 +1990,8 @@ export default function Editor() {
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => handleIncludeReserveQuestion(question.id)}
-                      disabled={movingQuestionId === question.id || normalPrograms.length === 0}
+                      onClick={() => handleIncludeReserveQuestion(question)}
+                      disabled={movingQuestionId === question.id || getCandidatePrograms(question).length === 0}
                       className="rounded-sm text-xs text-green-700 border-green-400 hover:bg-green-50"
                       data-testid={`include-reserve-btn-${question.id}`}
                       title="Añadir esta pregunta de Reserva a la edición en curso"

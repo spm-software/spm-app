@@ -39,7 +39,8 @@ export default function Dashboard() {
     total_questions: 0,
     total_users: 0,
     total_batches: 0,
-    recent_questions: 0
+    recent_questions: 0,
+    reserve_questions: 0
   });
   const [batches, setBatches] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -134,6 +135,13 @@ export default function Dashboard() {
     navigate('/editor');
   };
 
+  const handleGoToReserve = () => {
+    sessionStorage.removeItem('selectedBatch');
+    sessionStorage.setItem('editorAssignmentFilter', 'reserve');
+    sessionStorage.setItem('editorGlobalReserve', 'true');
+    navigate('/editor');
+  };
+
   const handleGoToDistribuir = (batchId) => {
     sessionStorage.setItem('selectedBatch', batchId);
     navigate('/distribuir');
@@ -168,6 +176,13 @@ export default function Dashboard() {
       value: stats.recent_questions,
       icon: Calendar,
       description: "Preguntas recientes"
+    },
+    {
+      title: "EN RESERVA",
+      value: stats.reserve_questions || 0,
+      icon: Layers,
+      description: "Pulsa para verlas",
+      onClick: handleGoToReserve
     }
   ];
 
@@ -176,8 +191,8 @@ export default function Dashboard() {
       <div className="p-8 md:p-12">
         <div className="animate-pulse space-y-8">
           <div className="h-10 w-64 bg-muted rounded" />
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-            {[1,2,3,4].map(i => (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6">
+            {[1,2,3,4,5].map(i => (
               <div key={i} className="h-32 bg-muted rounded-sm" />
             ))}
           </div>
@@ -199,11 +214,14 @@ export default function Dashboard() {
       </div>
 
       {/* Stats Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-12 stagger-children">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6 mb-12 stagger-children">
         {statCards.map((stat, index) => (
           <Card 
             key={stat.title} 
-            className="bg-card border border-border rounded-sm hover:border-foreground/20 transition-colors"
+            className={`bg-card border border-border rounded-sm hover:border-foreground/20 transition-colors ${
+              stat.onClick ? "cursor-pointer" : ""
+            }`}
+            onClick={stat.onClick}
             data-testid={`stat-card-${index}`}
           >
             <CardHeader className="pb-2">

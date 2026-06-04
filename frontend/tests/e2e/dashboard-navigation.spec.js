@@ -11,8 +11,20 @@ test("shows dashboard stats and batch actions", async ({ page }) => {
 
   await expect(page.getByTestId("stat-card-0")).toContainText("12");
   await expect(page.getByTestId("stat-card-1")).toContainText("4");
+  await expect(page.getByTestId("stat-card-4")).toContainText("EN RESERVA");
+  await expect(page.getByTestId("stat-card-4")).toContainText("1");
   await expect(page.getByTestId("batch-card-batch-1")).toContainText("Importacion junio");
   await expect(page.getByTestId("batch-preguntas-batch-1")).toContainText("1 preguntas confirmadas");
+});
+
+test("opens global reserve from dashboard stat card", async ({ page }) => {
+  await page.goto("/");
+
+  await page.getByTestId("stat-card-4").click();
+
+  await expect(page).toHaveURL(/\/editor$/);
+  await expect(page.getByText("Reserva global")).toBeVisible();
+  await expect(page.getByTestId("question-card-q2")).toBeVisible();
 });
 
 test("navigates through the core sections", async ({ page }) => {

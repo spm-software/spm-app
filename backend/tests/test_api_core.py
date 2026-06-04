@@ -39,6 +39,53 @@ def test_settings_default_and_update(client, auth_headers):
     assert response.json()["max_questions_per_user_per_program"] == 1
 
 
+def test_stats_and_reserve_endpoint_count_valid_reserve_questions(client, auth_headers, fake_db):
+    fake_db.programs.docs.extend([
+        {"id": "program-1", "batch_id": "batch-1", "name": "Programa 01", "number": 1, "is_reserve": False},
+        {"id": "reserve-1", "batch_id": "batch-1", "name": "Reserva", "number": 2, "is_reserve": True},
+    ])
+    fake_db.questions.docs.extend([
+        {
+            "id": "q-included",
+            "youtube_username": "@ana",
+            "original_text": "Pregunta incluida",
+            "program_id": "program-1",
+            "is_greeting": False,
+            "is_duplicate": False,
+            "clasificacion": "pregunta",
+            "created_at": "2026-06-01T10:00:00+00:00",
+        },
+        {
+            "id": "q-reserve",
+            "youtube_username": "@ana",
+            "original_text": "Pregunta en reserva",
+            "program_id": "reserve-1",
+            "is_greeting": False,
+            "is_duplicate": False,
+            "clasificacion": "pregunta",
+            "created_at": "2026-06-01T11:00:00+00:00",
+        },
+        {
+            "id": "q-reserve-duplicate",
+            "youtube_username": "@ana",
+            "original_text": "Duplicada en reserva",
+            "program_id": "reserve-1",
+            "is_greeting": False,
+            "is_duplicate": True,
+            "clasificacion": "pregunta",
+            "created_at": "2026-06-01T12:00:00+00:00",
+        },
+    ])
+
+    stats = auth_get(client, "/api/stats", auth_headers)
+    assert stats.status_code == 200
+    assert stats.json()["reserve_questions"] == 1
+
+    reserve = auth_get(client, "/api/questions/reserve", auth_headers)
+    assert reserve.status_code == 200
+    assert [q["id"] for q in reserve.json()] == ["q-reserve"]
+
+
 def test_allowed_emails_are_normalized_deduped_listed_and_deleted(client, auth_headers):
     response = auth_post(client, "/api/allowed-emails", auth_headers, json={"email": " User@Example.COM "})
     assert response.status_code == 200
