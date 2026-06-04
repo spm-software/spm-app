@@ -109,6 +109,27 @@ class FakeCollection:
     async def distinct(self, key):
         return sorted({doc.get(key) for doc in self.docs if doc.get(key) is not None})
 
+    def aggregate(self, pipeline):
+        docs = copy.deepcopy(self.docs)
+        for stage in pipeline:
+            if "$match" in stage:
+                docs = [doc for doc in docs if self._matches(doc, stage["$match"])]
+                continue
+            if "$group" in stage:
+                grouped = {}
+                group_spec = stage["$group"]
+                group_key = group_spec["_id"].lstrip("$")
+                for doc in docs:
+                    key = doc.get(group_key)
+                    if key not in grouped:
+                        grouped[key] = {"_id": key}
+                    for output_key, expression in group_spec.items():
+                        if output_key == "_id":
+                            continue
+                        grouped[key][output_key] = grouped[key].get(output_key, 0) + self._eval_sum_expression(expression, doc)
+                docs = list(grouped.values())
+        return FakeCursor(docs)
+
     def _apply_update(self, doc, update, inserting):
         if "$set" in update:
             doc.update(copy.deepcopy(update["$set"]))
@@ -144,6 +165,33 @@ class FakeCollection:
             if actual != expected:
                 return False
         return True
+
+    def _eval_sum_expression(self, expression, doc):
+        if "$sum" not in expression:
+            return 0
+        value = expression["$sum"]
+        if isinstance(value, int):
+            return value
+        if "$cond" not in value:
+            return 0
+        condition, when_true, when_false = value["$cond"]
+        return when_true if self._eval_condition(condition, doc) else when_false
+
+    def _eval_condition(self, condition, doc):
+        if "$and" in condition:
+            return all(self._eval_condition(part, doc) for part in condition["$and"])
+        if "$eq" in condition:
+            left, right = condition["$eq"]
+            return self._eval_value(left, doc) == self._eval_value(right, doc)
+        if "$ne" in condition:
+            left, right = condition["$ne"]
+            return self._eval_value(left, doc) != self._eval_value(right, doc)
+        return bool(condition)
+
+    def _eval_value(self, value, doc):
+        if isinstance(value, str) and value.startswith("$"):
+            return doc.get(value[1:])
+        return value
 
 
 class FakeDB:

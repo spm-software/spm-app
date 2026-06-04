@@ -2898,27 +2898,53 @@ async def export_all_programs(batch_id: str):
 async def get_batches():
     """Get all import batches with classification counts."""
     batches = await db.import_batches.find({}, {"_id": 0}).sort("created_at", -1).to_list(50)
+    batch_ids = [b.get("id") for b in batches if b.get("id")]
+    counts_by_batch = {}
+
+    if batch_ids:
+        counts = await db.questions.aggregate([
+            {"$match": {"import_batch_id": {"$in": batch_ids}}},
+            {
+                "$group": {
+                    "_id": "$import_batch_id",
+                    "preguntas_confirmadas": {
+                        "$sum": {
+                            "$cond": [
+                                {
+                                    "$and": [
+                                        {"$eq": ["$clasificacion", "pregunta"]},
+                                        {"$ne": ["$is_duplicate", True]},
+                                        {"$ne": ["$is_greeting", True]},
+                                    ]
+                                },
+                                1,
+                                0,
+                            ]
+                        }
+                    },
+                    "classified_count": {
+                        "$sum": {
+                            "$cond": [
+                                {"$ne": ["$clasificacion", None]},
+                                1,
+                                0,
+                            ]
+                        }
+                    },
+                }
+            },
+        ]).to_list(len(batch_ids))
+        counts_by_batch = {item["_id"]: item for item in counts}
+
     for b in batches:
         if isinstance(b.get('created_at'), str):
             b['created_at'] = deserialize_datetime(b['created_at'])
 
         # Attach classification counts
         bid = b.get("id")
-        if bid:
-            # Unified "preguntas confirmadas" count — same formula used everywhere:
-            # clasificacion == "pregunta" AND NOT is_duplicate AND NOT is_greeting
-            preguntas_confirmadas = await db.questions.count_documents({
-                "import_batch_id": bid,
-                "clasificacion": "pregunta",
-                "is_duplicate": {"$ne": True},
-                "is_greeting": {"$ne": True}
-            })
-            any_classified = await db.questions.find_one(
-                {"import_batch_id": bid, "clasificacion": {"$ne": None}},
-                {"_id": 1}
-            )
-            b["preguntas_confirmadas"] = preguntas_confirmadas
-            b["is_classified"] = any_classified is not None
+        batch_counts = counts_by_batch.get(bid, {})
+        b["preguntas_confirmadas"] = batch_counts.get("preguntas_confirmadas", 0)
+        b["is_classified"] = batch_counts.get("classified_count", 0) > 0
     return batches
 
 @api_router.delete("/batches/{batch_id}")
@@ -4059,6 +4085,13 @@ async def seed_default_blocked_comments():
     """Seed the blocked-comments collection with the default entry if not present."""
     try:
         await db.allowed_emails.create_index("email", unique=True)
+        await db.import_batches.create_index("created_at")
+        await db.questions.create_index([
+            ("import_batch_id", 1),
+            ("clasificacion", 1),
+            ("is_duplicate", 1),
+            ("is_greeting", 1),
+        ])
         seed_emails = [
             _normalize_email(email)
             for email in os.environ.get("INITIAL_ALLOWED_EMAILS", "").split(",")
