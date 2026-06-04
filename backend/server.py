@@ -369,14 +369,27 @@ async def is_blocked_comment(youtube_username: str, text: str, threshold: float 
 async def build_clasificacion_filter(batch_id: str) -> Dict:
     """Return a Mongo filter fragment restricting to 'pregunta' classification.
 
-    If no question in the batch has any `clasificacion` set yet (legacy or
-    not-yet-classified), return {} so behavior is unchanged.
+    If the batch is unclassified or partially classified, return {} so valid
+    unclassified questions are not accidentally hidden by a single manual label.
     """
-    any_classified = await db.questions.find_one(
-        {"import_batch_id": batch_id, "clasificacion": {"$ne": None}},
-        {"_id": 1}
-    )
-    if any_classified:
+    base_query = {
+        "import_batch_id": batch_id,
+        "is_greeting": {"$ne": True},
+        "is_duplicate": {"$ne": True},
+        "clasificacion": {"$ne": "saludo"}
+    }
+    classified_count = await db.questions.count_documents({
+        **base_query,
+        "clasificacion": {"$exists": True, "$nin": [None, "saludo"]}
+    })
+    unclassified_exists = await db.questions.find_one({
+        **base_query,
+        "$or": [
+            {"clasificacion": None},
+            {"clasificacion": {"$exists": False}}
+        ]
+    }, {"_id": 1})
+    if classified_count > 0 and not unclassified_exists:
         return {"clasificacion": "pregunta"}
     return {}
 
@@ -1605,25 +1618,34 @@ async def update_question(question_id: str, update: QuestionUpdate):
     if "real_name" in update_data and update_data["real_name"]:
         question = await db.questions.find_one({"id": question_id}, {"_id": 0})
         if question and question.get("youtube_username"):
+            username = question["youtube_username"]
             # Create or update user mapping
             existing = await db.user_mappings.find_one(
-                {"youtube_username": question["youtube_username"]},
+                {"youtube_username": username},
                 {"_id": 0}
             )
             if existing:
                 await db.user_mappings.update_one(
-                    {"youtube_username": question["youtube_username"]},
+                    {"youtube_username": username},
                     {"$set": {"real_name": update_data["real_name"], "updated_at": datetime.now(timezone.utc).isoformat()}}
                 )
             else:
                 new_mapping = UserMapping(
-                    youtube_username=question["youtube_username"],
+                    youtube_username=username,
                     real_name=update_data["real_name"]
                 )
                 doc = new_mapping.model_dump()
                 doc['created_at'] = serialize_datetime(doc['created_at'])
                 doc['updated_at'] = serialize_datetime(doc['updated_at'])
                 await db.user_mappings.insert_one(doc)
+
+            await db.questions.update_many(
+                {"youtube_username": username},
+                {"$set": {
+                    "real_name": update_data["real_name"],
+                    "real_name_confirmed": update_data.get("real_name_confirmed", True)
+                }}
+            )
 
     if update_data:
         await db.questions.update_one(

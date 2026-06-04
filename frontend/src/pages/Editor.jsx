@@ -994,6 +994,7 @@ export default function Editor() {
 
   const handleUpdateQuestion = async (questionId, field, value) => {
     try {
+      const targetQuestion = questions.find(q => q.id === questionId);
       // When the user manually edits the real_name, mark it as confirmed so the app
       // knows it was reviewed (even if the value equals the youtube_username).
       const payload = { [field]: value };
@@ -1002,7 +1003,9 @@ export default function Editor() {
       }
       await axios.put(`${API}/questions/${questionId}`, payload);
       setQuestions(prev => prev.map(q =>
-        q.id === questionId
+        field === "real_name" && targetQuestion?.youtube_username && q.youtube_username === targetQuestion.youtube_username
+          ? { ...q, ...payload }
+          : q.id === questionId
           ? { ...q, ...payload }
           : q
       ));
