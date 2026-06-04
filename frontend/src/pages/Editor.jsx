@@ -582,11 +582,13 @@ export default function Editor() {
   const [batches, setBatches] = useState([]);
   const [selectedBatch, setSelectedBatch] = useState("");
   const [questions, setQuestions] = useState([]);
+  const [programs, setPrograms] = useState([]);
   const [loading, setLoading] = useState(false);
   const [correcting, setCorrecting] = useState(false);
   const [correctingMode, setCorrectingMode] = useState(null);
   const [correctingProgress, setCorrectingProgress] = useState({ current: 0, total: 0 });
   const [correctingId, setCorrectingId] = useState(null);
+  const [movingQuestionId, setMovingQuestionId] = useState(null);
   const [checkingDuplicates, setCheckingDuplicates] = useState(false);
   const [duplicateProgress, setDuplicateProgress] = useState({ current: 0, total: 0, percentage: 0, duplicatesFound: 0 });
   const [duplicates, setDuplicates] = useState([]);
@@ -594,6 +596,7 @@ export default function Editor() {
   const [showSearchModal, setShowSearchModal] = useState(false);
   const [showOnlyDuplicates, setShowOnlyDuplicates] = useState(false);
   const [showOnlyNoName, setShowOnlyNoName] = useState(false);
+  const [assignmentFilter, setAssignmentFilter] = useState("all"); // "all" | "included" | "reserve" | "unassigned"
   const [clasificationFilter, setClasificationFilter] = useState("dudoso"); // "all" | "pregunta" | "dudoso" | "saludo"
   const [clasifying, setClasifying] = useState(false);
   const [clasifyProgress, setClasifyProgress] = useState({ current: 0, total: 0, percentage: 0 });
@@ -646,7 +649,7 @@ export default function Editor() {
     setLoading(true);
     try {
       const response = await axios.get(`${API}/questions`, {
-        params: { batch_id: selectedBatch }
+        params: { batch_id: selectedBatch, include_program_assignments: true }
       });
       setQuestions(response.data);
     } catch (error) {
@@ -656,15 +659,33 @@ export default function Editor() {
     }
   }, [selectedBatch]);
 
+  const fetchPrograms = useCallback(async () => {
+    if (!selectedBatch) {
+      setPrograms([]);
+      return;
+    }
+
+    try {
+      const response = await axios.get(`${API}/programs`, {
+        params: { batch_id: selectedBatch }
+      });
+      setPrograms(response.data);
+    } catch (error) {
+      console.error("Error fetching programs:", error);
+      setPrograms([]);
+    }
+  }, [selectedBatch]);
+
   useEffect(() => {
     fetchBatches();
   }, [fetchBatches]);
 
   useEffect(() => {
     if (selectedBatch) {
+      fetchPrograms();
       fetchQuestions();
     }
-  }, [selectedBatch, fetchQuestions]);
+  }, [selectedBatch, fetchPrograms, fetchQuestions]);
 
   const handleCorrectAll = async (force = false) => {
     if (force && !window.confirm("¿Recorregir todas las preguntas válidas de este lote? Esto volverá a consumir créditos IA.")) {
@@ -1208,7 +1229,54 @@ export default function Editor() {
     }
   };
 
+  const reserveProgramIds = new Set(programs.filter(p => p.is_reserve).map(p => p.id));
+  const programById = new Map(programs.map(p => [p.id, p]));
+  const normalPrograms = programs
+    .filter(p => !p.is_reserve)
+    .sort((a, b) => (a.question_count || 0) - (b.question_count || 0));
+  const getAssignmentState = (question) => {
+    if (!question.program_id) return "unassigned";
+    return reserveProgramIds.has(question.program_id) ? "reserve" : "included";
+  };
+  const includedCount = questions.filter(q => getAssignmentState(q) === "included").length;
+  const reserveCount = questions.filter(q => getAssignmentState(q) === "reserve").length;
+  const unassignedCount = questions.filter(q => getAssignmentState(q) === "unassigned").length;
   const validQuestions = questions.filter(q => !isGreetingQuestion(q) && !q.is_duplicate);
+
+  const handleIncludeReserveQuestion = async (questionId) => {
+    if (normalPrograms.length === 0) {
+      toast.error("No hay programas creados para incluir esta pregunta");
+      return;
+    }
+
+    setMovingQuestionId(questionId);
+    let lastError = null;
+
+    try {
+      for (const program of normalPrograms) {
+        try {
+          const response = await axios.post(`${API}/questions/${questionId}/move`, {
+            target_program_id: program.id
+          });
+          await Promise.all([fetchPrograms(), fetchQuestions()]);
+          toast.success(`Pregunta incluida en ${response.data.target_program || program.name}`);
+          return;
+        } catch (error) {
+          lastError = error;
+          if (error.response?.status !== 400) {
+            throw error;
+          }
+        }
+      }
+
+      toast.error(lastError?.response?.data?.detail || "No se pudo incluir en ningún programa");
+    } catch (error) {
+      console.error("Error including reserve question:", error);
+      toast.error(error.response?.data?.detail || "Error al incluir la pregunta");
+    } finally {
+      setMovingQuestionId(null);
+    }
+  };
 
   return (
     <div className="p-6 md:p-10 animate-fade-in">
@@ -1510,6 +1578,36 @@ export default function Editor() {
         </div>
       </div>
 
+      {/* Assignment Filter */}
+      <div className="flex items-center gap-2 mb-6 flex-wrap" data-testid="assignment-filters">
+        <span className="text-xs uppercase tracking-wide text-muted-foreground mr-2">Selección:</span>
+        {[
+          { value: "all", label: "Todas", count: questions.length, dot: "bg-foreground" },
+          { value: "included", label: "Incluidas", count: includedCount, dot: "bg-green-500" },
+          { value: "reserve", label: "Reserva", count: reserveCount, dot: "bg-amber-500" },
+          { value: "unassigned", label: "Sin seleccionar", count: unassignedCount, dot: "bg-slate-400" },
+        ].map(option => (
+          <button
+            key={option.value}
+            onClick={() => {
+              setAssignmentFilter(option.value);
+              setShowOnlyDuplicates(false);
+              setShowOnlyNoName(false);
+            }}
+            className={`flex items-center gap-2 px-3 py-1.5 rounded-sm border text-xs transition-colors ${
+              assignmentFilter === option.value
+                ? 'bg-foreground text-background border-foreground'
+                : 'border-border hover:bg-secondary/50'
+            }`}
+            data-testid={`assignment-filter-${option.value}`}
+          >
+            <div className={`w-2.5 h-2.5 rounded-full ${option.dot}`} />
+            <span className="font-medium">{option.label}</span>
+            <span className="opacity-70">({option.count})</span>
+          </button>
+        ))}
+      </div>
+
       {/* Ready-to-process counter */}
       {questions.some(q => q.clasificacion) && (
         <div
@@ -1549,6 +1647,7 @@ export default function Editor() {
                   // Classification pills take precedence — clear mutex filters
                   setShowOnlyDuplicates(false);
                   setShowOnlyNoName(false);
+                  setAssignmentFilter("all");
                 }}
                 className={`flex items-center gap-2 px-3 py-1.5 rounded-sm border text-xs transition-colors ${
                   clasificationFilter === p.value && !showOnlyDuplicates && !showOnlyNoName
@@ -1587,12 +1686,15 @@ export default function Editor() {
           (() => {
             // Apply filters (uses centralized getNameState for consistency)
             let filteredQuestions = questions;
+            if (assignmentFilter !== "all") {
+              filteredQuestions = filteredQuestions.filter(q => getAssignmentState(q) === assignmentFilter);
+            }
             if (showOnlyDuplicates) {
-              filteredQuestions = questions.filter(q => q.is_duplicate);
+              filteredQuestions = filteredQuestions.filter(q => q.is_duplicate);
             } else if (showOnlyNoName) {
-              filteredQuestions = questions.filter(q => getNameState(q) === "missing");
-            } else if (clasificationFilter !== "all" && questions.some(q => q.clasificacion)) {
-              filteredQuestions = questions.filter(q => q.clasificacion === clasificationFilter);
+              filteredQuestions = filteredQuestions.filter(q => getNameState(q) === "missing");
+            } else if (assignmentFilter === "all" && clasificationFilter !== "all" && questions.some(q => q.clasificacion)) {
+              filteredQuestions = filteredQuestions.filter(q => q.clasificacion === clasificationFilter);
             }
             
             return filteredQuestions.map((question, index) => (
@@ -1686,6 +1788,48 @@ export default function Editor() {
                         Corregido
                       </Badge>
                     )}
+                    {(() => {
+                      const assignment = getAssignmentState(question);
+                      const program = question.program_id ? programById.get(question.program_id) : null;
+
+                      if (assignment === "included") {
+                        return (
+                          <Badge
+                            variant="outline"
+                            className="text-xs text-green-700 border-green-400 bg-green-50"
+                            title="Esta pregunta está incluida en un programa de la selección"
+                            data-testid={`assignment-included-${question.id}`}
+                          >
+                            <CheckCircle className="w-3 h-3 mr-1" />
+                            {program?.name || `Programa ${question.program_number || ""}`.trim()}
+                          </Badge>
+                        );
+                      }
+
+                      if (assignment === "reserve") {
+                        return (
+                          <Badge
+                            variant="outline"
+                            className="text-xs text-amber-700 border-amber-400 bg-amber-50"
+                            title="Esta pregunta está en Reserva y no entra en la selección de programas"
+                            data-testid={`assignment-reserve-${question.id}`}
+                          >
+                            Reserva
+                          </Badge>
+                        );
+                      }
+
+                      return (
+                        <Badge
+                          variant="outline"
+                          className="text-xs text-slate-600 border-slate-300 bg-slate-50"
+                          title="Esta pregunta todavía no está asignada a la selección"
+                          data-testid={`assignment-unassigned-${question.id}`}
+                        >
+                          Sin seleccionar
+                        </Badge>
+                      );
+                    })()}
                     {(question.youtube_video_title || question.youtube_video_id) && (
                       <Badge
                         variant="outline"
@@ -1788,6 +1932,25 @@ export default function Editor() {
                     >
                       <CheckCircle className="w-3.5 h-3.5" />
                       <span className="ml-1.5 hidden sm:inline">Es pregunta</span>
+                    </Button>
+                  )}
+
+                  {getAssignmentState(question) === "reserve" && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleIncludeReserveQuestion(question.id)}
+                      disabled={movingQuestionId === question.id || normalPrograms.length === 0}
+                      className="rounded-sm text-xs text-green-700 border-green-400 hover:bg-green-50"
+                      data-testid={`include-reserve-btn-${question.id}`}
+                      title="Añadir esta pregunta de Reserva a la edición en curso"
+                    >
+                      {movingQuestionId === question.id ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <CheckCircle className="w-3.5 h-3.5" />
+                      )}
+                      <span className="ml-1.5 hidden sm:inline">Incluir</span>
                     </Button>
                   )}
                   
