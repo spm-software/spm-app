@@ -1280,6 +1280,14 @@ export default function Editor() {
       return;
     }
 
+    const questionPreview = (question.corrected_text || question.original_text || "").trim();
+    const confirmed = window.confirm(
+      `¿Añadir esta pregunta de Reserva a la lista de preguntas que se van a editar?\n\n${questionPreview.slice(0, 180)}${questionPreview.length > 180 ? "..." : ""}`
+    );
+    if (!confirmed) {
+      return;
+    }
+
     const questionId = question.id;
     setMovingQuestionId(questionId);
     let lastError = null;
@@ -1291,7 +1299,7 @@ export default function Editor() {
             target_program_id: program.id
           });
           await Promise.all([fetchPrograms(), fetchQuestions()]);
-          toast.success(`Pregunta incluida en ${response.data.target_program || program.name}`);
+          toast.success(`Pregunta añadida a la edición en curso (${response.data.target_program || program.name})`);
           return;
         } catch (error) {
           lastError = error;
