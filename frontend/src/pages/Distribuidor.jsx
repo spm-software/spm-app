@@ -88,7 +88,7 @@ export default function Distribuidor() {
   const fetchQuestions = useCallback(async () => {
     try {
       const response = await axios.get(`${API}/questions`, {
-        params: { batch_id: selectedBatch }
+        params: { batch_id: selectedBatch, include_program_assignments: true }
       });
       setQuestions(response.data);
     } catch (error) {
@@ -284,7 +284,7 @@ export default function Distribuidor() {
               </div>
               <div className="flex items-start gap-2">
                 <ChevronRight className="w-4 h-4 text-primary mt-0.5" />
-                <span>Excedentes van a Reserva</span>
+                <span>Excedentes van a Reserva y se intentan incluir en la próxima división</span>
               </div>
             </div>
           </div>
@@ -386,7 +386,7 @@ export default function Distribuidor() {
                     </div>
                   </div>
                   <p className="text-xs text-muted-foreground mt-2">
-                    Preguntas que exceden el máximo por persona. La Reserva no tiene límite. Muévelas manualmente a cualquier programa si quieres incluirlas.
+                    Preguntas que exceden el máximo por persona. La Reserva no tiene límite y se volverá a tener en cuenta en la próxima división.
                   </p>
                 </CardHeader>
                 <CardContent className="pt-0">

@@ -410,6 +410,10 @@ async def build_clasificacion_filter_no_batch() -> Dict:
     return {}
 
 
+def get_question_user_key(question: Dict) -> str:
+    return (question.get("real_name") or question.get("youtube_username") or "").strip().lower()
+
+
 
 def clean_youtube_metadata(text: str) -> str:
     """Remove YouTube metadata like timestamps from comment text"""
@@ -1577,13 +1581,23 @@ async def delete_blocked_comment(blocked_id: str):
 async def get_questions(
     batch_id: Optional[str] = None,
     program_id: Optional[str] = None,
-    include_greetings: bool = False
+    include_greetings: bool = False,
+    include_program_assignments: bool = False
 ):
     query = {}
-    if batch_id:
-        query["import_batch_id"] = batch_id
     if program_id:
         query["program_id"] = program_id
+    elif batch_id and include_program_assignments:
+        programs = await db.programs.find(
+            {"batch_id": batch_id},
+            {"id": 1, "_id": 0}
+        ).to_list(100)
+        program_ids = [p["id"] for p in programs if p.get("id")]
+        query["$or"] = [{"import_batch_id": batch_id}]
+        if program_ids:
+            query["$or"].append({"program_id": {"$in": program_ids}})
+    elif batch_id:
+        query["import_batch_id"] = batch_id
     if not include_greetings:
         query["is_greeting"] = {"$ne": True}
         query["clasificacion"] = {"$ne": "saludo"}
@@ -2440,17 +2454,81 @@ async def distribute_questions(data: DistributeRequest):
     2. Max `max_per_user` (default 2) questions per person per program
     3. Overflow (questions that would exceed the per-person cap in ALL programs) → Reserva
     4. Reserva has NO limits (neither total nor per-person)
+    5. Questions left in Reserva from previous batches are considered again
     """
     clasif_filter = await build_clasificacion_filter(data.batch_id)
-    questions = await db.questions.find(
-        {
-            "import_batch_id": data.batch_id,
-            "is_greeting": {"$ne": True},
-            "is_duplicate": {"$ne": True},
-            **clasif_filter
-        },
+    current_batch_query = {
+        "import_batch_id": data.batch_id,
+        "is_greeting": {"$ne": True},
+        "is_duplicate": {"$ne": True},
+        "clasificacion": {"$ne": "saludo"}
+    }
+    current_batch_query.update(clasif_filter)
+    current_batch_questions = await db.questions.find(
+        current_batch_query,
         {"_id": 0}
-    ).sort("created_at", 1).to_list(1000)
+    ).sort("created_at", 1).to_list(2000)
+
+    def parse_batch_created_at(batch: Dict) -> Optional[datetime]:
+        value = batch.get("created_at")
+        if isinstance(value, datetime):
+            return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+        if isinstance(value, str):
+            parsed = deserialize_datetime(value)
+            if isinstance(parsed, datetime):
+                return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+        return None
+
+    current_batch = await db.import_batches.find_one({"id": data.batch_id}, {"_id": 0})
+    current_batch_created_at = parse_batch_created_at(current_batch or {})
+    previous_batch_ids: List[str] = []
+    if current_batch_created_at:
+        all_batches = await db.import_batches.find({}, {"id": 1, "created_at": 1, "_id": 0}).to_list(1000)
+        previous_batch_ids = [
+            b["id"] for b in all_batches
+            if b.get("id") and b.get("id") != data.batch_id
+            and parse_batch_created_at(b)
+            and parse_batch_created_at(b) < current_batch_created_at
+        ]
+
+    previous_reserve_programs = []
+    if previous_batch_ids:
+        previous_reserve_programs = await db.programs.find(
+            {"is_reserve": True, "batch_id": {"$in": previous_batch_ids}},
+            {"id": 1, "_id": 0}
+        ).to_list(1000)
+    previous_reserve_ids = [p["id"] for p in previous_reserve_programs if p.get("id")]
+    carry_reserve_questions = []
+    if previous_reserve_ids:
+        carry_reserve_questions = await db.questions.find(
+            {
+                "program_id": {"$in": previous_reserve_ids},
+                "is_greeting": {"$ne": True},
+                "is_duplicate": {"$ne": True},
+                "clasificacion": {"$ne": "saludo"}
+            },
+            {"_id": 0}
+        ).sort("created_at", 1).to_list(2000)
+
+    questions_by_id = {}
+    for q in carry_reserve_questions + current_batch_questions:
+        if q.get("id"):
+            questions_by_id[q["id"]] = q
+
+    def question_created_at(q: Dict) -> datetime:
+        value = q.get("created_at")
+        if isinstance(value, datetime):
+            return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+        if isinstance(value, str):
+            try:
+                parsed = deserialize_datetime(value)
+                if isinstance(parsed, datetime):
+                    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+            except Exception:
+                pass
+        return datetime.min.replace(tzinfo=timezone.utc)
+
+    questions = sorted(questions_by_id.values(), key=question_created_at)
 
     if not questions:
         raise HTTPException(status_code=400, detail="No hay preguntas para distribuir")
@@ -2462,9 +2540,9 @@ async def distribute_questions(data: DistributeRequest):
     # Delete existing programs for this batch
     await db.programs.delete_many({"batch_id": data.batch_id})
 
-    # Reset all question assignments for this batch
+    # Reset current batch questions plus carried Reserva questions before assigning.
     await db.questions.update_many(
-        {"import_batch_id": data.batch_id},
+        {"id": {"$in": [q["id"] for q in questions]}},
         {"$set": {"program_id": None, "program_number": None, "order_in_program": None}}
     )
 
@@ -2501,10 +2579,6 @@ async def distribute_questions(data: DistributeRequest):
     import math
     target_per_program = math.ceil(len(questions) / num_programs) if num_programs > 0 else 0
 
-    def get_user_key(q: dict) -> str:
-        name = (q.get("real_name") or q.get("youtube_username") or "").strip().lower()
-        return name
-
     # Walk chronologically. For each question, try programs 1→N:
     # - assign to program if user has < max_per_user AND program below target size
     # - otherwise try next program
@@ -2512,7 +2586,7 @@ async def distribute_questions(data: DistributeRequest):
     # The "target" cap ensures equitable distribution across programs.
     current_prog = 0
     for q in questions:
-        user_key = get_user_key(q)
+        user_key = get_question_user_key(q)
         if user_key not in user_count_per_program:
             user_count_per_program[user_key] = {}
 
@@ -2594,11 +2668,18 @@ async def distribute_questions(data: DistributeRequest):
     distribution = {programs[i].name: len(program_questions[i]) for i in range(num_programs)}
     distribution["Reserva"] = len(reserve_questions)
 
-    logger.info(f"Distribution complete: {distribution}")
+    logger.info(
+        "Distribution complete: %s (current_batch=%s, carried_reserve=%s)",
+        distribution,
+        len(current_batch_questions),
+        len(carry_reserve_questions)
+    )
 
     return {
         "programs_created": num_programs + 1,
-        "distribution": distribution
+        "distribution": distribution,
+        "current_batch_questions": len(current_batch_questions),
+        "carried_reserve_questions": len(carry_reserve_questions)
     }
 
 
@@ -2620,6 +2701,24 @@ async def move_question_between_programs(question_id: str, data: MoveQuestionReq
     source_program_id = question.get("program_id")
     if source_program_id == data.target_program_id:
         return {"message": "La pregunta ya está en ese programa"}
+
+    if not target_program.get("is_reserve"):
+        settings = await get_settings()
+        max_per_user = settings.max_questions_per_user_per_program
+        user_key = get_question_user_key(question)
+        target_questions = await db.questions.find(
+            {"program_id": data.target_program_id},
+            {"_id": 0}
+        ).to_list(500)
+        same_user_count = sum(
+            1 for q in target_questions
+            if q.get("id") != question_id and get_question_user_key(q) == user_key
+        )
+        if same_user_count >= max_per_user:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Ese programa ya tiene {max_per_user} preguntas de este usuario"
+            )
 
     # Append to target: next order = current count + 1
     target_count = await db.questions.count_documents({"program_id": data.target_program_id})
@@ -2656,13 +2755,27 @@ async def move_question_between_programs(question_id: str, data: MoveQuestionReq
 @api_router.delete("/programs/clear/{batch_id}")
 async def clear_distribution(batch_id: str):
     """Clear all distribution for a batch - delete programs and reset question assignments"""
+    programs = await db.programs.find(
+        {"batch_id": batch_id},
+        {"id": 1, "_id": 0}
+    ).to_list(100)
+    program_ids = [p["id"] for p in programs if p.get("id")]
+
     # Delete all programs for this batch
     result = await db.programs.delete_many({"batch_id": batch_id})
     programs_deleted = result.deleted_count
 
-    # Reset all question assignments for this batch
+    # Reset current batch questions and any carried reserve questions assigned here.
+    reset_query = {"import_batch_id": batch_id}
+    if program_ids:
+        reset_query = {
+            "$or": [
+                {"import_batch_id": batch_id},
+                {"program_id": {"$in": program_ids}}
+            ]
+        }
     await db.questions.update_many(
-        {"import_batch_id": batch_id},
+        reset_query,
         {"$set": {"program_id": None, "program_number": None, "order_in_program": None}}
     )
 
