@@ -34,7 +34,8 @@ import {
   Sparkles,
   Filter,
   Ban,
-  Video
+  Video,
+  Undo2
 } from "lucide-react";
 import { API_BASE_URL as API } from "@/lib/api";
 
@@ -592,6 +593,8 @@ export default function Editor() {
   const [correctingProgress, setCorrectingProgress] = useState({ current: 0, total: 0 });
   const [correctingId, setCorrectingId] = useState(null);
   const [movingQuestionId, setMovingQuestionId] = useState(null);
+  const [undoStack, setUndoStack] = useState([]);
+  const [undoing, setUndoing] = useState(false);
   const [checkingDuplicates, setCheckingDuplicates] = useState(false);
   const [duplicateProgress, setDuplicateProgress] = useState({ current: 0, total: 0, percentage: 0, duplicatesFound: 0 });
   const [duplicates, setDuplicates] = useState([]);
@@ -795,11 +798,13 @@ export default function Editor() {
 
   const handleCorrectSingle = async (questionId) => {
     const scrollY = window.scrollY;
+    const question = questions.find(q => q.id === questionId);
     setCorrectingId(questionId);
     try {
       await axios.post(`${API}/questions/correct`, {
         question_ids: [questionId]
       });
+      pushQuestionUndo("Corregir pregunta", question ? createQuestionSnapshot(question) : null);
       toast.success("Pregunta corregida");
       await fetchQuestions();
       requestAnimationFrame(() => {
@@ -1027,6 +1032,10 @@ export default function Editor() {
       await axios.put(`${API}/questions/${question.id}`, {
         ...payload
       });
+      pushQuestionUndo(
+        nextIsGreeting ? "Marcar como saludo" : "Desmarcar saludo",
+        createQuestionSnapshot(question)
+      );
       setQuestions(prev => nextIsGreeting
         ? prev.filter(q => q.id !== question.id)
         : prev.map(q => q.id === question.id ? { ...q, ...payload } : q)
@@ -1040,6 +1049,13 @@ export default function Editor() {
   const handleUpdateQuestion = async (questionId, field, value) => {
     try {
       const targetQuestion = questions.find(q => q.id === questionId);
+      const snapshots = field === "real_name" && targetQuestion?.youtube_username
+        ? questions
+            .filter(q => q.youtube_username === targetQuestion.youtube_username)
+            .map(createQuestionSnapshot)
+        : targetQuestion
+        ? [createQuestionSnapshot(targetQuestion)]
+        : [];
       // When the user manually edits the real_name, mark it as confirmed so the app
       // knows it was reviewed (even if the value equals the youtube_username).
       const payload = { [field]: value };
@@ -1047,6 +1063,10 @@ export default function Editor() {
         payload.real_name_confirmed = true;
       }
       await axios.put(`${API}/questions/${questionId}`, payload);
+      pushQuestionUndo(
+        field === "real_name" ? "Editar nombre" : field === "corrected_text" ? "Editar texto corregido" : "Editar pregunta",
+        snapshots
+      );
       setQuestions(prev => prev.map(q =>
         field === "real_name" && targetQuestion?.youtube_username && q.youtube_username === targetQuestion.youtube_username
           ? { ...q, ...payload }
@@ -1082,7 +1102,9 @@ export default function Editor() {
 
   const handleKeepBoth = async (questionId) => {
     try {
+      const question = questions.find(q => q.id === questionId);
       await axios.put(`${API}/questions/${questionId}/clear-duplicate`);
+      pushQuestionUndo("Mantener duplicado", question ? createQuestionSnapshot(question) : null);
       setQuestions(prev => prev.map(q => 
         q.id === questionId ? { ...q, is_duplicate: false, duplicate_of: null } : q
       ));
@@ -1100,6 +1122,7 @@ export default function Editor() {
         updates.corrected_text = question.original_text;
       }
       await axios.put(`${API}/questions/${question.id}`, updates);
+      pushQuestionUndo("Aceptar pregunta", createQuestionSnapshot(question));
       setQuestions(prev => prev.map(q => 
         q.id === question.id ? { ...q, ...updates } : q
       ));
@@ -1183,11 +1206,13 @@ export default function Editor() {
 
   const handleConfirmarComoPregunta = async (questionId) => {
     try {
+      const question = questions.find(q => q.id === questionId);
       await axios.put(`${API}/questions/${questionId}`, {
         clasificacion: "pregunta",
         motivo_clasificacion: "Confirmado manualmente",
         is_greeting: false
       });
+      pushQuestionUndo("Confirmar como pregunta", question ? createQuestionSnapshot(question) : null);
       setQuestions(prev => prev.map(q =>
         q.id === questionId
           ? { ...q, clasificacion: "pregunta", motivo_clasificacion: "Confirmado manualmente", is_greeting: false }
@@ -1225,7 +1250,9 @@ export default function Editor() {
 
   const handleConfirmName = async (questionId) => {
     try {
+      const question = questions.find(q => q.id === questionId);
       await axios.post(`${API}/questions/${questionId}/confirm-name`);
+      pushQuestionUndo("Confirmar nombre", question ? createQuestionSnapshot(question) : null);
       setQuestions(prev => prev.map(q =>
         q.id === questionId ? { ...q, real_name_confirmed: true } : q
       ));
@@ -1272,6 +1299,40 @@ export default function Editor() {
   const unassignedCount = questions.filter(q => getAssignmentState(q) === "unassigned").length;
   const validQuestions = questions.filter(q => !isGreetingQuestion(q) && !q.is_duplicate);
 
+  const createQuestionSnapshot = (question) => ({
+    id: question.id,
+    youtube_username: question.youtube_username,
+    youtube_comment_id: question.youtube_comment_id,
+    youtube_video_id: question.youtube_video_id,
+    youtube_video_title: question.youtube_video_title,
+    real_name: question.real_name,
+    real_name_confirmed: question.real_name_confirmed,
+    original_text: question.original_text,
+    corrected_text: question.corrected_text,
+    is_corrected: question.is_corrected,
+    is_greeting: question.is_greeting,
+    is_duplicate: question.is_duplicate,
+    duplicate_of: question.duplicate_of,
+    program_id: question.program_id,
+    program_number: question.program_number,
+    order_in_program: question.order_in_program,
+    clasificacion: question.clasificacion,
+    motivo_clasificacion: question.motivo_clasificacion,
+  });
+
+  const pushQuestionUndo = (label, snapshots) => {
+    const normalizedSnapshots = (Array.isArray(snapshots) ? snapshots : [snapshots]).filter(Boolean);
+    if (normalizedSnapshots.length === 0) return;
+    setUndoStack(prev => [
+      ...prev,
+      {
+        type: "question_snapshot",
+        label,
+        snapshots: normalizedSnapshots,
+      }
+    ]);
+  };
+
   const handleIncludeReserveQuestion = async (question) => {
     const candidatePrograms = getCandidatePrograms(question);
 
@@ -1298,6 +1359,17 @@ export default function Editor() {
           const response = await axios.post(`${API}/questions/${questionId}/move`, {
             target_program_id: program.id
           });
+          setUndoStack(prev => [
+            ...prev,
+            {
+              type: "move",
+              questionId,
+              questionLabel: question.real_name || question.youtube_username || "Pregunta",
+              fromProgramId: question.program_id,
+              fromProgramName: programById.get(question.program_id)?.name || "Reserva",
+              toProgramName: response.data.target_program || program.name,
+            }
+          ]);
           await Promise.all([fetchPrograms(), fetchQuestions()]);
           toast.success(`Pregunta añadida a la edición en curso (${response.data.target_program || program.name})`);
           return;
@@ -1318,8 +1390,74 @@ export default function Editor() {
     }
   };
 
+  const handleUndoLastAction = async () => {
+    const action = undoStack[undoStack.length - 1];
+    if (!action) {
+      return;
+    }
+
+    setUndoing(true);
+    try {
+      if (action.type === "move") {
+        if (!action.fromProgramId) return;
+        await axios.post(`${API}/questions/${action.questionId}/move`, {
+          target_program_id: action.fromProgramId
+        });
+      } else if (action.type === "question_snapshot") {
+        await Promise.all(action.snapshots.map(snapshot => (
+          axios.put(`${API}/questions/${snapshot.id}`, snapshot)
+        )));
+      } else {
+        return;
+      }
+      setUndoStack(prev => prev.slice(0, -1));
+      await Promise.all([fetchPrograms(), fetchQuestions()]);
+      toast.success(action.type === "move"
+        ? `Deshecho: pregunta devuelta a ${action.fromProgramName}`
+        : `Deshecho: ${action.label}`
+      );
+    } catch (error) {
+      console.error("Error undoing last action:", error);
+      toast.error(error.response?.data?.detail || "No se pudo deshacer la última acción");
+    } finally {
+      setUndoing(false);
+    }
+  };
+
   return (
     <div className="p-6 md:p-10 animate-fade-in">
+      <div className="fixed bottom-5 right-5 z-50">
+        <Button
+          variant="default"
+          size="lg"
+          onClick={handleUndoLastAction}
+          disabled={undoStack.length === 0 || undoing}
+          className="rounded-sm shadow-lg uppercase tracking-wide text-xs"
+          data-testid="undo-last-action-button"
+          title={
+            undoStack.length > 0
+              ? `Deshacer: ${
+                  undoStack[undoStack.length - 1].type === "move"
+                    ? `${undoStack[undoStack.length - 1].questionLabel} a ${undoStack[undoStack.length - 1].fromProgramName}`
+                    : undoStack[undoStack.length - 1].label
+                }`
+              : "No hay acciones para deshacer"
+          }
+        >
+          {undoing ? (
+            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+          ) : (
+            <Undo2 className="w-4 h-4 mr-2" />
+          )}
+          Deshacer
+          {undoStack.length > 0 && (
+            <Badge variant="secondary" className="ml-2 rounded-full px-2 py-0 text-[10px]">
+              {undoStack.length}
+            </Badge>
+          )}
+        </Button>
+      </div>
+
       {/* Header */}
       <div className="mb-8 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
         <div>
