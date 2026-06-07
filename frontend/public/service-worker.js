@@ -1,4 +1,4 @@
-const CACHE_NAME = "spm-shell-v1";
+const CACHE_NAME = "spm-shell-v2";
 const SHELL_ASSETS = ["/", "/manifest.webmanifest", "/icons/icon-192.png", "/icons/icon-512.png"];
 
 self.addEventListener("install", (event) => {

@@ -1,15 +1,39 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title">
-  <title id="title">SPM</title>
-  <rect width="512" height="512" rx="112" fill="#dc2626"/>
-  <circle cx="256" cy="256" r="196" fill="#fff"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 640" role="img" aria-labelledby="title desc">
+  <title id="title">Samuel Pérez Millos Asociación Teológica</title>
+  <desc id="desc">Logotipo circular negro con libro abierto blanco y texto Samuel Pérez Millos Asociación Teológica.</desc>
+  <rect width="640" height="640" fill="#ffffff"/>
+  <circle cx="320" cy="320" r="319" fill="#171713"/>
+
+  <g fill="none" stroke-linecap="butt" stroke-linejoin="round">
+    <path d="M113 276H257C298 276 315 301 315 344" stroke="#ffffff" stroke-width="13"/>
+    <path d="M100 306H257C283 306 296 319 296 344" stroke="#ffffff" stroke-width="13"/>
+    <path d="M80 337H257C270 337 277 340 283 350" stroke="#ffffff" stroke-width="13"/>
+
+    <path d="M527 276H383C342 276 325 301 325 344" stroke="#ffffff" stroke-width="13"/>
+    <path d="M540 306H383C357 306 344 319 344 344" stroke="#ffffff" stroke-width="13"/>
+    <path d="M560 337H383C370 337 363 340 357 350" stroke="#ffffff" stroke-width="13"/>
+
+    <path d="M320 344C320 299 301 270 265 256" stroke="#ffffff" stroke-width="13"/>
+    <path d="M320 344C320 299 339 270 375 256" stroke="#ffffff" stroke-width="13"/>
+    <path d="M329 340C329 300 344 278 375 263" stroke="#bfc1bf" stroke-width="9" opacity="0.85"/>
+    <path d="M311 340C311 300 296 278 265 263" stroke="#bfc1bf" stroke-width="9" opacity="0.85"/>
+  </g>
+
   <text
-    x="256"
-    y="286"
-    text-anchor="middle"
-    font-family="Arial, Helvetica, sans-serif"
-    font-size="122"
-    font-weight="800"
-    letter-spacing="6"
-    fill="#dc2626"
-  >SPM</text>
+    x="80"
+    y="414"
+    fill="#ffffff"
+    font-family="Manrope, Arial, Helvetica, sans-serif"
+    font-size="51"
+    font-weight="700"
+    letter-spacing="-1"
+  >Samuel Pérez Millos</text>
+  <text
+    x="293"
+    y="456"
+    fill="#cfd0d0"
+    font-family="Manrope, Arial, Helvetica, sans-serif"
+    font-size="29"
+    font-weight="700"
+  >Asociación Teológica</text>
 </svg>

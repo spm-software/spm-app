@@ -31,12 +31,11 @@ export default function Layout() {
         {/* Logo */}
         <div className="p-6 border-b border-border">
           <div className="flex items-center gap-3">
-            <div
-              className="w-12 h-12 rounded-full bg-primary text-primary-foreground flex items-center justify-center font-heading text-lg font-bold tracking-wide"
-              aria-label="Samuel Pérez Millos"
-            >
-              SPM
-            </div>
+            <img
+              src="/icons/icon.svg"
+              alt="Samuel Pérez Millos Asociación Teológica"
+              className="w-12 h-12 rounded-full object-cover"
+            />
             <div>
               <h1 className="font-heading text-base font-bold tracking-tight leading-tight">
                 GESTOR Q&A
@@ -102,12 +101,11 @@ export default function Layout() {
       <div className="md:hidden fixed top-0 left-0 right-0 z-40 bg-card border-b border-border">
         <div className="h-16 px-4 flex items-center justify-between">
           <div className="flex items-center gap-3 min-w-0">
-            <div
-              className="w-10 h-10 rounded-full bg-primary text-primary-foreground flex items-center justify-center font-heading text-sm font-bold tracking-wide flex-shrink-0"
-              aria-label="Samuel Pérez Millos"
-            >
-              SPM
-            </div>
+            <img
+              src="/icons/icon.svg"
+              alt="Samuel Pérez Millos Asociación Teológica"
+              className="w-10 h-10 rounded-full object-cover flex-shrink-0"
+            />
             <div className="min-w-0">
               <h1 className="font-heading text-sm font-bold tracking-tight leading-tight truncate">
                 GESTOR Q&A
