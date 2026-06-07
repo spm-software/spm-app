@@ -27,7 +27,7 @@ export default function Layout() {
   return (
     <div className="flex min-h-screen">
       {/* Sidebar */}
-      <aside className="w-64 bg-card border-r border-border flex flex-col">
+      <aside className="hidden md:flex w-64 bg-card border-r border-border flex-col">
         {/* Logo */}
         <div className="p-6 border-b border-border">
           <div className="flex items-center gap-3">
@@ -99,9 +99,61 @@ export default function Layout() {
       </aside>
 
       {/* Main content */}
-      <main className="flex-1 overflow-auto">
+      <div className="md:hidden fixed top-0 left-0 right-0 z-40 bg-card border-b border-border">
+        <div className="h-16 px-4 flex items-center justify-between">
+          <div className="flex items-center gap-3 min-w-0">
+            <div
+              className="w-10 h-10 rounded-full bg-primary text-primary-foreground flex items-center justify-center font-heading text-sm font-bold tracking-wide flex-shrink-0"
+              aria-label="Samuel Pérez Millos"
+            >
+              SPM
+            </div>
+            <div className="min-w-0">
+              <h1 className="font-heading text-sm font-bold tracking-tight leading-tight truncate">
+                GESTOR Q&A
+              </h1>
+              <p className="text-[11px] text-muted-foreground truncate">
+                {user?.name || user?.email || "Samuel Pérez Millos"}
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={logout}
+            className="w-10 h-10 rounded-sm flex items-center justify-center text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors"
+            aria-label="Cerrar sesión"
+            data-testid="mobile-logout-button"
+          >
+            <LogOut className="w-5 h-5" strokeWidth={1.5} />
+          </button>
+        </div>
+      </div>
+
+      <main className="app-main flex-1 overflow-auto pt-16 pb-20 md:pt-0 md:pb-0">
         <Outlet />
       </main>
+
+      <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-card border-t border-border pb-[env(safe-area-inset-bottom)]">
+        <div className="grid grid-cols-7">
+          {navItems.map((item) => (
+            <NavLink
+              key={item.to}
+              to={item.to}
+              end={item.to === "/"}
+              className={({ isActive }) =>
+                cn(
+                  "h-16 flex flex-col items-center justify-center gap-1 text-[10px] font-medium transition-colors",
+                  isActive
+                    ? "text-primary bg-primary/5"
+                    : "text-muted-foreground hover:text-foreground"
+                )
+              }
+            >
+              <item.icon className="w-5 h-5" strokeWidth={1.5} />
+              <span className="leading-none truncate max-w-full px-0.5">{item.label}</span>
+            </NavLink>
+          ))}
+        </div>
+      </nav>
     </div>
   );
 }

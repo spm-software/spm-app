@@ -102,6 +102,35 @@ body {
     -moz-osx-font-smoothing: grayscale;
 }
 
+html,
+body,
+#root {
+    min-height: 100%;
+}
+
+body {
+    overflow-x: hidden;
+}
+
+@media (max-width: 767px) {
+    .app-main > div {
+        padding: 1rem;
+    }
+
+    .app-main h1 {
+        font-size: 2.25rem;
+        line-height: 1;
+    }
+
+    button,
+    a,
+    input,
+    textarea,
+    [role="button"] {
+        touch-action: manipulation;
+    }
+}
+
 /* Swiss Style Animations */
 @keyframes fadeIn {
     from { opacity: 0; transform: translateY(8px); }
