@@ -1,3 +1,5 @@
+import io
+import zipfile
 from datetime import datetime, timedelta, timezone
 
 
@@ -252,6 +254,14 @@ def test_distribution_move_export_and_clear(client, auth_headers):
         json={"raw_text": "@ana ¿Pregunta uno?\n\n@ana ¿Pregunta dos?\n\n@ana ¿Pregunta tres?"},
     )
     batch_id = imported.json()["batch_id"]
+    imported_questions = auth_get(client, "/api/questions", auth_headers, params={"batch_id": batch_id}).json()
+    for question in imported_questions:
+        auth_put(
+            client,
+            f"/api/questions/{question['id']}",
+            auth_headers,
+            json={"clasificacion": "pregunta", "is_greeting": False},
+        )
     auth_put(client, "/api/settings", auth_headers, json={"max_questions_per_user_per_program": 1})
 
     distributed = auth_post(client, "/api/programs/distribute", auth_headers, json={"batch_id": batch_id, "num_programs": 2})
@@ -264,6 +274,7 @@ def test_distribution_move_export_and_clear(client, auth_headers):
     reserve = next(program for program in programs if program["is_reserve"])
     reserve_question = next(q for q in auth_get(client, "/api/questions", auth_headers, params={"batch_id": batch_id}).json() if q["program_id"] == reserve["id"])
 
+    auth_put(client, "/api/settings", auth_headers, json={"max_questions_per_user_per_program": 2})
     moved = auth_post(client, f"/api/questions/{reserve_question['id']}/move", auth_headers, json={"target_program_id": normal_program["id"]})
     assert moved.status_code == 200
     assert moved.json()["target_program"] == normal_program["name"]
@@ -272,12 +283,60 @@ def test_distribution_move_export_and_clear(client, auth_headers):
     assert exported.status_code == 200
     assert "Ana" in exported.json()["content"]
 
+    png_export = auth_get(client, f"/api/programs/{normal_program['id']}/export-png", auth_headers)
+    assert png_export.status_code == 200
+    assert png_export.headers["content-type"].startswith("application/zip")
+    archive = zipfile.ZipFile(io.BytesIO(png_export.content))
+    png_names = archive.namelist()
+    assert len(png_names) == normal_program["question_count"] + 1
+    assert png_names[0].endswith(".png")
+    assert archive.read(png_names[0]).startswith(b"\x89PNG")
+
+    png_preview = auth_get(client, f"/api/programs/{normal_program['id']}/export-png-preview", auth_headers)
+    assert png_preview.status_code == 200
+    preview_data = png_preview.json()
+    assert preview_data["question_count"] == normal_program["question_count"] + 1
+    assert preview_data["previews"][0]["image"].startswith("data:image/png;base64,")
+
     all_exports = auth_get(client, f"/api/batches/{batch_id}/export-all", auth_headers)
     assert all_exports.status_code == 200
     assert len(all_exports.json()["exports"]) == 3
 
     cleared = auth_delete(client, f"/api/programs/clear/{batch_id}", auth_headers)
     assert cleared.status_code == 200
+
+
+def test_distribution_excludes_confirmed_duplicates(client, auth_headers):
+    imported = auth_post(
+        client,
+        "/api/questions/import",
+        auth_headers,
+        json={"raw_text": "@ana ¿Pregunta uno?\n\n@bea ¿Pregunta dos?\n\n@carlos ¿Pregunta duplicada?"},
+    )
+    batch_id = imported.json()["batch_id"]
+    imported_questions = auth_get(client, "/api/questions", auth_headers, params={"batch_id": batch_id}).json()
+
+    duplicate_question = imported_questions[-1]
+    for question in imported_questions:
+        payload = {"clasificacion": "pregunta", "is_greeting": False}
+        if question["id"] == duplicate_question["id"]:
+            payload["is_duplicate"] = True
+        updated = auth_put(client, f"/api/questions/{question['id']}", auth_headers, json=payload)
+        assert updated.status_code == 200
+
+    auth_put(client, "/api/settings", auth_headers, json={"max_questions_per_user_per_program": 10})
+    distributed = auth_post(client, "/api/programs/distribute", auth_headers, json={"batch_id": batch_id, "num_programs": 2})
+    assert distributed.status_code == 200
+
+    programs = auth_get(client, "/api/programs", auth_headers, params={"batch_id": batch_id}).json()
+    normal_programs = [program for program in programs if not program["is_reserve"]]
+    reserve = next(program for program in programs if program["is_reserve"])
+    assert sum(program["question_count"] for program in normal_programs) == 2
+    assert reserve["question_count"] == 0
+
+    questions = auth_get(client, "/api/questions", auth_headers, params={"batch_id": batch_id}).json()
+    duplicate_after_distribution = next(question for question in questions if question["id"] == duplicate_question["id"])
+    assert duplicate_after_distribution.get("program_id") is None
 
 
 def test_cleanup_stats_questions_batches_and_full_cleanup(client, auth_headers, fake_db):

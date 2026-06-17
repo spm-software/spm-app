@@ -50,6 +50,7 @@ services:
       - ./frontend/.env
     environment:
       VITE_BACKEND_URL: http://localhost:8000
+      CI: "true"
     ports:
       - "3000:3000"
     volumes:

@@ -159,6 +159,7 @@ export default function Distribuidor() {
     return true;
   });
   const undistributed = validQuestions.filter(q => !q.program_id);
+  const duplicateQuestionsCount = questions.filter(q => q.is_duplicate).length;
 
   return (
     <div className="p-8 md:p-12 animate-fade-in">
@@ -217,8 +218,13 @@ export default function Distribuidor() {
             <div className="text-right text-sm" data-testid="distribute-summary">
               <p className="text-muted-foreground">
                 <span className="font-bold text-foreground">{validQuestions.length}</span>{" "}
-                {anyClassified ? "preguntas confirmadas listas para distribuir" : "preguntas válidas"}
+                {anyClassified ? "preguntas confirmadas distribuibles" : "preguntas distribuibles"}
               </p>
+              {duplicateQuestionsCount > 0 && (
+                <p className="text-red-600">
+                  Duplicadas excluidas: {duplicateQuestionsCount}
+                </p>
+              )}
               {undistributed.length > 0 && (
                 <p className="text-yellow-600">
                   Sin distribuir: {undistributed.length}

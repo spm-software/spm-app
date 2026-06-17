@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, HTTPException, Query, BackgroundTasks
+from fastapi import FastAPI, APIRouter, HTTPException, Query, BackgroundTasks, Response
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -16,6 +16,9 @@ from datetime import datetime, timezone, timedelta
 import re
 import json
 import html
+import io
+import zipfile
+import base64
 from difflib import SequenceMatcher
 from bson import ObjectId
 import asyncio
@@ -1595,7 +1598,12 @@ async def get_questions(
         program_ids = [p["id"] for p in programs if p.get("id")]
         query["$or"] = [{"import_batch_id": batch_id}]
         if program_ids:
-            query["$or"].append({"program_id": {"$in": program_ids}})
+            query["$or"].append({
+                "program_id": {"$in": program_ids},
+                "import_batch_id": {"$ne": batch_id},
+                "clasificacion": "pregunta",
+                "is_duplicate": {"$ne": True},
+            })
     elif batch_id:
         query["import_batch_id"] = batch_id
     if not include_greetings:
@@ -1624,7 +1632,7 @@ async def get_reserve_questions():
             "program_id": {"$in": reserve_program_ids},
             "is_greeting": {"$ne": True},
             "is_duplicate": {"$ne": True},
-            "clasificacion": {"$ne": "saludo"}
+            "clasificacion": "pregunta"
         },
         {"_id": 0}
     ).sort("created_at", 1).to_list(2000)
@@ -2538,7 +2546,7 @@ async def distribute_questions(data: DistributeRequest):
                 "program_id": {"$in": previous_reserve_ids},
                 "is_greeting": {"$ne": True},
                 "is_duplicate": {"$ne": True},
-                "clasificacion": {"$ne": "saludo"}
+                "clasificacion": "pregunta"
             },
             {"_id": 0}
         ).sort("created_at", 1).to_list(2000)
@@ -2551,7 +2559,7 @@ async def distribute_questions(data: DistributeRequest):
                 "import_batch_id": {"$ne": data.batch_id},
                 "is_greeting": {"$ne": True},
                 "is_duplicate": {"$ne": True},
-                "clasificacion": {"$ne": "saludo"}
+                "clasificacion": "pregunta"
             },
             {"_id": 0}
         ).sort("created_at", 1).to_list(2000)
@@ -2566,7 +2574,7 @@ async def distribute_questions(data: DistributeRequest):
             "import_batch_id": {"$ne": data.batch_id},
             "is_greeting": {"$ne": True},
             "is_duplicate": {"$ne": True},
-            "clasificacion": {"$ne": "saludo"}
+            "clasificacion": "pregunta"
         },
         {"_id": 0}
     ).sort("created_at", 1).to_list(2000)
@@ -2773,6 +2781,22 @@ async def move_question_between_programs(question_id: str, data: MoveQuestionReq
         return {"message": "La pregunta ya está en ese programa"}
 
     if not target_program.get("is_reserve"):
+        if question.get("clasificacion") != "pregunta":
+            raise HTTPException(
+                status_code=400,
+                detail="Solo se pueden incluir preguntas confirmadas"
+            )
+        if question.get("is_duplicate") is True:
+            raise HTTPException(
+                status_code=400,
+                detail="No se puede incluir una pregunta duplicada"
+            )
+        if question.get("is_greeting") is True:
+            raise HTTPException(
+                status_code=400,
+                detail="No se puede incluir un saludo"
+            )
+
         settings = await get_settings()
         max_per_user = settings.max_questions_per_user_per_program
         user_key = get_question_user_key(question)
@@ -2865,6 +2889,135 @@ async def clear_distribution(batch_id: str):
 
 # ----- EXPORT -----
 
+PNG_EXPORT_SIZE = (1280, 720)
+PNG_EXPORT_MONITOR = (420, 22, 1230, 455)
+PNG_EXPORT_TEXT_BOX = (455, 318, 1185, 420)
+PNG_EXPORT_TEXT_COLOR = (255, 255, 255)
+PNG_EXPORT_BACKGROUND = (214, 218, 216)
+PNG_EXPORT_SCREEN = (5, 7, 9)
+
+
+def _safe_export_filename(value: str) -> str:
+    value = re.sub(r"[^a-zA-Z0-9_-]+", "-", value.strip().lower())
+    return value.strip("-") or "programa"
+
+
+def _load_png_font(size: int, bold: bool = False):
+    from PIL import ImageFont
+
+    font_names = (
+        ["/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"] if bold else []
+    ) + [
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf",
+        "/System/Library/Fonts/Supplemental/Arial.ttf",
+    ]
+    for font_name in font_names:
+        try:
+            return ImageFont.truetype(font_name, size=size)
+        except OSError:
+            continue
+    return ImageFont.load_default()
+
+
+def _text_width(draw, text: str, font) -> int:
+    left, _, right, _ = draw.textbbox((0, 0), text, font=font)
+    return right - left
+
+
+def _truncate_to_width(draw, text: str, font, width: int) -> str:
+    ellipsis = "..."
+    if _text_width(draw, text, font) <= width:
+        return text
+    available = max(width - _text_width(draw, ellipsis, font), 0)
+    trimmed = text.strip()
+    while trimmed and _text_width(draw, trimmed, font) > available:
+        trimmed = trimmed[:-1].rstrip()
+    return f"{trimmed}{ellipsis}" if trimmed else ellipsis
+
+
+def _wrap_text_with_ellipsis(draw, text: str, font, width: int, max_lines: int) -> List[str]:
+    words = re.sub(r"\s+", " ", text).strip().split(" ")
+    lines: List[str] = []
+    current = ""
+
+    for word in words:
+        candidate = f"{current} {word}".strip()
+        if _text_width(draw, candidate, font) <= width:
+            current = candidate
+            continue
+        if current:
+            lines.append(current)
+            current = word
+        else:
+            lines.append(_truncate_to_width(draw, word, font, width))
+            current = ""
+        if len(lines) == max_lines:
+            break
+
+    if current and len(lines) < max_lines:
+        lines.append(current)
+
+    if len(lines) == max_lines and words:
+        consumed = " ".join(lines)
+        original = " ".join(words)
+        if len(consumed) < len(original):
+            lines[-1] = _truncate_to_width(draw, lines[-1], font, width)
+
+    return lines or [""]
+
+
+def _draw_monitor_template():
+    from PIL import Image, ImageDraw
+
+    image = Image.new("RGB", PNG_EXPORT_SIZE, PNG_EXPORT_BACKGROUND)
+    draw = ImageDraw.Draw(image)
+
+    # Left vertical panel and desktop props, matching the current production mockup.
+    draw.rectangle((48, 38, 348, 526), fill=(23, 24, 22))
+    draw.rectangle((0, 618, 1280, 720), fill=(122, 116, 106))
+    draw.rectangle((0, 545, 1280, 618), fill=(187, 190, 185))
+    draw.rounded_rectangle((412, 18, 1242, 525), radius=18, fill=(14, 15, 16))
+    draw.rectangle(PNG_EXPORT_MONITOR, fill=PNG_EXPORT_SCREEN)
+    draw.rounded_rectangle((412, 456, 1242, 532), radius=12, fill=(224, 224, 219))
+    draw.rounded_rectangle((684, 520, 976, 570), radius=12, fill=(142, 158, 154))
+    draw.rectangle((506, 664, 961, 708), fill=(231, 232, 227))
+    draw.ellipse((1116, 638, 1210, 680), fill=(236, 236, 233))
+    return image
+
+
+def _render_question_png(question: Dict[str, Any]) -> bytes:
+    from PIL import ImageDraw
+
+    image = _draw_monitor_template()
+    draw = ImageDraw.Draw(image)
+    question_font = _load_png_font(30, bold=False)
+    name_font = _load_png_font(24, bold=True)
+
+    left, top, right, bottom = PNG_EXPORT_TEXT_BOX
+    width = right - left
+    question_text = question.get("corrected_text") or question.get("original_text", "")
+    name = question.get("real_name") or question.get("youtube_username") or "Desconocido"
+
+    question_lines = _wrap_text_with_ellipsis(draw, question_text, question_font, width, max_lines=2)
+    y = top
+    for line in question_lines:
+        draw.text((left, y), line, font=question_font, fill=PNG_EXPORT_TEXT_COLOR)
+        y += 38
+
+    y += 22
+    draw.text(
+        (left, min(y, bottom - 30)),
+        _truncate_to_width(draw, name, name_font, width),
+        font=name_font,
+        fill=PNG_EXPORT_TEXT_COLOR,
+    )
+
+    output = io.BytesIO()
+    image.save(output, format="PNG", optimize=True)
+    return output.getvalue()
+
+
 @api_router.get("/programs/{program_id}/export")
 async def export_program(program_id: str):
     """Export program to TXT format"""
@@ -2900,6 +3053,68 @@ async def export_program(program_id: str):
         "program_name": program["name"],
         "question_count": len(questions),
         "content": txt_content
+    }
+
+
+@api_router.get("/programs/{program_id}/export-png")
+async def export_program_png(program_id: str):
+    """Export program questions as a ZIP of PNG images."""
+    program = await db.programs.find_one({"id": program_id}, {"_id": 0})
+    if not program:
+        raise HTTPException(status_code=404, detail="Programa no encontrado")
+
+    questions = await db.questions.find(
+        {"program_id": program_id},
+        {"_id": 0}
+    ).sort("order_in_program", 1).to_list(200)
+
+    zip_buffer = io.BytesIO()
+    program_slug = _safe_export_filename(program.get("name", "programa"))
+    with zipfile.ZipFile(zip_buffer, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for index, question in enumerate(questions, start=1):
+            png = _render_question_png(question)
+            filename = f"{program_slug}-{index:03d}.png"
+            archive.writestr(filename, png)
+
+    await db.programs.update_one(
+        {"id": program_id},
+        {"$set": {"is_exported": True}}
+    )
+
+    filename = f"{program_slug}-png.zip"
+    headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
+    return Response(content=zip_buffer.getvalue(), media_type="application/zip", headers=headers)
+
+
+@api_router.get("/programs/{program_id}/export-png-preview")
+async def export_program_png_preview(program_id: str):
+    """Preview program PNG export without marking it as exported."""
+    program = await db.programs.find_one({"id": program_id}, {"_id": 0})
+    if not program:
+        raise HTTPException(status_code=404, detail="Programa no encontrado")
+
+    questions = await db.questions.find(
+        {"program_id": program_id},
+        {"_id": 0}
+    ).sort("order_in_program", 1).to_list(200)
+
+    program_slug = _safe_export_filename(program.get("name", "programa"))
+    previews = []
+    for index, question in enumerate(questions, start=1):
+        png = _render_question_png(question)
+        previews.append({
+            "question_id": question.get("id"),
+            "filename": f"{program_slug}-{index:03d}.png",
+            "image": f"data:image/png;base64,{base64.b64encode(png).decode('ascii')}",
+            "name": question.get("real_name") or question.get("youtube_username") or "Desconocido",
+            "text": question.get("corrected_text") or question.get("original_text", ""),
+        })
+
+    return {
+        "program_id": program_id,
+        "program_name": program.get("name"),
+        "question_count": len(previews),
+        "previews": previews,
     }
 
 @api_router.get("/batches/{batch_id}/export-all")

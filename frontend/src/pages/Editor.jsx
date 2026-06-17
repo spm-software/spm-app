@@ -1297,7 +1297,22 @@ export default function Editor() {
   const includedCount = questions.filter(q => getAssignmentState(q) === "included").length;
   const reserveCount = questions.filter(q => getAssignmentState(q) === "reserve").length;
   const unassignedCount = questions.filter(q => getAssignmentState(q) === "unassigned").length;
-  const validQuestions = questions.filter(q => !isGreetingQuestion(q) && !q.is_duplicate);
+  const ownBatchQuestions = globalReserveMode
+    ? questions
+    : questions.filter(q => q.import_batch_id === selectedBatch);
+  const visibleConfirmedCount = questions.filter(q =>
+    q.clasificacion === "pregunta" && !q.is_duplicate && !isGreetingQuestion(q)
+  ).length;
+  const ownConfirmedCount = ownBatchQuestions.filter(q =>
+    q.clasificacion === "pregunta" && !q.is_duplicate && !isGreetingQuestion(q)
+  ).length;
+  const externalVisibleCount = globalReserveMode
+    ? 0
+    : questions.filter(q => q.import_batch_id && q.import_batch_id !== selectedBatch).length;
+  const unclassifiedVisibleCount = questions.filter(q => !q.clasificacion).length;
+  const distributableQuestions = questions.filter(q =>
+    q.clasificacion === "pregunta" && !q.is_duplicate && !isGreetingQuestion(q)
+  );
 
   const createQuestionSnapshot = (question) => ({
     id: question.id,
@@ -1338,6 +1353,14 @@ export default function Editor() {
 
     if (candidatePrograms.length === 0) {
       toast.error("No hay programas creados para incluir esta pregunta");
+      return;
+    }
+    if (question.clasificacion !== "pregunta") {
+      toast.error("Solo puedes incluir preguntas confirmadas");
+      return;
+    }
+    if (question.is_duplicate || isGreetingQuestion(question)) {
+      toast.error("No puedes incluir duplicados ni saludos");
       return;
     }
 
@@ -1729,7 +1752,29 @@ export default function Editor() {
         <div className="flex items-center gap-6 text-sm">
           <div className="flex items-center gap-2">
             <div className="w-3 h-3 rounded-full bg-green-500" />
-            <span><strong>{validQuestions.length}</strong> válidas</span>
+            <span><strong>{visibleConfirmedCount}</strong> confirmadas visibles</span>
+          </div>
+          {!globalReserveMode && (
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 rounded-full bg-blue-500" />
+              <span><strong>{ownConfirmedCount}</strong> confirmadas del lote</span>
+            </div>
+          )}
+          {externalVisibleCount > 0 && (
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 rounded-full bg-purple-500" />
+              <span><strong>{externalVisibleCount}</strong> de otros lotes</span>
+            </div>
+          )}
+          {unclassifiedVisibleCount > 0 && (
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 rounded-full bg-slate-400" />
+              <span><strong>{unclassifiedVisibleCount}</strong> sin clasificar</span>
+            </div>
+          )}
+          <div className="flex items-center gap-2">
+            <div className="w-3 h-3 rounded-full bg-emerald-500" />
+            <span><strong>{distributableQuestions.length}</strong> distribuibles visibles</span>
           </div>
           {(() => {
             const noNameCount = questions.filter(q => getNameState(q) === "missing").length;
@@ -1779,7 +1824,7 @@ export default function Editor() {
       <div className="flex items-center gap-2 mb-6 flex-wrap" data-testid="assignment-filters">
         <span className="text-xs uppercase tracking-wide text-muted-foreground mr-2">Selección:</span>
         {[
-          { value: "all", label: "Todas", count: questions.length, dot: "bg-foreground" },
+          { value: "all", label: "Visibles", count: questions.length, dot: "bg-foreground" },
           { value: "included", label: "Incluidas", count: includedCount, dot: "bg-green-500" },
           { value: "reserve", label: "Reserva", count: reserveCount, dot: "bg-amber-500" },
           { value: "unassigned", label: "Sin seleccionar", count: unassignedCount, dot: "bg-slate-400" },
@@ -1814,10 +1859,12 @@ export default function Editor() {
           <CheckCircle className="w-4 h-4 text-green-600 flex-shrink-0" />
           <p className="text-sm text-green-800">
             <span className="font-semibold">
-              {questions.filter(q => q.clasificacion === "pregunta").length}
+              {visibleConfirmedCount}
             </span>{" "}
             comentarios listos para procesar{" "}
-            <span className="text-green-600">(solo preguntas confirmadas)</span>
+            <span className="text-green-600">
+              ({ownConfirmedCount} del lote{externalVisibleCount > 0 ? ` + ${externalVisibleCount} de otros lotes visibles` : ""})
+            </span>
           </p>
         </div>
       )}
@@ -1832,8 +1879,8 @@ export default function Editor() {
               return acc;
             }, {});
             const pills = [
-              { value: "all", label: "Todas", count: questions.length, dot: "bg-foreground" },
-              { value: "pregunta", label: "Preguntas", count: cCounts.pregunta || 0, dot: "bg-green-500" },
+              { value: "all", label: "Visibles", count: questions.length, dot: "bg-foreground" },
+              { value: "pregunta", label: "Preguntas", count: visibleConfirmedCount, dot: "bg-green-500" },
               { value: "dudoso", label: "Dudosas", count: cCounts.dudoso || 0, dot: "bg-yellow-500" },
             ];
             return pills.map(p => (
@@ -1891,7 +1938,13 @@ export default function Editor() {
             } else if (showOnlyNoName) {
               filteredQuestions = filteredQuestions.filter(q => getNameState(q) === "missing");
             } else if (assignmentFilter === "all" && clasificationFilter !== "all" && questions.some(q => q.clasificacion)) {
-              filteredQuestions = filteredQuestions.filter(q => q.clasificacion === clasificationFilter);
+              if (clasificationFilter === "pregunta") {
+                filteredQuestions = filteredQuestions.filter(q =>
+                  q.clasificacion === "pregunta" && !q.is_duplicate && !isGreetingQuestion(q)
+                );
+              } else {
+                filteredQuestions = filteredQuestions.filter(q => q.clasificacion === clasificationFilter);
+              }
             }
             
             return filteredQuestions.map((question, index) => (
