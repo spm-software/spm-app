@@ -17,7 +17,12 @@ import {
   Download,
   Pencil,
   Check,
-  X
+  X,
+  Upload,
+  Filter,
+  Copy,
+  Wand2,
+  ClipboardCheck
 } from "lucide-react";
 import {
   AlertDialog,
@@ -466,23 +471,29 @@ export default function Dashboard() {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="flex flex-wrap gap-4">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {[
-              { step: 1, title: "Importar", desc: "Pega comentarios", path: "/importar" },
-              { step: 2, title: "Editar", desc: "Corrige con IA", path: "/editor" },
-              { step: 3, title: "Distribuir", desc: "Organiza en programas", path: "/distribuir" },
-              { step: 4, title: "Exportar", desc: "Genera TXT", path: "/exportar" },
+              { step: 1, title: "Importar", desc: "Cargar comentarios", path: "/importar", icon: Upload },
+              { step: 2, title: "Nombres", desc: "Resolver autores", path: "/editor", icon: Users },
+              { step: 3, title: "Clasificar", desc: "Separar saludos", path: "/editor", icon: Filter },
+              { step: 4, title: "Duplicados", desc: "Buscar y revisar", path: "/editor", icon: Copy },
+              { step: 5, title: "Ortografía", desc: "Corregir preguntas", path: "/editor", icon: Wand2 },
+              { step: 6, title: "Reserva", desc: "Revisar pendientes", action: handleGoToReserve, icon: Inbox },
+              { step: 7, title: "Distribuir", desc: "Crear programas", path: "/distribuir", icon: Layers },
+              { step: 8, title: "Revisar", desc: "Ajustar selección", path: "/editor", icon: ClipboardCheck },
+              { step: 9, title: "Exportar", desc: "TXT y PNG", path: "/exportar", icon: Download },
             ].map((item) => (
               <button
                 key={item.step}
-                onClick={() => navigate(item.path)}
-                className="flex items-center gap-3 p-4 rounded-sm hover:bg-secondary/50 transition-colors flex-1 min-w-[200px] text-left"
+                onClick={() => item.action ? item.action() : navigate(item.path)}
+                className="flex items-center gap-3 p-4 rounded-sm border border-border hover:bg-secondary/50 transition-colors text-left"
               >
-                <div className="w-10 h-10 rounded-full bg-primary text-primary-foreground flex items-center justify-center font-bold flex-shrink-0">
+                <div className="w-9 h-9 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-sm font-bold flex-shrink-0">
                   {item.step}
                 </div>
-                <div>
-                  <p className="font-medium">{item.title}</p>
+                <item.icon className="w-5 h-5 text-muted-foreground flex-shrink-0" strokeWidth={1.5} />
+                <div className="min-w-0">
+                  <p className="font-medium truncate">{item.title}</p>
                   <p className="text-xs text-muted-foreground">{item.desc}</p>
                 </div>
                 <ChevronRight className="w-5 h-5 text-muted-foreground ml-auto" />

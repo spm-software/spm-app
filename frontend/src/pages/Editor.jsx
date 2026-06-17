@@ -35,7 +35,8 @@ import {
   Filter,
   Ban,
   Video,
-  Undo2
+  Undo2,
+  Inbox
 } from "lucide-react";
 import { API_BASE_URL as API } from "@/lib/api";
 
@@ -712,6 +713,15 @@ export default function Editor() {
     setGlobalReserveMode(false);
     setAssignmentFilter("all");
     setSelectedBatch(batchId);
+  };
+
+  const handleOpenGlobalReserve = () => {
+    setSelectedBatch("");
+    setGlobalReserveMode(true);
+    setAssignmentFilter("reserve");
+    setClasificationFilter("pregunta");
+    setShowOnlyDuplicates(false);
+    setShowOnlyNoName(false);
   };
 
   const handleCorrectAll = async (force = false) => {
@@ -1529,7 +1539,32 @@ export default function Editor() {
 
       {/* Actions Bar */}
       <div className="flex flex-wrap items-center gap-4 mb-8 p-5 bg-card border border-border rounded-sm">
-        {/* 1. Clasificar con IA */}
+        {/* 1. Actualizar nombres */}
+        <Button
+          variant="outline"
+          onClick={handleUpdateNames}
+          disabled={questions.length === 0}
+          size="lg"
+          className="rounded-sm uppercase tracking-wide text-xs"
+          data-testid="update-names-button"
+        >
+          <Users className="w-4 h-4 mr-2" />
+          Actualizar nombres
+        </Button>
+
+        <Button
+          variant="outline"
+          onClick={handleConfirmDerivedNames}
+          disabled={questions.length === 0}
+          size="lg"
+          className="rounded-sm uppercase tracking-wide text-xs"
+          data-testid="confirm-derived-names-button"
+        >
+          <Check className="w-4 h-4 mr-2" />
+          Confirmar nombres derivados
+        </Button>
+
+        {/* 2. Clasificar con IA */}
         <Button
           variant="outline"
           onClick={handleClasificarIA}
@@ -1564,7 +1599,7 @@ export default function Editor() {
           </div>
         )}
 
-        {/* 2. Duplicados (rápido) */}
+        {/* 3. Duplicados (rápido) */}
         <Button
           variant="outline"
           onClick={handleCheckDuplicates}
@@ -1581,7 +1616,7 @@ export default function Editor() {
           Duplicados (rápido)
         </Button>
 
-        {/* 3. Buscar con IA (+ selector de modelo) */}
+        {/* 4. Buscar duplicados con IA (+ selector de modelo) */}
         <div className="flex items-center gap-2">
           <Select value={aiModel} onValueChange={setAiModel} disabled={checkingDuplicates}>
             <SelectTrigger className="w-[180px] h-10 rounded-sm text-xs">
@@ -1646,7 +1681,7 @@ export default function Editor() {
           </Button>
         )}
 
-        {/* 4. Corregir todo con IA */}
+        {/* 5. Corregir todo con IA */}
         <Button
           onClick={() => handleCorrectAll(false)}
           disabled={correcting || questions.length === 0}
@@ -1709,33 +1744,19 @@ export default function Editor() {
           </div>
         )}
 
-        {/* 5. Actualizar nombres */}
+        {/* 6. Reserva */}
         <Button
-          variant="outline"
-          onClick={handleUpdateNames}
-          disabled={questions.length === 0}
+          variant={globalReserveMode ? "default" : "outline"}
+          onClick={handleOpenGlobalReserve}
           size="lg"
           className="rounded-sm uppercase tracking-wide text-xs"
-          data-testid="update-names-button"
+          data-testid="open-reserve-button"
         >
-          <Users className="w-4 h-4 mr-2" />
-          Actualizar nombres
+          <Inbox className="w-4 h-4 mr-2" />
+          Reserva
         </Button>
 
-        {/* 5b. Confirmar nombres derivados */}
-        <Button
-          variant="outline"
-          onClick={handleConfirmDerivedNames}
-          disabled={questions.length === 0}
-          size="lg"
-          className="rounded-sm uppercase tracking-wide text-xs"
-          data-testid="confirm-derived-names-button"
-        >
-          <Check className="w-4 h-4 mr-2" />
-          Confirmar nombres derivados
-        </Button>
-
-        {/* 6. Buscar en todo */}
+        {/* Herramienta auxiliar */}
         <Button
           variant="outline"
           onClick={() => setShowSearchModal(true)}
@@ -1822,12 +1843,41 @@ export default function Editor() {
 
       {/* Assignment Filter */}
       <div className="flex items-center gap-2 mb-6 flex-wrap" data-testid="assignment-filters">
-        <span className="text-xs uppercase tracking-wide text-muted-foreground mr-2">Selección:</span>
+        <span
+          className="text-xs uppercase tracking-wide text-muted-foreground mr-2"
+          title="Filtra las preguntas según su estado dentro de la selección para programas"
+        >
+          Estado en programas:
+        </span>
         {[
-          { value: "all", label: "Visibles", count: questions.length, dot: "bg-foreground" },
-          { value: "included", label: "Incluidas", count: includedCount, dot: "bg-green-500" },
-          { value: "reserve", label: "Reserva", count: reserveCount, dot: "bg-amber-500" },
-          { value: "unassigned", label: "Sin seleccionar", count: unassignedCount, dot: "bg-slate-400" },
+          {
+            value: "all",
+            label: "Todas visibles",
+            count: questions.length,
+            dot: "bg-foreground",
+            title: "Muestra todas las preguntas cargadas en esta vista"
+          },
+          {
+            value: "included",
+            label: "En programas",
+            count: includedCount,
+            dot: "bg-green-500",
+            title: "Preguntas que ya están asignadas a un programa y entrarán en la edición"
+          },
+          {
+            value: "reserve",
+            label: "En reserva",
+            count: reserveCount,
+            dot: "bg-amber-500",
+            title: "Preguntas apartadas en Reserva; no entran en programas hasta distribuirlas o incluirlas manualmente"
+          },
+          {
+            value: "unassigned",
+            label: "Pendientes",
+            count: unassignedCount,
+            dot: "bg-slate-400",
+            title: "Preguntas válidas todavía no asignadas a programas ni a reserva"
+          },
         ].map(option => (
           <button
             key={option.value}
@@ -1841,6 +1891,7 @@ export default function Editor() {
                 ? 'bg-foreground text-background border-foreground'
                 : 'border-border hover:bg-secondary/50'
             }`}
+            title={option.title}
             data-testid={`assignment-filter-${option.value}`}
           >
             <div className={`w-2.5 h-2.5 rounded-full ${option.dot}`} />
@@ -2061,7 +2112,7 @@ export default function Editor() {
                           <Badge
                             variant="outline"
                             className="text-xs text-amber-700 border-amber-400 bg-amber-50"
-                            title="Esta pregunta está en Reserva y no entra en la selección de programas"
+                            title="Esta pregunta está en Reserva; tendrá prioridad en la próxima distribución"
                             data-testid={`assignment-reserve-${question.id}`}
                           >
                             Reserva
@@ -2073,10 +2124,10 @@ export default function Editor() {
                         <Badge
                           variant="outline"
                           className="text-xs text-slate-600 border-slate-300 bg-slate-50"
-                          title="Esta pregunta todavía no está asignada a la selección"
+                          title="Esta pregunta todavía no está asignada a programas ni a reserva"
                           data-testid={`assignment-unassigned-${question.id}`}
                         >
-                          Sin seleccionar
+                          Pendiente
                         </Badge>
                       );
                     })()}

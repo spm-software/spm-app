@@ -17,8 +17,8 @@ const navItems = [
   { to: "/importar", icon: Upload, label: "Importar" },
   { to: "/editor", icon: Edit3, label: "Editor" },
   { to: "/distribuir", icon: Layers, label: "Distribuir" },
-  { to: "/usuarios", icon: Users, label: "Usuarios" },
   { to: "/exportar", icon: Download, label: "Exportar" },
+  { to: "/usuarios", icon: Users, label: "Usuarios" },
   { to: "/configuracion", icon: Settings, label: "Configuración" },
 ];
 

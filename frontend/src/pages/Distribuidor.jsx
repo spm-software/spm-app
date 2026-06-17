@@ -227,7 +227,7 @@ export default function Distribuidor() {
               )}
               {undistributed.length > 0 && (
                 <p className="text-yellow-600">
-                  Sin distribuir: {undistributed.length}
+                  Pendientes por distribuir: {undistributed.length}
                 </p>
               )}
             </div>
