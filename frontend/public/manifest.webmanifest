@@ -1,32 +1,61 @@
 {
+  "id": "/",
   "name": "Gestor Q&A SPM",
   "short_name": "SPM Q&A",
   "description": "Gestor de preguntas y respuestas SPM",
   "lang": "es",
   "start_url": "/",
   "scope": "/",
+  "launch_handler": {
+    "client_mode": "navigate-existing"
+  },
   "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
   "orientation": "portrait",
   "background_color": "#ffffff",
-  "theme_color": "#dc2626",
+  "theme_color": "#171713",
+  "categories": ["productivity", "utilities"],
   "icons": [
     {
       "src": "/icons/icon.svg",
       "sizes": "any",
       "type": "image/svg+xml",
-      "purpose": "any"
+      "purpose": "any maskable"
     },
     {
       "src": "/icons/icon-192.png",
       "sizes": "192x192",
       "type": "image/png",
-      "purpose": "any"
+      "purpose": "any maskable"
     },
     {
       "src": "/icons/icon-512.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Importar",
+      "short_name": "Importar",
+      "description": "Cargar comentarios en un lote",
+      "url": "/importar",
+      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Editor",
+      "short_name": "Editor",
+      "description": "Revisar preguntas, nombres, duplicados y reserva",
+      "url": "/editor",
+      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Exportar",
+      "short_name": "Exportar",
+      "description": "Descargar TXT y PNG",
+      "url": "/exportar",
+      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }]
     }
   ]
 }

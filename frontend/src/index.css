@@ -108,11 +108,22 @@ body,
     min-height: 100%;
 }
 
+html {
+    -webkit-text-size-adjust: 100%;
+}
+
 body {
     overflow-x: hidden;
+    overscroll-behavior-x: none;
 }
 
 @media (max-width: 767px) {
+    html,
+    body,
+    #root {
+        min-height: 100dvh;
+    }
+
     .app-main > div {
         padding: 1rem;
     }
@@ -128,6 +139,15 @@ body {
     textarea,
     [role="button"] {
         touch-action: manipulation;
+    }
+
+    .mobile-bottom-nav {
+        scrollbar-width: none;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    .mobile-bottom-nav::-webkit-scrollbar {
+        display: none;
     }
 }
 

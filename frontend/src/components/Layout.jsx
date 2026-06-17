@@ -126,12 +126,12 @@ export default function Layout() {
         </div>
       </div>
 
-      <main className="app-main flex-1 overflow-auto pt-16 pb-20 md:pt-0 md:pb-0">
+      <main className="app-main flex-1 overflow-auto pt-16 pb-24 md:pt-0 md:pb-0">
         <Outlet />
       </main>
 
       <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-card border-t border-border pb-[env(safe-area-inset-bottom)]">
-        <div className="grid grid-cols-7">
+        <div className="mobile-bottom-nav flex overflow-x-auto overscroll-x-contain">
           {navItems.map((item) => (
             <NavLink
               key={item.to}
@@ -139,7 +139,7 @@ export default function Layout() {
               end={item.to === "/"}
               className={({ isActive }) =>
                 cn(
-                  "h-16 flex flex-col items-center justify-center gap-1 text-[10px] font-medium transition-colors",
+                  "h-16 min-w-[76px] flex-1 flex flex-col items-center justify-center gap-1 px-1 text-[10px] font-medium transition-colors",
                   isActive
                     ? "text-primary bg-primary/5"
                     : "text-muted-foreground hover:text-foreground"
