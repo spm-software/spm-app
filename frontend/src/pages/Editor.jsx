@@ -36,7 +36,8 @@ import {
   Ban,
   Video,
   Undo2,
-  Inbox
+  Inbox,
+  ArrowUp
 } from "lucide-react";
 import { API_BASE_URL as API } from "@/lib/api";
 
@@ -722,6 +723,15 @@ export default function Editor() {
     setClasificationFilter("pregunta");
     setShowOnlyDuplicates(false);
     setShowOnlyNoName(false);
+  };
+
+  const handleScrollToTop = () => {
+    const main = document.querySelector(".app-main");
+    if (main) {
+      main.scrollTo({ top: 0, behavior: "smooth" });
+      return;
+    }
+    window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
   const handleCorrectAll = async (force = false) => {
@@ -2303,6 +2313,19 @@ export default function Editor() {
           })()
         )}
       </div>
+
+      <Button
+        type="button"
+        variant="default"
+        size="icon"
+        onClick={handleScrollToTop}
+        className="fixed bottom-24 right-4 z-30 h-11 w-11 rounded-full shadow-lg md:bottom-6 md:right-6"
+        title="Subir al principio"
+        aria-label="Subir al principio de la página"
+        data-testid="scroll-to-top-button"
+      >
+        <ArrowUp className="w-5 h-5" />
+      </Button>
 
       {/* Duplicates Modal */}
       <DuplicatesModal
