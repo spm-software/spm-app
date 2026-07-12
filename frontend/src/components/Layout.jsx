@@ -341,26 +341,10 @@ export default function Layout() {
         </div>
         <Outlet />
         <div className="px-4 pb-8 pt-2 md:px-8 md:pb-10">
-          <div className="mx-auto flex w-full max-w-sm flex-col items-center gap-2 sm:flex-row sm:justify-center">
-            <button
-              type="button"
-              onClick={handleToggleTheme}
-              className="flex items-center gap-2 rounded-sm border border-border bg-card px-4 py-2 text-xs font-semibold uppercase tracking-wide text-foreground transition-colors hover:bg-secondary"
-              title={isDarkMode ? "Activar modo claro" : "Activar modo oscuro"}
-              aria-label={isDarkMode ? "Activar modo claro" : "Activar modo oscuro"}
-              data-testid="page-theme-toggle-button"
-            >
-              {isDarkMode ? (
-                <Sun className="h-4 w-4" />
-              ) : (
-                <Moon className="h-4 w-4" />
-              )}
-              {isDarkMode ? "Modo claro" : "Modo oscuro"}
-            </button>
           <button
             type="button"
             onClick={handleScrollToTop}
-            className="flex items-center gap-2 rounded-sm border border-border bg-card px-4 py-2 text-xs font-semibold uppercase tracking-wide text-foreground transition-colors hover:bg-secondary"
+            className="mx-auto flex items-center gap-2 rounded-sm border border-border bg-card px-4 py-2 text-xs font-semibold uppercase tracking-wide text-foreground transition-colors hover:bg-secondary"
             title="Volver al inicio de la página"
             aria-label="Volver al inicio de la página"
             data-testid="page-scroll-to-top-button"
@@ -368,9 +352,24 @@ export default function Layout() {
             <ArrowUp className="h-4 w-4" />
             Volver al inicio
           </button>
-          </div>
         </div>
       </main>
+
+      <button
+        type="button"
+        onClick={handleToggleTheme}
+        className="fixed bottom-20 left-4 z-50 flex h-11 items-center gap-2 rounded-full border border-border bg-card px-4 text-xs font-semibold uppercase tracking-wide text-foreground shadow-lg transition-colors hover:bg-secondary md:bottom-4 md:left-[17rem]"
+        title={isDarkMode ? "Activar modo claro" : "Activar modo oscuro"}
+        aria-label={isDarkMode ? "Activar modo claro" : "Activar modo oscuro"}
+        data-testid="floating-theme-toggle-button"
+      >
+        {isDarkMode ? (
+          <Sun className="h-4 w-4" />
+        ) : (
+          <Moon className="h-4 w-4" />
+        )}
+        {isDarkMode ? "Modo claro" : "Modo oscuro"}
+      </button>
 
       <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-card border-t border-border pb-[env(safe-area-inset-bottom)]">
         <div className="mobile-bottom-nav flex overflow-x-auto overscroll-x-contain">
