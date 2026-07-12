@@ -1666,14 +1666,16 @@ async def update_question(question_id: str, update: QuestionUpdate):
         question = await db.questions.find_one({"id": question_id}, {"_id": 0})
         if question and question.get("youtube_username"):
             username = question["youtube_username"]
+            username_pattern = f"^@*{re.escape(_normalize_username(username))}$"
+            username_query = {"youtube_username": {"$regex": username_pattern, "$options": "i"}}
             # Create or update user mapping
             existing = await db.user_mappings.find_one(
-                {"youtube_username": username},
+                username_query,
                 {"_id": 0}
             )
             if existing:
                 await db.user_mappings.update_one(
-                    {"youtube_username": username},
+                    {"id": existing["id"]} if existing.get("id") else {"youtube_username": existing.get("youtube_username")},
                     {"$set": {"real_name": update_data["real_name"], "updated_at": datetime.now(timezone.utc).isoformat()}}
                 )
             else:
@@ -1687,7 +1689,7 @@ async def update_question(question_id: str, update: QuestionUpdate):
                 await db.user_mappings.insert_one(doc)
 
             await db.questions.update_many(
-                {"youtube_username": username},
+                username_query,
                 {"$set": {
                     "real_name": update_data["real_name"],
                     "real_name_confirmed": update_data.get("real_name_confirmed", True)
@@ -3513,12 +3515,14 @@ def get_youtube_oauth_flow(redirect_uri: str):
 @api_router.get("/youtube/auth-status")
 async def youtube_auth_status():
     """Check if user is authenticated with YouTube"""
+    last_anchor = await get_youtube_last_anchor()
+
     # Check if we have valid tokens stored
     token_doc = await db.youtube_tokens.find_one({"type": "user_token"})
 
     if not token_doc:
         logger.info("[YouTube OAuth] auth-status: no token doc in DB")
-        return {"authenticated": False, "message": "No token found"}
+        return {"authenticated": False, "message": "No token found", "last_anchor": last_anchor}
 
     # Check if token is expired (robust against naive datetimes from legacy docs)
     expiry = token_doc.get("expiry")
@@ -3540,20 +3544,15 @@ async def youtube_auth_status():
                 "authenticated": True,
                 "needs_refresh": True,
                 "account_email": token_doc.get("account_email"),
-                "channel_title": token_doc.get("channel_title")
+                "channel_title": token_doc.get("channel_title"),
+                "last_anchor": last_anchor
             }
         logger.info("[YouTube OAuth] auth-status: token expired and NO refresh_token -> authenticated=False")
-        return {"authenticated": False, "message": "Token expired"}
+        return {"authenticated": False, "message": "Token expired", "last_anchor": last_anchor}
 
     logger.info(
         f"[YouTube OAuth] auth-status: authenticated=True channel={token_doc.get('channel_title')} "
         f"email={token_doc.get('account_email')} has_refresh={bool(token_doc.get('refresh_token'))}"
-    )
-
-    # Get last import anchor (raw, unmodified reference for next cutoff)
-    last_anchor = await db.youtube_last_imported.find_one(
-        {"type": "last_anchor"},
-        {"_id": 0}
     )
 
     return {
@@ -3562,6 +3561,20 @@ async def youtube_auth_status():
         "channel_title": token_doc.get("channel_title"),
         "last_anchor": last_anchor  # None if no import yet
     }
+
+
+async def get_youtube_last_anchor() -> Optional[Dict[str, Any]]:
+    """Return the persisted cutoff anchor for the next YouTube import."""
+    return await db.youtube_last_imported.find_one(
+        {"type": "last_anchor"},
+        {"_id": 0}
+    )
+
+
+@api_router.get("/youtube/last-import-anchor")
+async def youtube_last_import_anchor():
+    """Return the last newly imported YouTube comment used as the next cutoff."""
+    return {"last_anchor": await get_youtube_last_anchor()}
 
 
 @api_router.get("/youtube/auth-url")
@@ -3949,35 +3962,11 @@ async def youtube_fetch_comments(request: YouTubeFetchRequest):
 
         logger.info(f"Total comments fetched: {len(all_comments)}, greetings filtered: {greetings_filtered}")
 
-        # Save last-imported anchor (RAW, unmodified) and import history if we have comments
+        # Keep a fetch history log if we have comments. The cutoff anchor is updated
+        # only after comments are actually imported as NEW questions.
         if all_comments:
-            # all_comments is newest-first (from YouTube API order='time').
-            # The newest = the anchor for next import.
             newest_comment = all_comments[0]
 
-            anchor_doc = {
-                "type": "last_anchor",
-                "comment_id": newest_comment['comment_id'],
-                "raw_text": newest_comment['text'],              # EXACT text from YouTube
-                "raw_username": newest_comment['raw_username'],  # EXACT username from YouTube
-                "comment_published_at": newest_comment['published_at'],  # EXACT date from YouTube
-                "imported_at": datetime.now(timezone.utc).isoformat(),
-                "video_id": newest_comment['video_id'],
-                "video_title": newest_comment['video_title']
-            }
-
-            # Upsert single "last_anchor" document — overwrites previous on each import
-            await db.youtube_last_imported.update_one(
-                {"type": "last_anchor"},
-                {"$set": anchor_doc},
-                upsert=True
-            )
-            logger.info(
-                f"[YouTube] Saved last_anchor: id={anchor_doc['comment_id']} "
-                f"user={anchor_doc['raw_username']} date={anchor_doc['comment_published_at']}"
-            )
-
-            # Also keep history log
             await db.youtube_imports.insert_one({
                 "created_at": datetime.now(timezone.utc),
                 "fecha_desde": fecha_desde,
@@ -4038,6 +4027,23 @@ async def youtube_import_comments(request: YouTubeImportCommentsRequest):
     imported_count = 0
     updated_count = 0
     blocked_count = 0
+    newest_imported_comment: Optional[Dict] = None
+
+    def _parse_youtube_datetime(value: Optional[str]) -> datetime:
+        if not value:
+            return datetime.min.replace(tzinfo=timezone.utc)
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            if parsed.tzinfo is None:
+                return parsed.replace(tzinfo=timezone.utc)
+            return parsed.astimezone(timezone.utc)
+        except Exception:
+            return datetime.min.replace(tzinfo=timezone.utc)
+
+    def _is_newer_comment(candidate: Dict, current: Optional[Dict]) -> bool:
+        if current is None:
+            return True
+        return _parse_youtube_datetime(candidate.get("published_at")) >= _parse_youtube_datetime(current.get("published_at"))
 
     for c in request.comments:
         yt_id = c.get("comment_id")
@@ -4105,12 +4111,38 @@ async def youtube_import_comments(request: YouTubeImportCommentsRequest):
             doc['created_at'] = serialize_datetime(doc['created_at'])
             await db.questions.insert_one(doc)
             imported_count += 1
+            if _is_newer_comment(c, newest_imported_comment):
+                newest_imported_comment = c
 
     # Update batch question_count if a batch was created
     if batch_id and imported_count > 0:
         await db.import_batches.update_one(
             {"id": batch_id},
             {"$set": {"question_count": imported_count}}
+        )
+
+    last_anchor = await get_youtube_last_anchor()
+    if newest_imported_comment:
+        anchor_doc = {
+            "type": "last_anchor",
+            "comment_id": newest_imported_comment.get("comment_id"),
+            "raw_text": newest_imported_comment.get("text"),
+            "raw_username": newest_imported_comment.get("raw_username") or newest_imported_comment.get("youtube_username"),
+            "comment_published_at": newest_imported_comment.get("published_at"),
+            "imported_at": now.isoformat(),
+            "video_id": newest_imported_comment.get("video_id"),
+            "video_title": newest_imported_comment.get("video_title"),
+            "source": "youtube_import_comments"
+        }
+        await db.youtube_last_imported.update_one(
+            {"type": "last_anchor"},
+            {"$set": anchor_doc},
+            upsert=True
+        )
+        last_anchor = await get_youtube_last_anchor()
+        logger.info(
+            f"[YouTube] Saved last_anchor after import: id={anchor_doc['comment_id']} "
+            f"user={anchor_doc['raw_username']} date={anchor_doc['comment_published_at']}"
         )
 
     logger.info(
@@ -4123,7 +4155,8 @@ async def youtube_import_comments(request: YouTubeImportCommentsRequest):
         "questions_imported": imported_count,
         "questions_updated": updated_count,
         "blocked_count": blocked_count,
-        "total": imported_count + updated_count
+        "total": imported_count + updated_count,
+        "last_anchor": last_anchor
     }
 
 

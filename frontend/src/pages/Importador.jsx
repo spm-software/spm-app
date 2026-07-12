@@ -33,6 +33,7 @@ export default function Importador() {
   const [fetchingComments, setFetchingComments] = useState(false);
   const [fetchProgress, setFetchProgress] = useState(0);
   const [youtubeResult, setYoutubeResult] = useState(null);
+  const [lastAnchor, setLastAnchor] = useState(null);
 
   // Check YouTube auth status on mount
   useEffect(() => {
@@ -46,6 +47,7 @@ export default function Importador() {
         ...response.data, 
         loading: false 
       });
+      setLastAnchor(response.data.last_anchor || null);
       
       // The anchor is purely informational now — never auto-cutoff.
       // Manual textarea is always visible (empty by default = no cutoff, full range).
@@ -111,6 +113,7 @@ export default function Importador() {
         ...response.data,
         imported: importResponse.data
       });
+      setLastAnchor(importResponse.data.last_anchor || null);
       
       // Refresh auth/anchor info so the aviso shows the new last comment
       await checkYoutubeAuth();
@@ -165,6 +168,51 @@ Pedro López - Gracias por el contenido! Mi pregunta es: ¿Cuánto tiempo tarda 
 
 @otro_usuario Otra pregunta de ejemplo con formato de username`;
 
+  const renderLastAnchor = () => (
+    <div className="p-4 bg-secondary/40 border border-border rounded-sm space-y-2" data-testid="last-import-info">
+      <div className="flex items-center gap-2 text-xs uppercase tracking-wide text-muted-foreground">
+        <History className="w-3 h-3" />
+        <span>Última pregunta importada · corte actual</span>
+      </div>
+      {lastAnchor ? (
+        <>
+          <p className="text-sm leading-relaxed">
+            <span className="italic">"{lastAnchor.raw_text?.length > 180
+              ? lastAnchor.raw_text.slice(0, 180) + '…'
+              : lastAnchor.raw_text}"</span>
+          </p>
+          <div className="space-y-1 text-xs text-muted-foreground">
+            <p>
+              Usuario: <span className="font-medium text-foreground">{lastAnchor.raw_username || "Desconocido"}</span>
+            </p>
+            <p>
+              Fecha del comentario: <span className="font-medium text-foreground">
+                {lastAnchor.comment_published_at
+                  ? new Date(lastAnchor.comment_published_at).toLocaleString('es-ES', {
+                      day: '2-digit', month: '2-digit', year: 'numeric',
+                      hour: '2-digit', minute: '2-digit'
+                    })
+                  : "Desconocida"}
+              </span>
+            </p>
+            {lastAnchor.video_title && (
+              <p>
+                Vídeo: <span className="font-medium text-foreground">{lastAnchor.video_title}</span>
+              </p>
+            )}
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Este es el punto de corte que debes usar como referencia para no dejar preguntas fuera en la siguiente importación.
+          </p>
+        </>
+      ) : (
+        <p className="text-sm text-muted-foreground">
+          Todavía no hay una última pregunta importada guardada. Se fijará automáticamente cuando entre la primera pregunta nueva desde YouTube.
+        </p>
+      )}
+    </div>
+  );
+
   return (
     <div className="p-8 md:p-12 animate-fade-in">
       {/* Header */}
@@ -202,6 +250,8 @@ Pedro López - Gracias por el contenido! Mi pregunta es: ¿Cuánto tiempo tarda 
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-6">
+                  {renderLastAnchor()}
+
                   {youtubeAuth.loading ? (
                     <div className="flex items-center justify-center py-12">
                       <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
@@ -273,31 +323,6 @@ Pedro López - Gracias por el contenido! Mi pregunta es: ¿Cuánto tiempo tarda 
                           />
                         </div>
                       </div>
-
-                      {/* Last Imported (informational only — never used as auto cutoff) */}
-                      {youtubeAuth.last_anchor && (
-                        <div className="p-4 bg-secondary/40 border border-border rounded-sm space-y-2" data-testid="last-import-info">
-                          <div className="flex items-center gap-2 text-xs uppercase tracking-wide text-muted-foreground">
-                            <History className="w-3 h-3" />
-                            <span>Última importación (informativo)</span>
-                          </div>
-                          <p className="text-sm leading-relaxed">
-                            <span className="italic">"{youtubeAuth.last_anchor.raw_text?.length > 140
-                              ? youtubeAuth.last_anchor.raw_text.slice(0, 140) + '…'
-                              : youtubeAuth.last_anchor.raw_text}"</span>
-                            <span className="text-muted-foreground"> ({youtubeAuth.last_anchor.raw_username}, </span>
-                            <span className="text-muted-foreground">
-                              {new Date(youtubeAuth.last_anchor.comment_published_at).toLocaleString('es-ES', {
-                                day: '2-digit', month: '2-digit', year: 'numeric',
-                                hour: '2-digit', minute: '2-digit'
-                              })})
-                            </span>
-                          </p>
-                          <p className="text-xs text-muted-foreground">
-                            Se descargan siempre todos los comentarios del rango de fechas. Los comentarios ya importados se detectan automáticamente por su ID de YouTube y no se duplican.
-                          </p>
-                        </div>
-                      )}
 
                       {/* Optional manual cutoff */}
                       <div className="space-y-2">

@@ -134,6 +134,14 @@ def test_questions_create_update_confirm_and_delete(client, auth_headers, fake_d
     assert question["real_name"] == "Ana Real"
     assert question["original_text"] == "Hola\n¿Qué es la fe & la gracia?"
 
+    sibling = auth_post(
+        client,
+        "/api/questions",
+        auth_headers,
+        json={"youtube_username": "ANA", "original_text": "¿Otra pregunta de Ana?"},
+    )
+    assert sibling.status_code == 200
+
     updated = auth_put(
         client,
         f"/api/questions/{question['id']}",
@@ -143,6 +151,9 @@ def test_questions_create_update_confirm_and_delete(client, auth_headers, fake_d
     assert updated.status_code == 200
     assert updated.json()["real_name"] == "Ana Confirmada"
     assert fake_db.user_mappings.docs[0]["real_name"] == "Ana Confirmada"
+    sibling_after_update = next(q for q in fake_db.questions.docs if q["id"] == sibling.json()["id"])
+    assert sibling_after_update["real_name"] == "Ana Confirmada"
+    assert sibling_after_update["real_name_confirmed"] is True
 
     confirmed = auth_post(client, f"/api/questions/{question['id']}/confirm-name", auth_headers)
     assert confirmed.status_code == 200
@@ -223,6 +234,51 @@ def test_blocked_comments_skip_youtube_import_and_remove_existing(client, auth_h
     assert imported.status_code == 200
     assert imported.json()["blocked_count"] == 1
     assert imported.json()["questions_imported"] == 1
+
+
+def test_youtube_import_anchor_updates_only_for_new_questions(client, auth_headers):
+    first_comment = {
+        "comment_id": "yt-comment-1",
+        "youtube_username": "@ana",
+        "raw_username": "Ana",
+        "text": "Primera pregunta nueva",
+        "video_id": "video-1",
+        "video_title": "Video uno",
+        "published_at": "2026-07-10T10:00:00Z",
+    }
+
+    imported = auth_post(
+        client,
+        "/api/youtube/import-comments",
+        auth_headers,
+        json={"comments": [first_comment]},
+    )
+    assert imported.status_code == 200
+    assert imported.json()["questions_imported"] == 1
+    assert imported.json()["last_anchor"]["comment_id"] == "yt-comment-1"
+    assert imported.json()["last_anchor"]["raw_text"] == "Primera pregunta nueva"
+
+    duplicate_with_later_date = {
+        **first_comment,
+        "text": "Primera pregunta nueva editada",
+        "published_at": "2026-07-12T10:00:00Z",
+    }
+    updated = auth_post(
+        client,
+        "/api/youtube/import-comments",
+        auth_headers,
+        json={"comments": [duplicate_with_later_date]},
+    )
+    assert updated.status_code == 200
+    assert updated.json()["questions_imported"] == 0
+    assert updated.json()["questions_updated"] == 1
+    assert updated.json()["last_anchor"]["comment_id"] == "yt-comment-1"
+    assert updated.json()["last_anchor"]["raw_text"] == "Primera pregunta nueva"
+    assert updated.json()["last_anchor"]["comment_published_at"] == "2026-07-10T10:00:00Z"
+
+    anchor = auth_get(client, "/api/youtube/last-import-anchor", auth_headers)
+    assert anchor.status_code == 200
+    assert anchor.json()["last_anchor"]["comment_id"] == "yt-comment-1"
 
 
 def test_duplicate_detection_in_batch_and_history(client, auth_headers, fake_db):
