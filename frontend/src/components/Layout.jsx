@@ -10,7 +10,9 @@ import {
   Download,
   LogOut,
   ArrowRight,
-  ArrowUp
+  ArrowUp,
+  Moon,
+  Sun
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
@@ -42,6 +44,7 @@ const workflowSteps = [
 ];
 
 const WORKFLOW_STEP_KEY = "workflowStepIndex";
+const THEME_STORAGE_KEY = "spmTheme";
 
 const getWorkflowIndexFromPath = (pathname, currentIndex) => {
   if (pathname === "/") return 0;
@@ -59,11 +62,25 @@ export default function Layout() {
   const { user, logout } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
+  const [isDarkMode, setIsDarkMode] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return localStorage.getItem(THEME_STORAGE_KEY) === "dark";
+  });
   const [workflowIndex, setWorkflowIndex] = useState(() => {
     if (typeof window === "undefined") return 0;
     const stored = Number(sessionStorage.getItem(WORKFLOW_STEP_KEY));
     return Number.isInteger(stored) && stored >= 0 && stored < workflowSteps.length ? stored : 0;
   });
+
+  useEffect(() => {
+    const root = document.documentElement;
+    root.classList.toggle("dark", isDarkMode);
+    localStorage.setItem(THEME_STORAGE_KEY, isDarkMode ? "dark" : "light");
+    document.querySelector('meta[name="theme-color"]')?.setAttribute(
+      "content",
+      isDarkMode ? "#202124" : "#171713"
+    );
+  }, [isDarkMode]);
 
   useEffect(() => {
     setWorkflowIndex((current) => {
@@ -135,6 +152,10 @@ export default function Layout() {
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
+  const handleToggleTheme = () => {
+    setIsDarkMode((current) => !current);
+  };
+
   const currentStep = workflowSteps[workflowIndex];
   const isLastWorkflowStep = workflowIndex >= workflowSteps.length - 1;
 
@@ -200,6 +221,18 @@ export default function Layout() {
               </span>
             </div>
           )}
+          <button
+            onClick={handleToggleTheme}
+            className="w-full flex items-center gap-3 px-4 py-2.5 rounded-sm text-xs uppercase tracking-wide font-medium text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors"
+            data-testid="theme-toggle-button"
+          >
+            {isDarkMode ? (
+              <Sun className="w-4 h-4" strokeWidth={1.5} />
+            ) : (
+              <Moon className="w-4 h-4" strokeWidth={1.5} />
+            )}
+            {isDarkMode ? "Modo claro" : "Modo oscuro"}
+          </button>
           <button
             onClick={logout}
             className="w-full flex items-center gap-3 px-4 py-2.5 rounded-sm text-xs uppercase tracking-wide font-medium text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors"
@@ -308,10 +341,26 @@ export default function Layout() {
         </div>
         <Outlet />
         <div className="px-4 pb-8 pt-2 md:px-8 md:pb-10">
+          <div className="mx-auto flex w-full max-w-sm flex-col items-center gap-2 sm:flex-row sm:justify-center">
+            <button
+              type="button"
+              onClick={handleToggleTheme}
+              className="flex items-center gap-2 rounded-sm border border-border bg-card px-4 py-2 text-xs font-semibold uppercase tracking-wide text-foreground transition-colors hover:bg-secondary"
+              title={isDarkMode ? "Activar modo claro" : "Activar modo oscuro"}
+              aria-label={isDarkMode ? "Activar modo claro" : "Activar modo oscuro"}
+              data-testid="page-theme-toggle-button"
+            >
+              {isDarkMode ? (
+                <Sun className="h-4 w-4" />
+              ) : (
+                <Moon className="h-4 w-4" />
+              )}
+              {isDarkMode ? "Modo claro" : "Modo oscuro"}
+            </button>
           <button
             type="button"
             onClick={handleScrollToTop}
-            className="mx-auto flex items-center gap-2 rounded-sm border border-border bg-card px-4 py-2 text-xs font-semibold uppercase tracking-wide text-foreground transition-colors hover:bg-secondary"
+            className="flex items-center gap-2 rounded-sm border border-border bg-card px-4 py-2 text-xs font-semibold uppercase tracking-wide text-foreground transition-colors hover:bg-secondary"
             title="Volver al inicio de la página"
             aria-label="Volver al inicio de la página"
             data-testid="page-scroll-to-top-button"
@@ -319,6 +368,7 @@ export default function Layout() {
             <ArrowUp className="h-4 w-4" />
             Volver al inicio
           </button>
+          </div>
         </div>
       </main>
 
