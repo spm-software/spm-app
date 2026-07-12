@@ -137,14 +137,14 @@ export default function Dashboard() {
   const handleGoToEditor = (batchId) => {
     // Store selected batch in sessionStorage and navigate
     sessionStorage.setItem('selectedBatch', batchId);
-    navigate('/editor');
+    navigate('/flujo/clasificar');
   };
 
   const handleGoToReserve = () => {
     sessionStorage.removeItem('selectedBatch');
     sessionStorage.setItem('editorAssignmentFilter', 'reserve');
     sessionStorage.setItem('editorGlobalReserve', 'true');
-    navigate('/editor');
+    navigate('/flujo/reserva');
   };
 
   const handleGoToDistribuir = (batchId) => {
@@ -475,14 +475,17 @@ export default function Dashboard() {
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {[
               { step: 1, title: "Importar", desc: "Cargar comentarios", path: "/importar", icon: Upload },
-              { step: 2, title: "Nombres", desc: "Resolver autores", path: "/editor", icon: Users },
-              { step: 3, title: "Clasificar", desc: "Separar saludos", path: "/editor", icon: Filter },
-              { step: 4, title: "Duplicados", desc: "Buscar y revisar", path: "/editor", icon: Copy },
-              { step: 5, title: "Ortografía", desc: "Corregir preguntas", path: "/editor", icon: Wand2 },
-              { step: 6, title: "Reserva", desc: "Revisar pendientes", action: handleGoToReserve, icon: Inbox },
-              { step: 7, title: "Distribuir", desc: "Crear programas", path: "/distribuir", icon: Layers },
-              { step: 8, title: "Revisar", desc: "Ajustar selección", path: "/editor", icon: ClipboardCheck },
-              { step: 9, title: "Exportar", desc: "TXT y PNG", path: "/exportar", icon: Download },
+              { step: 2, title: "Clasificar", desc: "Separar saludos", path: "/flujo/clasificar", icon: Filter },
+              { step: 3, title: "Dudosas", desc: "Revisar casos dudosos", path: "/flujo/dudosas", icon: ClipboardCheck },
+              { step: 4, title: "Nombres", desc: "Resolver autores", path: "/flujo/nombres", icon: Users },
+              { step: 5, title: "Confirmar nombres", desc: "Validar derivados", path: "/flujo/confirmar-nombres", icon: Check },
+              { step: 6, title: "Duplicados rápido", desc: "Coincidencias directas", path: "/flujo/duplicados-rapido", icon: Copy },
+              { step: 7, title: "Duplicados IA", desc: "Coincidencias semánticas", path: "/flujo/duplicados-ia", icon: Wand2 },
+              { step: 8, title: "Revisar duplicados", desc: "Aceptar o mantener", path: "/flujo/revisar-duplicados", icon: ClipboardCheck },
+              { step: 9, title: "Ortografía", desc: "Corregir preguntas", path: "/flujo/ortografia", icon: Wand2 },
+              { step: 10, title: "Reserva", desc: "Revisar pendientes", action: handleGoToReserve, icon: Inbox },
+              { step: 11, title: "Distribuir", desc: "Crear programas", path: "/distribuir", icon: Layers },
+              { step: 12, title: "Exportar", desc: "TXT y PNG", path: "/exportar", icon: Download },
             ].map((item) => (
               <button
                 key={item.step}

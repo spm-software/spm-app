@@ -836,7 +836,7 @@ export default function Editor({ workflowMode = null }) {
   useEffect(() => {
     const handleWorkflowStep = (event) => {
       const detail = event.detail || {};
-      if (detail.path !== "/editor") return;
+      if (detail.path !== "/editor" && !detail.path?.startsWith("/flujo/")) return;
 
       if (detail.reserve) {
         handleOpenGlobalReserve();
@@ -1700,7 +1700,7 @@ export default function Editor({ workflowMode = null }) {
   const showClassifyActions = showAllActions || workflowMode === "classify";
   const showFastDuplicateActions = showAllActions || workflowMode === "duplicates_fast";
   const showAiDuplicateActions = showAllActions || workflowMode === "duplicates_ai";
-  const showReviewDuplicateActions = showAllActions || workflowMode === "duplicates_ai" || workflowMode === "review_duplicates";
+  const showReviewDuplicateActions = showAllActions || workflowMode === "review_duplicates";
   const showSpellingActions = showAllActions || workflowMode === "spelling";
   const showReserveActions = showAllActions || workflowMode === "reserve";
 

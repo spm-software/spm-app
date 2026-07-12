@@ -19,7 +19,7 @@ import { toast } from "sonner";
 const navItems = [
   { to: "/", icon: LayoutDashboard, label: "Dashboard" },
   { to: "/importar", icon: Upload, label: "Importar" },
-  { to: "/editor", icon: Edit3, label: "Editor" },
+  { to: "/flujo/clasificar", icon: Edit3, label: "Editor" },
   { to: "/distribuir", icon: Layers, label: "Distribuir" },
   { to: "/exportar", icon: Download, label: "Exportar" },
   { to: "/usuarios", icon: Users, label: "Usuarios" },
@@ -45,9 +45,6 @@ const WORKFLOW_STEP_KEY = "workflowStepIndex";
 
 const getWorkflowIndexFromPath = (pathname, currentIndex) => {
   if (pathname === "/") return 0;
-  if (pathname === "/editor") {
-    return workflowSteps[currentIndex]?.path === "/editor" ? currentIndex : 1;
-  }
   const index = workflowSteps.findIndex((step) => step.path === pathname);
   return index >= 0 ? index : currentIndex;
 };
@@ -86,7 +83,7 @@ export default function Layout() {
       sessionStorage.removeItem("selectedBatch");
       sessionStorage.setItem("editorGlobalReserve", "true");
       sessionStorage.setItem("editorAssignmentFilter", "reserve");
-    } else if (step.path === "/editor" || step.path.startsWith("/flujo/")) {
+    } else if (step.path.startsWith("/flujo/")) {
       sessionStorage.removeItem("editorGlobalReserve");
       sessionStorage.removeItem("editorAssignmentFilter");
     }
@@ -245,22 +242,7 @@ export default function Layout() {
 
       <main className="app-main flex-1 overflow-auto pt-16 pb-24 md:pt-0 md:pb-0">
         <div className="sticky top-0 z-30 border-b border-border bg-background/95 px-4 py-3 backdrop-blur md:px-8">
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-            <div className="min-w-0">
-              <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
-                Flujo guiado · paso {workflowIndex + 1} de {workflowSteps.length}
-              </p>
-              <div className="flex items-baseline gap-2">
-                <h2 className="font-heading text-lg font-bold uppercase tracking-tight">
-                  {currentStep.label}
-                </h2>
-                <p className="truncate text-xs text-muted-foreground">
-                  {currentStep.description}
-                </p>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2">
               <div className="workflow-step-strip flex min-w-0 flex-1 overflow-x-auto">
                 {workflowSteps.map((step, index) => {
                   const status = getWorkflowStepStatus(index, workflowIndex);
@@ -322,7 +304,6 @@ export default function Layout() {
               >
                 Paso siguiente
               </button>
-            </div>
           </div>
         </div>
         <Outlet />
