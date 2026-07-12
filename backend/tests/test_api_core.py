@@ -132,7 +132,7 @@ def test_questions_create_update_confirm_and_delete(client, auth_headers, fake_d
     assert created.status_code == 200
     question = created.json()
     assert question["real_name"] == "Ana Real"
-    assert question["original_text"] == "Hola\n¿Qué es la fe & la gracia?"
+    assert question["original_text"] == "Hola ¿Qué es la fe & la gracia?"
 
     sibling = auth_post(
         client,
@@ -196,6 +196,25 @@ def test_import_search_batch_info_and_batch_update(client, auth_headers):
     batches = auth_get(client, "/api/batches", auth_headers)
     assert batches.status_code == 200
     assert batches.json()[0]["is_classified"] is False
+
+
+def test_import_normalizes_blank_lines_inside_questions(client, auth_headers):
+    imported = auth_post(
+        client,
+        "/api/questions/import",
+        auth_headers,
+        json={
+            "raw_text": (
+                "@ana Primera línea de la pregunta.<br><br>\n"
+                "Segunda línea tras una línea en blanco.\n\n"
+                "@luis Otra pregunta."
+            )
+        },
+    )
+    assert imported.status_code == 200
+    questions = imported.json()["questions"]
+    assert questions[0]["original_text"] == "Primera línea de la pregunta. Segunda línea tras una línea en blanco."
+    assert "\n" not in questions[0]["original_text"]
 
 
 def test_blocked_comments_skip_youtube_import_and_remove_existing(client, auth_headers):

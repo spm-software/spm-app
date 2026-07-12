@@ -91,8 +91,14 @@ def clean_html_to_plain_text(text: str) -> str:
     text = re.sub(r"<br\s*/?>", "\n", text, flags=re.IGNORECASE)
     text = re.sub(r"<[^>]+>", "", text)
     text = html.unescape(text)
-    text = re.sub(r"\n{3,}", "\n\n", text)
-    return text.strip()
+    return normalize_question_text(text)
+
+
+def normalize_question_text(text: str) -> str:
+    """Store imported questions as a single readable block."""
+    if not text:
+        return text
+    return re.sub(r"\s+", " ", text).strip()
 
 
 def normalize_username(username: str) -> str:
@@ -127,7 +133,10 @@ def clean_youtube_metadata(text: str) -> str:
     for pattern in patterns:
         cleaned = re.sub(pattern, "", cleaned, flags=re.IGNORECASE | re.MULTILINE)
 
-    return re.sub(r"^\s*\n", "", cleaned).strip()
+    cleaned = re.sub(r"<br\s*/?>", " ", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"<[^>]+>", "", cleaned)
+    cleaned = html.unescape(cleaned)
+    return normalize_question_text(cleaned)
 
 
 def parse_comments(raw_text: str) -> List[Dict[str, Optional[str]]]:

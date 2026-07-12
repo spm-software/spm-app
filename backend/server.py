@@ -319,10 +319,14 @@ def clean_html_to_plain_text(text: str) -> str:
     # 3) Decode HTML entities
     text = html.unescape(text)
 
-    # 4) Collapse 3+ newlines into max 2
-    text = re.sub(r'\n{3,}', '\n\n', text)
+    return normalize_question_text(text)
 
-    return text.strip()
+
+def normalize_question_text(text: str) -> str:
+    """Store imported questions as a single readable block."""
+    if not text:
+        return text
+    return re.sub(r'\s+', ' ', text).strip()
 
 
 def _normalize_username(u: str) -> str:
@@ -453,11 +457,10 @@ def clean_youtube_metadata(text: str) -> str:
     for pattern in patterns:
         cleaned = re.sub(pattern, '', cleaned, flags=re.IGNORECASE | re.MULTILINE)
 
-    # Clean up extra whitespace and newlines at the start
-    cleaned = re.sub(r'^\s*\n', '', cleaned)
-    cleaned = cleaned.strip()
-
-    return cleaned
+    cleaned = re.sub(r'<br\s*/?>', ' ', cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r'<[^>]+>', '', cleaned)
+    cleaned = html.unescape(cleaned)
+    return normalize_question_text(cleaned)
 
 def parse_comments(raw_text: str) -> List[Dict[str, str]]:
     """Parse raw text into individual comments with usernames or real names
