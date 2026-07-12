@@ -11,7 +11,10 @@ import {
   Trash2, 
   Search,
   Save,
-  Loader2
+  Loader2,
+  Pencil,
+  Check,
+  X
 } from "lucide-react";
 import { API_BASE_URL as API } from "@/lib/api";
 
@@ -22,6 +25,10 @@ export default function Usuarios() {
   const [newUsername, setNewUsername] = useState("");
   const [newRealName, setNewRealName] = useState("");
   const [saving, setSaving] = useState(false);
+  const [editingUserId, setEditingUserId] = useState(null);
+  const [editingUsername, setEditingUsername] = useState("");
+  const [editingRealName, setEditingRealName] = useState("");
+  const [savingEditId, setSavingEditId] = useState(null);
 
   useEffect(() => {
     fetchUsers();
@@ -70,6 +77,53 @@ export default function Usuarios() {
     } catch (error) {
       console.error("Error deleting user:", error);
       toast.error("Error al eliminar usuario");
+    }
+  };
+
+  const handleStartEdit = (user) => {
+    setEditingUserId(user.id);
+    setEditingUsername(user.youtube_username || "");
+    setEditingRealName(user.real_name || "");
+  };
+
+  const handleCancelEdit = () => {
+    setEditingUserId(null);
+    setEditingUsername("");
+    setEditingRealName("");
+  };
+
+  const handleSaveUser = async (userId) => {
+    const username = editingUsername.trim();
+    const realName = editingRealName.trim();
+    if (!username || !realName) {
+      toast.error("Usuario y nombre real son obligatorios");
+      return;
+    }
+
+    setSavingEditId(userId);
+    try {
+      await axios.put(`${API}/users/${userId}`, {
+        youtube_username: username.startsWith("@") ? username : `@${username}`,
+        real_name: realName
+      });
+      toast.success("Usuario actualizado y aplicado a sus preguntas");
+      handleCancelEdit();
+      fetchUsers();
+    } catch (error) {
+      console.error("Error updating user:", error);
+      toast.error(error.response?.data?.detail || "Error al actualizar usuario");
+    } finally {
+      setSavingEditId(null);
+    }
+  };
+
+  const handleEditKeyDown = (event, userId) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      handleSaveUser(userId);
+    }
+    if (event.key === "Escape") {
+      handleCancelEdit();
     }
   };
 
@@ -187,36 +241,106 @@ export default function Usuarios() {
                 </div>
               ) : (
                 <div className="space-y-2">
-                  {filteredUsers.map((user) => (
-                    <div
-                      key={user.id}
-                      className="flex items-center justify-between p-4 bg-secondary/30 rounded-sm group hover:bg-secondary/50 transition-colors"
-                      data-testid={`user-item-${user.id}`}
-                    >
-                      <div className="flex items-center gap-4">
-                        <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
-                          <span className="font-bold text-primary">
-                            {user.real_name.charAt(0).toUpperCase()}
-                          </span>
+                  {filteredUsers.map((user) => {
+                    const isEditing = editingUserId === user.id;
+                    return (
+                      <div
+                        key={user.id}
+                        className="flex flex-col gap-3 p-4 bg-secondary/30 rounded-sm group hover:bg-secondary/50 transition-colors sm:flex-row sm:items-center sm:justify-between"
+                        data-testid={`user-item-${user.id}`}
+                      >
+                        <div className="flex min-w-0 flex-1 items-center gap-4">
+                          <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
+                            <span className="font-bold text-primary">
+                              {(isEditing ? editingRealName : user.real_name).charAt(0).toUpperCase() || "?"}
+                            </span>
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            {isEditing ? (
+                              <div className="grid gap-2 sm:grid-cols-[minmax(150px,180px)_minmax(180px,1fr)]">
+                                <Input
+                                  value={editingUsername}
+                                  onChange={(e) => setEditingUsername(e.target.value)}
+                                  className="h-8 rounded-sm font-mono text-xs"
+                                  placeholder="@usuario"
+                                  data-testid={`edit-username-${user.id}`}
+                                  onKeyDown={(e) => handleEditKeyDown(e, user.id)}
+                                />
+                                <Input
+                                  value={editingRealName}
+                                  onChange={(e) => setEditingRealName(e.target.value)}
+                                  className="h-8 rounded-sm text-sm font-medium"
+                                  placeholder="Nombre real"
+                                  data-testid={`edit-realname-${user.id}`}
+                                  onKeyDown={(e) => handleEditKeyDown(e, user.id)}
+                                />
+                              </div>
+                            ) : (
+                              <div className="flex min-w-0 flex-wrap items-center gap-2">
+                                <button
+                                  onClick={() => handleStartEdit(user)}
+                                  className="group/name flex max-w-full items-center gap-1.5 rounded border border-green-200 bg-green-50 px-2 py-1 text-green-800 transition-colors hover:bg-green-100"
+                                  data-testid={`edit-user-name-${user.id}`}
+                                  title="Editar nombre real"
+                                >
+                                  <span className="truncate text-sm font-medium">{user.real_name}</span>
+                                  <Pencil className="h-3 w-3 opacity-0 transition-opacity group-hover/name:opacity-100" />
+                                </button>
+                                <button
+                                  onClick={() => handleStartEdit(user)}
+                                  className="group/user flex items-center gap-1 rounded bg-secondary/50 px-2 py-1 font-mono text-xs text-muted-foreground transition-colors hover:bg-secondary"
+                                  data-testid={`edit-user-username-${user.id}`}
+                                  title="Editar usuario de YouTube"
+                                >
+                                  {user.youtube_username}
+                                  <Pencil className="h-2.5 w-2.5 opacity-0 transition-opacity group-hover/user:opacity-100" />
+                                </button>
+                              </div>
+                            )}
+                          </div>
                         </div>
-                        <div>
-                          <p className="font-medium">{user.real_name}</p>
-                          <p className="text-xs text-muted-foreground font-mono">
-                            {user.youtube_username}
-                          </p>
+                        <div className="flex items-center justify-end gap-2">
+                          {isEditing ? (
+                            <>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleSaveUser(user.id)}
+                                disabled={savingEditId === user.id}
+                                className="text-green-700 hover:bg-green-50 hover:text-green-800"
+                                data-testid={`save-user-${user.id}`}
+                              >
+                                {savingEditId === user.id ? (
+                                  <Loader2 className="h-4 w-4 animate-spin" />
+                                ) : (
+                                  <Check className="h-4 w-4" />
+                                )}
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={handleCancelEdit}
+                                className="text-muted-foreground hover:bg-secondary"
+                                data-testid={`cancel-user-${user.id}`}
+                              >
+                                <X className="h-4 w-4" />
+                              </Button>
+                            </>
+                          ) : (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleDeleteUser(user.id)}
+                              className="opacity-100 text-destructive hover:text-destructive sm:opacity-0 sm:group-hover:opacity-100 transition-opacity"
+                              data-testid={`delete-user-${user.id}`}
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </Button>
+                          )}
                         </div>
                       </div>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleDeleteUser(user.id)}
-                        className="opacity-0 group-hover:opacity-100 transition-opacity text-destructive hover:text-destructive"
-                        data-testid={`delete-user-${user.id}`}
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </Button>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </ScrollArea>

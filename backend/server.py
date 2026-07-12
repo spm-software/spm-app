@@ -77,6 +77,10 @@ class UserMappingCreate(BaseModel):
     youtube_username: str
     real_name: str
 
+class UserMappingUpdate(BaseModel):
+    youtube_username: Optional[str] = None
+    real_name: Optional[str] = None
+
 class Question(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
@@ -1530,6 +1534,55 @@ async def create_user_mapping(data: UserMappingCreate):
     doc['updated_at'] = serialize_datetime(doc['updated_at'])
     await db.user_mappings.insert_one(doc)
     return mapping
+
+@api_router.put("/users/{user_id}", response_model=UserMapping)
+async def update_user_mapping(user_id: str, data: UserMappingUpdate):
+    existing = await db.user_mappings.find_one({"id": user_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+
+    next_username = data.youtube_username.strip() if data.youtube_username is not None else existing.get("youtube_username", "")
+    next_real_name = data.real_name.strip() if data.real_name is not None else existing.get("real_name", "")
+
+    if not next_username or not next_real_name:
+        raise HTTPException(status_code=400, detail="Usuario y nombre real son obligatorios")
+
+    if not next_username.startswith("@"):
+        next_username = f"@{next_username}"
+
+    normalized_next = _normalize_username(next_username)
+    duplicate = await db.user_mappings.find_one({
+        "id": {"$ne": user_id},
+        "youtube_username": {"$regex": f"^@*{re.escape(normalized_next)}$", "$options": "i"}
+    }, {"_id": 0})
+    if duplicate:
+        raise HTTPException(status_code=409, detail="Ya existe un usuario con ese @")
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    await db.user_mappings.update_one(
+        {"id": user_id},
+        {"$set": {
+            "youtube_username": next_username,
+            "real_name": next_real_name,
+            "updated_at": now_iso
+        }}
+    )
+
+    old_username_pattern = f"^@*{re.escape(_normalize_username(existing.get('youtube_username', '')))}$"
+    await db.questions.update_many(
+        {"youtube_username": {"$regex": old_username_pattern, "$options": "i"}},
+        {"$set": {
+            "youtube_username": next_username,
+            "real_name": next_real_name,
+            "real_name_confirmed": True
+        }}
+    )
+
+    updated = await db.user_mappings.find_one({"id": user_id}, {"_id": 0})
+    for key in ['created_at', 'updated_at']:
+        if isinstance(updated.get(key), str):
+            updated[key] = deserialize_datetime(updated[key])
+    return UserMapping(**updated)
 
 @api_router.delete("/users/{user_id}")
 async def delete_user_mapping(user_id: str):

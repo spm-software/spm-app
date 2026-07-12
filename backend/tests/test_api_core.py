@@ -107,13 +107,33 @@ def test_allowed_emails_are_normalized_deduped_listed_and_deleted(client, auth_h
     assert auth_delete(client, "/api/allowed-emails/missing", auth_headers).status_code == 404
 
 
-def test_user_mapping_create_updates_and_delete(client, auth_headers):
+def test_user_mapping_create_updates_and_delete(client, auth_headers, fake_db):
     created = auth_post(client, "/api/users", auth_headers, json={"youtube_username": "@ana", "real_name": "Ana"}).json()
     assert created["real_name"] == "Ana"
 
     updated = auth_post(client, "/api/users", auth_headers, json={"youtube_username": "@ana", "real_name": "Ana Lopez"}).json()
     assert updated["id"] == created["id"]
     assert updated["real_name"] == "Ana Lopez"
+
+    fake_db.questions.docs.append({
+        "id": "q-ana",
+        "youtube_username": "@ana",
+        "real_name": "Ana Lopez",
+        "real_name_confirmed": False,
+        "original_text": "Pregunta de Ana",
+    })
+    edited = auth_put(
+        client,
+        f"/api/users/{created['id']}",
+        auth_headers,
+        json={"youtube_username": "ana-canal", "real_name": "Ana Confirmada"},
+    )
+    assert edited.status_code == 200
+    assert edited.json()["youtube_username"] == "@ana-canal"
+    assert edited.json()["real_name"] == "Ana Confirmada"
+    assert fake_db.questions.docs[0]["youtube_username"] == "@ana-canal"
+    assert fake_db.questions.docs[0]["real_name"] == "Ana Confirmada"
+    assert fake_db.questions.docs[0]["real_name_confirmed"] is True
 
     listed = auth_get(client, "/api/users", auth_headers).json()
     assert len(listed) == 1
