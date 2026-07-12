@@ -668,6 +668,7 @@ export default function Editor() {
   const [showSearchModal, setShowSearchModal] = useState(false);
   const [showOnlyDuplicates, setShowOnlyDuplicates] = useState(false);
   const [showOnlyNoName, setShowOnlyNoName] = useState(false);
+  const [showOnlyUnconfirmedNames, setShowOnlyUnconfirmedNames] = useState(false);
   const [assignmentFilter, setAssignmentFilter] = useState(() => (
     typeof window !== "undefined"
       ? sessionStorage.getItem('editorAssignmentFilter') || "all"
@@ -777,6 +778,7 @@ export default function Editor() {
   const handleSelectBatch = (batchId) => {
     setGlobalReserveMode(false);
     setAssignmentFilter("all");
+    setShowOnlyUnconfirmedNames(false);
     setSelectedBatch(batchId);
   };
 
@@ -787,6 +789,7 @@ export default function Editor() {
     setClasificationFilter("pregunta");
     setShowOnlyDuplicates(false);
     setShowOnlyNoName(false);
+    setShowOnlyUnconfirmedNames(false);
   };
 
   useEffect(() => {
@@ -805,9 +808,18 @@ export default function Editor() {
         setAssignmentFilter("all");
         setShowOnlyDuplicates(false);
         setShowOnlyNoName(false);
+        setShowOnlyUnconfirmedNames(false);
         if (fallbackBatch) {
           setSelectedBatch(fallbackBatch);
         }
+      }
+
+      if (detail.key === "names" || detail.key === "confirm_names") {
+        setAssignmentFilter("all");
+        setClasificationFilter("all");
+        setShowOnlyDuplicates(false);
+        setShowOnlyNoName(false);
+        setShowOnlyUnconfirmedNames(true);
       }
 
       if (detail.key === "review_doubtful") {
@@ -815,10 +827,12 @@ export default function Editor() {
         setClasificationFilter("dudoso");
         setShowOnlyDuplicates(false);
         setShowOnlyNoName(false);
+        setShowOnlyUnconfirmedNames(false);
       }
 
       if (detail.key === "review_duplicates") {
         setShowOnlyNoName(false);
+        setShowOnlyUnconfirmedNames(false);
         if (duplicates.length > 0) {
           setShowDuplicatesModal(true);
         } else {
@@ -1924,12 +1938,40 @@ export default function Editor() {
             <span><strong>{distributableQuestions.length}</strong> distribuibles visibles</span>
           </div>
           {(() => {
+            const unconfirmedNameCount = questions.filter(q => getNameState(q) !== "confirmed").length;
+            return unconfirmedNameCount > 0 ? (
+              <button
+                onClick={() => {
+                  setShowOnlyUnconfirmedNames(!showOnlyUnconfirmedNames);
+                  if (!showOnlyUnconfirmedNames) {
+                    setShowOnlyDuplicates(false);
+                    setShowOnlyNoName(false);
+                  }
+                }}
+                className={`flex items-center gap-2 px-3 py-1 rounded transition-colors cursor-pointer border ${
+                  showOnlyUnconfirmedNames
+                    ? 'bg-green-600 text-white border-green-600'
+                    : 'hover:bg-green-50 border-green-400'
+                }`}
+                title={showOnlyUnconfirmedNames ? "Ver todas las preguntas" : "Filtrar nombres no confirmados"}
+              >
+                <div className={`w-3 h-3 rounded-full ${showOnlyUnconfirmedNames ? 'bg-white' : 'bg-green-500'}`} />
+                <span className={`font-medium ${showOnlyUnconfirmedNames ? '' : 'text-green-700'}`}>
+                  <strong>{unconfirmedNameCount}</strong> nombres no confirmados
+                </span>
+              </button>
+            ) : null;
+          })()}
+          {(() => {
             const noNameCount = questions.filter(q => getNameState(q) === "missing").length;
             return noNameCount > 0 ? (
               <button
                 onClick={() => {
                   setShowOnlyNoName(!showOnlyNoName);
-                  if (!showOnlyNoName) setShowOnlyDuplicates(false);
+                  if (!showOnlyNoName) {
+                    setShowOnlyDuplicates(false);
+                    setShowOnlyUnconfirmedNames(false);
+                  }
                 }}
                 className={`flex items-center gap-2 px-3 py-1 rounded transition-colors cursor-pointer border ${
                   showOnlyNoName 
@@ -1949,7 +1991,10 @@ export default function Editor() {
             <button
               onClick={() => {
                 setShowOnlyDuplicates(!showOnlyDuplicates);
-                if (!showOnlyDuplicates) setShowOnlyNoName(false);
+                if (!showOnlyDuplicates) {
+                  setShowOnlyNoName(false);
+                  setShowOnlyUnconfirmedNames(false);
+                }
               }}
               className={`flex items-center gap-2 px-3 py-1 rounded transition-colors cursor-pointer border ${
                 showOnlyDuplicates 
@@ -2011,6 +2056,7 @@ export default function Editor() {
               setAssignmentFilter(option.value);
               setShowOnlyDuplicates(false);
               setShowOnlyNoName(false);
+              setShowOnlyUnconfirmedNames(false);
             }}
             className={`flex items-center gap-2 px-3 py-1.5 rounded-sm border text-xs transition-colors ${
               assignmentFilter === option.value
@@ -2068,10 +2114,11 @@ export default function Editor() {
                   // Classification pills take precedence — clear mutex filters
                   setShowOnlyDuplicates(false);
                   setShowOnlyNoName(false);
+                  setShowOnlyUnconfirmedNames(false);
                   setAssignmentFilter("all");
                 }}
                 className={`flex items-center gap-2 px-3 py-1.5 rounded-sm border text-xs transition-colors ${
-                  clasificationFilter === p.value && !showOnlyDuplicates && !showOnlyNoName
+                  clasificationFilter === p.value && !showOnlyDuplicates && !showOnlyNoName && !showOnlyUnconfirmedNames
                     ? 'bg-foreground text-background border-foreground'
                     : 'border-border hover:bg-secondary/50'
                 }`}
@@ -2112,6 +2159,8 @@ export default function Editor() {
             }
             if (showOnlyDuplicates) {
               filteredQuestions = filteredQuestions.filter(q => q.is_duplicate);
+            } else if (showOnlyUnconfirmedNames) {
+              filteredQuestions = filteredQuestions.filter(q => getNameState(q) !== "confirmed");
             } else if (showOnlyNoName) {
               filteredQuestions = filteredQuestions.filter(q => getNameState(q) === "missing");
             } else if (assignmentFilter === "all" && clasificationFilter !== "all" && questions.some(q => q.clasificacion)) {
