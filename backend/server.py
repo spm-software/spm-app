@@ -235,8 +235,9 @@ def deserialize_datetime(obj):
 
 async def get_real_name(youtube_username: str) -> Optional[str]:
     """Get real name from user mapping"""
+    username_pattern = f"^@*{re.escape(_normalize_username(youtube_username))}$"
     mapping = await db.user_mappings.find_one(
-        {"youtube_username": youtube_username},
+        {"youtube_username": {"$regex": username_pattern, "$options": "i"}},
         {"_id": 0}
     )
     if mapping:
@@ -419,6 +420,26 @@ async def build_clasificacion_filter_no_batch() -> Dict:
 
 def get_question_user_key(question: Dict) -> str:
     return (question.get("real_name") or question.get("youtube_username") or "").strip().lower()
+
+
+async def apply_stored_name_state(questions: List[Dict]) -> List[Dict]:
+    """Mark questions as confirmed in API responses when their user exists in mappings."""
+    if not questions:
+        return questions
+
+    mappings = await db.user_mappings.find({}, {"_id": 0, "youtube_username": 1, "real_name": 1}).to_list(5000)
+    names_by_user = {
+        _normalize_username(mapping.get("youtube_username")): mapping.get("real_name")
+        for mapping in mappings
+        if mapping.get("youtube_username") and mapping.get("real_name")
+    }
+
+    for question in questions:
+        stored_name = names_by_user.get(_normalize_username(question.get("youtube_username")))
+        if stored_name:
+            question["real_name"] = stored_name
+            question["real_name_confirmed"] = True
+    return questions
 
 
 
@@ -1617,7 +1638,7 @@ async def get_questions(
     for q in questions:
         if isinstance(q.get('created_at'), str):
             q['created_at'] = deserialize_datetime(q['created_at'])
-    return questions
+    return await apply_stored_name_state(questions)
 
 @api_router.get("/questions/reserve", response_model=List[Question])
 async def get_reserve_questions():
@@ -1642,17 +1663,19 @@ async def get_reserve_questions():
     for q in questions:
         if isinstance(q.get('created_at'), str):
             q['created_at'] = deserialize_datetime(q['created_at'])
-    return questions
+    return await apply_stored_name_state(questions)
 
 @api_router.post("/questions", response_model=Question)
 async def create_question(data: QuestionCreate):
     real_name = await get_real_name(data.youtube_username)
+    real_name_confirmed = bool(real_name)
     if not real_name:
         real_name = await extract_display_name(data.youtube_username)
 
     question = Question(
         youtube_username=data.youtube_username,
         real_name=real_name,
+        real_name_confirmed=real_name_confirmed,
         original_text=clean_html_to_plain_text(data.original_text)
     )
     doc = question.model_dump()
@@ -1858,14 +1881,17 @@ async def import_comments(data: CommentImport):
     for comment in comments:
         # Check if real_name came from parsing
         real_name = comment.get("real_name")
+        real_name_confirmed = False
         if not real_name:
             real_name = await get_real_name(comment["youtube_username"])
+            real_name_confirmed = bool(real_name)
         if not real_name:
             real_name = await extract_display_name(comment["youtube_username"])
 
         question = Question(
             youtube_username=comment["youtube_username"],
             real_name=real_name,
+            real_name_confirmed=real_name_confirmed,
             original_text=clean_html_to_plain_text(comment["original_text"]),
             import_batch_id=batch.id
         )
@@ -2417,7 +2443,7 @@ async def update_names_from_mappings(batch_id: str):
     updated = 0
     for question in questions:
         stored_name = await get_real_name(question.get("youtube_username", ""))
-        if stored_name and stored_name != question.get("real_name"):
+        if stored_name and (stored_name != question.get("real_name") or question.get("real_name_confirmed") is not True):
             await db.questions.update_one(
                 {"id": question["id"]},
                 {"$set": {"real_name": stored_name, "real_name_confirmed": True}}
@@ -4098,6 +4124,7 @@ async def youtube_import_comments(request: YouTubeImportCommentsRequest):
                 await db.import_batches.insert_one(batch_doc)
 
             real_name = await get_real_name(username)
+            real_name_confirmed = bool(real_name)
             if not real_name:
                 real_name = await extract_display_name(username)
 
@@ -4107,6 +4134,7 @@ async def youtube_import_comments(request: YouTubeImportCommentsRequest):
                 youtube_video_id=video_id,
                 youtube_video_title=video_title,
                 real_name=real_name,
+                real_name_confirmed=real_name_confirmed,
                 original_text=text,
                 import_batch_id=batch_id
             )

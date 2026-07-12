@@ -1,5 +1,6 @@
 import copy
 import os
+import re
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -161,6 +162,10 @@ class FakeCollection:
                         return False
                     if op == "$lt" and (actual is None or actual >= value):
                         return False
+                    if op == "$regex":
+                        flags = re.IGNORECASE if expected.get("$options") == "i" else 0
+                        if actual is None or not re.search(value, str(actual), flags):
+                            return False
                 continue
             if actual != expected:
                 return False

@@ -132,6 +132,7 @@ def test_questions_create_update_confirm_and_delete(client, auth_headers, fake_d
     assert created.status_code == 200
     question = created.json()
     assert question["real_name"] == "Ana Real"
+    assert question["real_name_confirmed"] is True
     assert question["original_text"] == "Hola ¿Qué es la fe & la gracia?"
 
     sibling = auth_post(
@@ -141,6 +142,8 @@ def test_questions_create_update_confirm_and_delete(client, auth_headers, fake_d
         json={"youtube_username": "ANA", "original_text": "¿Otra pregunta de Ana?"},
     )
     assert sibling.status_code == 200
+    assert sibling.json()["real_name"] == "Ana Real"
+    assert sibling.json()["real_name_confirmed"] is True
 
     updated = auth_put(
         client,
@@ -215,6 +218,44 @@ def test_import_normalizes_blank_lines_inside_questions(client, auth_headers):
     questions = imported.json()["questions"]
     assert questions[0]["original_text"] == "Primera línea de la pregunta. Segunda línea tras una línea en blanco."
     assert "\n" not in questions[0]["original_text"]
+
+
+def test_update_names_confirms_existing_stored_name(client, auth_headers, fake_db):
+    fake_db.user_mappings.docs.append({
+        "id": "user-ana",
+        "youtube_username": "@ana",
+        "real_name": "Ana Real",
+    })
+    fake_db.import_batches.docs.append({
+        "id": "batch-names",
+        "created_at": "2026-06-01T10:00:00+00:00",
+        "question_count": 1,
+        "is_distributed": False,
+        "num_programs": 4,
+    })
+    fake_db.questions.docs.append({
+        "id": "q-ana",
+        "youtube_username": "ANA",
+        "real_name": "Ana",
+        "real_name_confirmed": False,
+        "original_text": "Pregunta",
+        "import_batch_id": "batch-names",
+        "clasificacion": "pregunta",
+        "is_greeting": False,
+        "is_duplicate": False,
+    })
+
+    listed = auth_get(client, "/api/questions", auth_headers, params={"batch_id": "batch-names"})
+    assert listed.status_code == 200
+    assert listed.json()[0]["real_name"] == "Ana Real"
+    assert listed.json()[0]["real_name_confirmed"] is True
+    assert fake_db.questions.docs[0]["real_name_confirmed"] is False
+
+    response = auth_post(client, "/api/questions/update-names/batch-names", auth_headers)
+    assert response.status_code == 200
+    assert response.json()["updated_count"] == 1
+    assert fake_db.questions.docs[0]["real_name_confirmed"] is True
+    assert fake_db.questions.docs[0]["real_name"] == "Ana Real"
 
 
 def test_blocked_comments_skip_youtube_import_and_remove_existing(client, auth_headers):
