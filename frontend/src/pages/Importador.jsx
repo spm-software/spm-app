@@ -67,6 +67,15 @@ export default function Importador() {
     }
   };
 
+  const formatImportRangeName = (from, to) => {
+    if (!from || !to) return "";
+    const format = (value) => {
+      const [year, month, day] = value.split("-");
+      return day && month ? `${day}/${month}` : value;
+    };
+    return `${format(from)} al ${format(to)}`;
+  };
+
   const handleFetchYouTubeComments = async () => {
     if (!fechaDesde || !fechaHasta) {
       toast.error("Selecciona el rango de fechas");
@@ -104,7 +113,9 @@ export default function Importador() {
       setFetchProgress(85);
       
       const importResponse = await axios.post(`${API}/youtube/import-comments`, {
-        comments: response.data.comments
+        comments: response.data.comments,
+        batch_name: formatImportRangeName(fechaDesde, fechaHasta),
+        batch_created_at: fechaHasta
       });
       
       setFetchProgress(100);

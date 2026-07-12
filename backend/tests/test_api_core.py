@@ -296,7 +296,7 @@ def test_blocked_comments_skip_youtube_import_and_remove_existing(client, auth_h
     assert imported.json()["questions_imported"] == 1
 
 
-def test_youtube_import_anchor_updates_only_for_new_questions(client, auth_headers):
+def test_youtube_import_anchor_updates_only_for_new_questions(client, auth_headers, fake_db):
     first_comment = {
         "comment_id": "yt-comment-1",
         "youtube_username": "@ana",
@@ -311,12 +311,18 @@ def test_youtube_import_anchor_updates_only_for_new_questions(client, auth_heade
         client,
         "/api/youtube/import-comments",
         auth_headers,
-        json={"comments": [first_comment]},
+        json={
+            "comments": [first_comment],
+            "batch_name": "16/06 al 30/06",
+            "batch_created_at": "2026-06-30",
+        },
     )
     assert imported.status_code == 200
     assert imported.json()["questions_imported"] == 1
     assert imported.json()["last_anchor"]["comment_id"] == "yt-comment-1"
     assert imported.json()["last_anchor"]["raw_text"] == "Primera pregunta nueva"
+    assert fake_db.import_batches.docs[0]["name"] == "16/06 al 30/06"
+    assert fake_db.import_batches.docs[0]["created_at"].startswith("2026-06-30")
 
     duplicate_with_later_date = {
         **first_comment,

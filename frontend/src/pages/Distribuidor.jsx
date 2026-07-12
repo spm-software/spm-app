@@ -182,7 +182,7 @@ export default function Distribuidor() {
             <SelectContent>
               {batches.map((batch) => (
                 <SelectItem key={batch.id} value={batch.id}>
-                  {new Date(batch.created_at).toLocaleDateString('es-ES')} ({batch.question_count})
+                  {batch.name || new Date(batch.created_at).toLocaleDateString('es-ES')} ({batch.question_count})
                 </SelectItem>
               ))}
             </SelectContent>

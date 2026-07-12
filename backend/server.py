@@ -4034,6 +4034,8 @@ async def youtube_fetch_comments(request: YouTubeFetchRequest):
 
 class YouTubeImportCommentsRequest(BaseModel):
     comments: List[Dict]
+    batch_name: Optional[str] = None
+    batch_created_at: Optional[str] = None
 
 
 @api_router.post("/youtube/import-comments")
@@ -4073,6 +4075,18 @@ async def youtube_import_comments(request: YouTubeImportCommentsRequest):
         if current is None:
             return True
         return _parse_youtube_datetime(candidate.get("published_at")) >= _parse_youtube_datetime(current.get("published_at"))
+
+    def _parse_batch_created_at(value: Optional[str]) -> datetime:
+        if not value:
+            return now
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            parsed = parsed.astimezone(timezone.utc)
+            return parsed.replace(hour=23, minute=59, second=59)
+        except Exception:
+            return now
 
     for c in request.comments:
         yt_id = c.get("comment_id")
@@ -4117,7 +4131,11 @@ async def youtube_import_comments(request: YouTubeImportCommentsRequest):
         else:
             # Lazy-create the batch on first new question
             if batch_id is None:
-                batch = ImportBatch(question_count=0)
+                batch = ImportBatch(
+                    name=request.batch_name.strip() if request.batch_name and request.batch_name.strip() else None,
+                    created_at=_parse_batch_created_at(request.batch_created_at),
+                    question_count=0
+                )
                 batch_id = batch.id
                 batch_doc = batch.model_dump()
                 batch_doc['created_at'] = serialize_datetime(batch_doc['created_at'])
