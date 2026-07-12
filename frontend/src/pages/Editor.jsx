@@ -1706,13 +1706,13 @@ export default function Editor({ workflowMode = null }) {
 
   return (
     <div className="p-6 md:p-10 animate-fade-in">
-      <div className="fixed bottom-5 right-5 z-50">
+      <div className="fixed right-4 top-[4.75rem] z-40 md:right-5 md:top-5">
         <Button
           variant="default"
-          size="lg"
+          size="sm"
           onClick={handleUndoLastAction}
           disabled={undoStack.length === 0 || undoing}
-          className="rounded-sm shadow-lg uppercase tracking-wide text-xs"
+          className="rounded-full shadow-lg uppercase tracking-wide text-xs"
           data-testid="undo-last-action-button"
           title={
             undoStack.length > 0
