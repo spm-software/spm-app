@@ -133,13 +133,19 @@ const EditableName = ({ question, onSave }) => {
   return (
     <button
       onClick={() => setIsEditing(true)}
-      className="flex items-center gap-1.5 px-2 py-1 rounded hover:bg-secondary/50 transition-colors group flex-shrink-0"
+      className={`flex items-center gap-1.5 px-2 py-1 rounded transition-colors group flex-shrink-0 ${
+        question.real_name_confirmed
+          ? "bg-green-50 text-green-800 border border-green-200 hover:bg-green-100"
+          : "hover:bg-secondary/50"
+      }`}
       data-testid={`name-edit-button-${question.id}`}
     >
       <span className="font-medium text-sm">
         {question.real_name || "Sin nombre"}
       </span>
-      <Pencil className="w-3 h-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
+      <Pencil className={`w-3 h-3 opacity-0 group-hover:opacity-100 transition-opacity ${
+        question.real_name_confirmed ? "text-green-700" : "text-muted-foreground"
+      }`} />
     </button>
   );
 };
@@ -199,8 +205,12 @@ const EditableUsername = ({ question, onSave }) => {
   return (
     <button
       onClick={() => setIsEditing(true)}
-      className="font-mono text-xs text-muted-foreground bg-secondary/50 px-2 py-1 rounded flex-shrink-0 hover:bg-secondary transition-colors group flex items-center gap-1"
-      title="Click para editar username"
+      className={`font-mono text-xs px-2 py-1 rounded flex-shrink-0 transition-colors group flex items-center gap-1 ${
+        question.real_name_confirmed
+          ? "bg-green-50 text-green-800 border border-green-200 hover:bg-green-100"
+          : "bg-secondary/50 text-muted-foreground hover:bg-secondary"
+      }`}
+      title={question.real_name_confirmed ? "Usuario con nombre confirmado" : "Click para editar username"}
       data-testid={`username-edit-button-${question.id}`}
     >
       {question.youtube_username}
