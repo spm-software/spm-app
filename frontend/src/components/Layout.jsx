@@ -28,10 +28,12 @@ const navItems = [
 
 const workflowSteps = [
   { key: "import", label: "Importar", path: "/importar", description: "Cargar comentarios", actionTestId: "import-button", actionLabel: "Importar" },
+  { key: "names", label: "Nombres", path: "/editor", description: "Actualizar autores", actionTestId: "update-names-button", actionLabel: "Actualizar nombres" },
+  { key: "confirm_names", label: "Confirmar nombres", path: "/editor", description: "Validar nombres derivados", actionTestId: "confirm-derived-names-button", actionLabel: "Confirmar nombres" },
   { key: "classify", label: "Clasificar", path: "/editor", description: "Separar saludos y preguntas", actionTestId: "clasificar-ia-button", actionLabel: "Clasificar" },
   { key: "review_doubtful", label: "Revisar dudosas", path: "/editor", description: "Confirmar las que son pregunta", actionTestId: "filter-pill-dudoso", actionLabel: "Ver dudosas" },
-  { key: "names", label: "Nombres", path: "/editor", description: "Actualizar autores", actionTestId: "update-names-button", actionLabel: "Actualizar nombres" },
-  { key: "duplicates_ai", label: "Duplicados IA", path: "/editor", description: "Buscar coincidencias", actionTestId: "check-duplicates-ai-button", actionLabel: "Buscar duplicados IA" },
+  { key: "duplicates_fast", label: "Duplicados rápido", path: "/editor", description: "Buscar coincidencias exactas", actionTestId: "check-duplicates-button", actionLabel: "Duplicados rápido" },
+  { key: "duplicates_ai", label: "Duplicados IA", path: "/editor", description: "Buscar coincidencias semánticas", actionTestId: "check-duplicates-ai-button", actionLabel: "Buscar con IA" },
   { key: "review_duplicates", label: "Revisar duplicados", path: "/editor", description: "Aceptar o mantener", viewOnly: true, actionLabel: "Ver duplicados" },
   { key: "spelling", label: "Ortografía", path: "/editor", description: "Corregir preguntas finales", actionTestId: "correct-all-button", actionLabel: "Corregir" },
   { key: "reserve", label: "Reserva", path: "/editor", description: "Incluir pendientes a mano", reserve: true, actionTestId: "open-reserve-button", actionLabel: "Ver reserva" },
