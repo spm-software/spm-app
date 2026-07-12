@@ -28,15 +28,15 @@ const navItems = [
 
 const workflowSteps = [
   { key: "import", label: "Importar", path: "/importar", description: "Cargar comentarios", actionTestId: "import-button", actionLabel: "Importar" },
-  { key: "classify", label: "Clasificar", path: "/editor", description: "Separar saludos y preguntas", actionTestId: "clasificar-ia-button", actionLabel: "Clasificar" },
-  { key: "review_doubtful", label: "Revisar dudosas", path: "/editor", description: "Confirmar las que son pregunta", actionTestId: "filter-pill-dudoso", actionLabel: "Ver dudosas" },
-  { key: "names", label: "Nombres", path: "/editor", description: "Actualizar autores", actionTestId: "update-names-button", actionLabel: "Actualizar nombres" },
-  { key: "confirm_names", label: "Confirmar nombres", path: "/editor", description: "Validar nombres derivados", actionTestId: "confirm-derived-names-button", actionLabel: "Confirmar nombres" },
-  { key: "duplicates_fast", label: "Duplicados rápido", path: "/editor", description: "Buscar coincidencias exactas", actionTestId: "check-duplicates-button", actionLabel: "Duplicados rápido" },
-  { key: "duplicates_ai", label: "Duplicados IA", path: "/editor", description: "Buscar coincidencias semánticas", actionTestId: "check-duplicates-ai-button", actionLabel: "Buscar con IA" },
-  { key: "review_duplicates", label: "Revisar duplicados", path: "/editor", description: "Aceptar o mantener", viewOnly: true, actionLabel: "Ver duplicados" },
-  { key: "spelling", label: "Ortografía", path: "/editor", description: "Corregir preguntas finales", actionTestId: "correct-all-button", actionLabel: "Corregir" },
-  { key: "reserve", label: "Reserva", path: "/editor", description: "Incluir pendientes a mano", reserve: true, actionTestId: "open-reserve-button", actionLabel: "Ver reserva" },
+  { key: "classify", label: "Clasificar", path: "/flujo/clasificar", description: "Separar saludos y preguntas", actionTestId: "clasificar-ia-button", actionLabel: "Clasificar" },
+  { key: "review_doubtful", label: "Revisar dudosas", path: "/flujo/dudosas", description: "Confirmar las que son pregunta", actionTestId: "filter-pill-dudoso", actionLabel: "Ver dudosas" },
+  { key: "names", label: "Nombres", path: "/flujo/nombres", description: "Actualizar autores", actionTestId: "update-names-button", actionLabel: "Actualizar nombres" },
+  { key: "confirm_names", label: "Confirmar nombres", path: "/flujo/confirmar-nombres", description: "Validar nombres derivados", actionTestId: "confirm-derived-names-button", actionLabel: "Confirmar nombres" },
+  { key: "duplicates_fast", label: "Duplicados rápido", path: "/flujo/duplicados-rapido", description: "Buscar coincidencias exactas", actionTestId: "check-duplicates-button", actionLabel: "Duplicados rápido" },
+  { key: "duplicates_ai", label: "Duplicados IA", path: "/flujo/duplicados-ia", description: "Buscar coincidencias semánticas", actionTestId: "check-duplicates-ai-button", actionLabel: "Buscar con IA" },
+  { key: "review_duplicates", label: "Revisar duplicados", path: "/flujo/revisar-duplicados", description: "Aceptar o mantener", viewOnly: true, actionLabel: "Ver duplicados" },
+  { key: "spelling", label: "Ortografía", path: "/flujo/ortografia", description: "Corregir preguntas finales", actionTestId: "correct-all-button", actionLabel: "Corregir" },
+  { key: "reserve", label: "Reserva", path: "/flujo/reserva", description: "Incluir pendientes a mano", reserve: true, actionTestId: "open-reserve-button", actionLabel: "Ver reserva" },
   { key: "distribute", label: "Distribuir", path: "/distribuir", description: "Crear programas", actionTestId: "distribute-button", actionLabel: "Distribuir" },
   { key: "export", label: "Exportar", path: "/exportar", description: "Descargar TXT y PNG", actionTestId: "export-all-button", actionLabel: "Exportar" },
 ];
@@ -86,7 +86,7 @@ export default function Layout() {
       sessionStorage.removeItem("selectedBatch");
       sessionStorage.setItem("editorGlobalReserve", "true");
       sessionStorage.setItem("editorAssignmentFilter", "reserve");
-    } else if (step.path === "/editor") {
+    } else if (step.path === "/editor" || step.path.startsWith("/flujo/")) {
       sessionStorage.removeItem("editorGlobalReserve");
       sessionStorage.removeItem("editorAssignmentFilter");
     }

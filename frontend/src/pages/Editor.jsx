@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { 
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -19,10 +19,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { 
-  Wand2, 
-  Check, 
-  Trash2, 
+import {
+  Wand2,
+  Check,
+  Trash2,
   AlertTriangle,
   Loader2,
   Search,
@@ -57,6 +57,45 @@ export const getNameState = (q) => {
 };
 
 const isGreetingQuestion = (q) => q?.is_greeting === true || q?.clasificacion === "saludo";
+
+const workflowModeConfig = {
+  classify: {
+    title: "CLASIFICAR",
+    subtitle: "Separa saludos, comentarios dudosos y preguntas reales",
+  },
+  review_doubtful: {
+    title: "REVISAR DUDOSAS",
+    subtitle: "Confirma manualmente qué comentarios dudosos son preguntas",
+  },
+  names: {
+    title: "NOMBRES",
+    subtitle: "Actualiza y revisa solo nombres no confirmados",
+  },
+  confirm_names: {
+    title: "CONFIRMAR NOMBRES",
+    subtitle: "Valida nombres derivados antes de continuar",
+  },
+  duplicates_fast: {
+    title: "DUPLICADOS RÁPIDO",
+    subtitle: "Busca coincidencias exactas o muy directas",
+  },
+  duplicates_ai: {
+    title: "DUPLICADOS IA",
+    subtitle: "Busca coincidencias semánticas entre preguntas",
+  },
+  review_duplicates: {
+    title: "REVISAR DUPLICADOS",
+    subtitle: "Compara pares y decide qué conservar",
+  },
+  spelling: {
+    title: "ORTOGRAFÍA",
+    subtitle: "Corrige las preguntas finales antes de distribuir",
+  },
+  reserve: {
+    title: "RESERVA",
+    subtitle: "Revisa preguntas pendientes e inclúyelas manualmente si procede",
+  },
+};
 
 const normalizeYoutubeUsername = (username) => (
   (username || "").replace(/^@+/, "").trim().toLowerCase()
@@ -270,7 +309,7 @@ const EditableText = ({ question, onSave }) => {
   }
 
   return (
-    <div 
+    <div
       onClick={() => setIsEditing(true)}
       className="cursor-text p-3 rounded-sm bg-secondary/30 hover:bg-secondary/50 transition-colors"
     >
@@ -310,7 +349,7 @@ const DuplicatesModal = ({ open, onClose, duplicates, onDelete, onKeep, currentB
     if (question.batch_name) {
       return question.batch_name;
     }
-    
+
     if (question.batch_date) {
       return new Date(question.batch_date).toLocaleDateString('es-ES', {
         day: 'numeric',
@@ -318,7 +357,7 @@ const DuplicatesModal = ({ open, onClose, duplicates, onDelete, onKeep, currentB
         year: 'numeric'
       });
     }
-    
+
     // Try to find batch in the batches list
     if (question.batch_id && batches) {
       const batch = batches.find(b => b.id === question.batch_id);
@@ -330,17 +369,17 @@ const DuplicatesModal = ({ open, onClose, duplicates, onDelete, onKeep, currentB
         });
       }
     }
-    
+
     // For new question without batch info, use current batch as fallback
     if (isNewQuestion && currentBatchName) {
       return currentBatchName;
     }
-    
+
     // Last resort - show batch_id shortened if available
     if (question.batch_id) {
       return `Lote ${question.batch_id.slice(0, 8)}...`;
     }
-    
+
     return "Desconocido";
   };
 
@@ -392,7 +431,7 @@ const DuplicatesModal = ({ open, onClose, duplicates, onDelete, onKeep, currentB
             Revisa un par cada vez. La pregunta nueva ya está marcada como duplicada y no entrará en la distribución salvo que decidas mantener ambas.
           </p>
         </DialogHeader>
-        
+
         <div className="flex-1 overflow-y-auto py-4">
           <div className="mb-4 flex flex-col gap-3 rounded-sm border border-border bg-secondary/30 p-4 sm:flex-row sm:items-center sm:justify-between">
             <div>
@@ -478,7 +517,7 @@ const DuplicatesModal = ({ open, onClose, duplicates, onDelete, onKeep, currentB
             </Button>
           </div>
         </div>
-        
+
         <div className="pt-4 border-t flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-sm text-muted-foreground">
             {duplicates.length} par{duplicates.length > 1 ? 'es' : ''} pendiente{duplicates.length > 1 ? 's' : ''} de revisión
@@ -522,7 +561,7 @@ const SearchModal = ({ open, onClose }) => {
       toast.error("Escribe al menos 2 caracteres");
       return;
     }
-    
+
     setSearching(true);
     setHasSearched(true);
     try {
@@ -553,7 +592,7 @@ const SearchModal = ({ open, onClose }) => {
             BUSCAR EN TODAS LAS PREGUNTAS
           </DialogTitle>
         </DialogHeader>
-        
+
         {/* Search Input */}
         <div className="flex gap-2 py-4">
           <Input
@@ -564,8 +603,8 @@ const SearchModal = ({ open, onClose }) => {
             className="flex-1 rounded-sm"
             autoFocus
           />
-          <Button 
-            onClick={handleSearch} 
+          <Button
+            onClick={handleSearch}
             disabled={searching || searchTerm.length < 2}
             className="rounded-sm"
           >
@@ -576,7 +615,7 @@ const SearchModal = ({ open, onClose }) => {
             )}
           </Button>
         </div>
-        
+
         {/* Results */}
         <div className="flex-1 overflow-y-auto space-y-3 pr-2">
           {searching ? (
@@ -595,7 +634,7 @@ const SearchModal = ({ open, onClose }) => {
                 {results.length} resultado{results.length !== 1 ? 's' : ''} encontrado{results.length !== 1 ? 's' : ''}
               </p>
               {results.map((result) => (
-                <div 
+                <div
                   key={result.id}
                   className="border border-border rounded-sm p-4 bg-card hover:border-primary/30 transition-colors"
                 >
@@ -634,7 +673,7 @@ const SearchModal = ({ open, onClose }) => {
             </div>
           )}
         </div>
-        
+
         <div className="pt-4 border-t border-border flex justify-end">
           <Button variant="outline" onClick={onClose} className="rounded-sm">
             Cerrar
@@ -645,7 +684,9 @@ const SearchModal = ({ open, onClose }) => {
   );
 };
 
-export default function Editor() {
+export default function Editor({ workflowMode = null }) {
+  const workflowConfig = workflowMode ? workflowModeConfig[workflowMode] : null;
+  const isFocusedWorkflow = Boolean(workflowConfig);
   const [batches, setBatches] = useState([]);
   const [selectedBatch, setSelectedBatch] = useState("");
   const [questions, setQuestions] = useState([]);
@@ -710,7 +751,7 @@ export default function Editor() {
     try {
       const response = await axios.get(`${API}/batches`);
       setBatches(response.data);
-      
+
       // Check if there's a selected batch from Dashboard (only on first load)
       if (!initialBatchLoaded.current) {
         initialBatchLoaded.current = true;
@@ -845,6 +886,63 @@ export default function Editor() {
     return () => window.removeEventListener("spm-workflow-step", handleWorkflowStep);
   }, [batches, duplicates.length, globalReserveMode, selectedBatch]);
 
+  useEffect(() => {
+    if (!workflowMode) return;
+
+    if (workflowMode === "reserve") {
+      if (!globalReserveMode) {
+        handleOpenGlobalReserve();
+      }
+      return;
+    }
+
+    if (globalReserveMode) {
+      const fallbackBatch = selectedBatch || batches[0]?.id || "";
+      setGlobalReserveMode(false);
+      setAssignmentFilter("all");
+      if (fallbackBatch) {
+        setSelectedBatch(fallbackBatch);
+      }
+    }
+
+    if (workflowMode === "review_doubtful") {
+      setAssignmentFilter("all");
+      setClasificationFilter("dudoso");
+      setShowOnlyDuplicates(false);
+      setShowOnlyNoName(false);
+      setShowOnlyUnconfirmedNames(false);
+      return;
+    }
+
+    if (workflowMode === "names" || workflowMode === "confirm_names") {
+      setAssignmentFilter("all");
+      setClasificationFilter("all");
+      setShowOnlyDuplicates(false);
+      setShowOnlyNoName(false);
+      setShowOnlyUnconfirmedNames(true);
+      return;
+    }
+
+    if (workflowMode === "review_duplicates") {
+      setAssignmentFilter("all");
+      setClasificationFilter("all");
+      setShowOnlyNoName(false);
+      setShowOnlyUnconfirmedNames(false);
+      if (duplicates.length > 0) {
+        setShowDuplicatesModal(true);
+      } else {
+        setShowOnlyDuplicates(true);
+      }
+      return;
+    }
+
+    setAssignmentFilter("all");
+    setClasificationFilter("all");
+    setShowOnlyDuplicates(false);
+    setShowOnlyNoName(false);
+    setShowOnlyUnconfirmedNames(false);
+  }, [workflowMode, batches, duplicates.length, globalReserveMode, selectedBatch]);
+
   const handleCorrectAll = async (force = false) => {
     if (force && !window.confirm("¿Recorregir todas las preguntas válidas de este lote? Esto volverá a consumir créditos IA.")) {
       return;
@@ -853,7 +951,7 @@ export default function Editor() {
     setCorrecting(true);
     setCorrectingMode(force ? "recorrect" : "correct");
     setCorrectingProgress({ current: 0, total: 0 });
-    
+
     try {
       // First, get the list of questions to correct
       const initResponse = await axios.post(`${API}/questions/correct-all/${selectedBatch}`, null, {
@@ -861,24 +959,24 @@ export default function Editor() {
       });
       const questionIds = initResponse.data.question_ids;
       const total = questionIds.length;
-      
+
       if (total === 0) {
         toast.info(force ? "No hay preguntas válidas para recorregir" : "No hay preguntas pendientes de corregir");
         setCorrecting(false);
         fetchQuestions();
         return;
       }
-      
+
       setCorrectingProgress({ current: 0, total });
-      
+
       // Process in batches of 5
       const batchSize = 5;
       let correctedCount = 0;
       let errorCount = 0;
-      
+
       for (let i = 0; i < questionIds.length; i += batchSize) {
         const batch = questionIds.slice(i, i + batchSize);
-        
+
         try {
           const response = await axios.post(`${API}/questions/correct-batch`, {
             question_ids: batch
@@ -891,16 +989,16 @@ export default function Editor() {
           console.error("Error in batch:", error);
           errorCount += batch.length;
         }
-        
+
         setCorrectingProgress({ current: Math.min(i + batchSize, total), total });
       }
-      
+
       if (errorCount > 0) {
         toast.warning(`${correctedCount} ${force ? "recorregidas" : "corregidas"}, ${errorCount} errores`);
       } else {
         toast.success(`${correctedCount} preguntas ${force ? "recorregidas" : "corregidas"}`);
       }
-      
+
       fetchQuestions();
     } catch (error) {
       console.error("Error correcting:", error);
@@ -973,22 +1071,22 @@ export default function Editor() {
     setCheckingDuplicates(true);
     setDuplicateProgress({ current: 0, total: 0, percentage: 0, duplicatesFound: 0 });
     const modelLabel = AI_MODELS.find(m => m.value === aiModel)?.label || aiModel;
-    
+
     try {
       // Start the background task
       const startResponse = await axios.post(`${API}/questions/check-duplicates-ai-start/${selectedBatch}`, {
         model: aiModel
       });
-      
+
       const taskId = startResponse.data.task_id;
       toast.info(`Búsqueda iniciada con ${modelLabel}...`, { duration: 3000 });
-      
+
       // Poll for status
       const pollStatus = async () => {
         try {
           const statusResponse = await axios.get(`${API}/duplicates/status/${taskId}`);
           const status = statusResponse.data;
-          
+
           // Update progress
           setDuplicateProgress({
             current: status.current || 0,
@@ -996,41 +1094,41 @@ export default function Editor() {
             percentage: status.percentage || 0,
             duplicatesFound: status.duplicates_found || 0
           });
-          
+
           if (status.status === "completed") {
             // Stop polling
             if (pollingIntervalRef.current) {
               clearInterval(pollingIntervalRef.current);
               pollingIntervalRef.current = null;
             }
-            
+
             setDuplicates(status.duplicates || []);
             setCheckingDuplicates(false);
             setDuplicateProgress({ current: 0, total: 0, percentage: 0, duplicatesFound: 0 });
-            
+
             if (status.duplicates_count > 0) {
               setShowDuplicatesModal(true);
               toast.success(`${status.duplicates_count} duplicados encontrados con ${modelLabel}`);
             } else {
               toast.success(`No se encontraron duplicados con ${modelLabel}`);
             }
-            
+
             fetchQuestions();
-            
+
             // Cleanup the task from server memory
             axios.delete(`${API}/duplicates/status/${taskId}`).catch(() => {});
-            
+
           } else if (status.status === "error") {
             // Stop polling on error
             if (pollingIntervalRef.current) {
               clearInterval(pollingIntervalRef.current);
               pollingIntervalRef.current = null;
             }
-            
+
             setCheckingDuplicates(false);
             setDuplicateProgress({ current: 0, total: 0, percentage: 0, duplicatesFound: 0 });
             toast.error(`Error: ${status.error || 'Error desconocido'}`);
-            
+
             // Cleanup
             axios.delete(`${API}/duplicates/status/${taskId}`).catch(() => {});
           }
@@ -1038,13 +1136,13 @@ export default function Editor() {
           console.error("Error polling status:", pollError);
         }
       };
-      
+
       // Start polling every 1.5 seconds
       pollingIntervalRef.current = setInterval(pollStatus, 1500);
-      
+
       // Also poll immediately
       pollStatus();
-      
+
     } catch (error) {
       console.error("Error starting AI duplicate check:", error);
       setCheckingDuplicates(false);
@@ -1055,16 +1153,16 @@ export default function Editor() {
 
   const handleViewDuplicate = async (question) => {
     // First check if we already have this duplicate in memory
-    const existingDup = duplicates.find(d => 
+    const existingDup = duplicates.find(d =>
       d.new_question.id === question.id || d.original_question.id === question.id
     );
-    
+
     if (existingDup) {
       setDuplicates([existingDup]);
       setShowDuplicatesModal(true);
       return;
     }
-    
+
     // If not, fetch the duplicate directly by ID
     if (question.duplicate_of) {
       try {
@@ -1079,7 +1177,7 @@ export default function Editor() {
             return null;
           })
         ]);
-        
+
         // Check if original question was found
         if (!originalResponse || !originalResponse.data || originalResponse.data.detail) {
           toast.error("La pregunta duplicada original fue eliminada. Limpiando referencia...");
@@ -1095,10 +1193,10 @@ export default function Editor() {
           fetchQuestions();
           return;
         }
-        
+
         const originalQ = originalResponse.data;
         const newQ = newQuestionResponse?.data || question;
-        
+
         setDuplicates([{
           new_question: {
             id: question.id,
@@ -1234,7 +1332,7 @@ export default function Editor() {
     try {
       await axios.delete(`${API}/questions/${questionId}`);
       setQuestions(prev => prev.filter(q => q.id !== questionId));
-      setDuplicates(prev => prev.filter(d => 
+      setDuplicates(prev => prev.filter(d =>
         d.new_question.id !== questionId && d.original_question.id !== questionId
       ));
       // Update batch list to reflect new count
@@ -1254,7 +1352,7 @@ export default function Editor() {
       const question = questions.find(q => q.id === questionId);
       await axios.put(`${API}/questions/${questionId}/clear-duplicate`);
       pushQuestionUndo("Mantener duplicado", question ? createQuestionSnapshot(question) : null);
-      setQuestions(prev => prev.map(q => 
+      setQuestions(prev => prev.map(q =>
         q.id === questionId ? { ...q, is_duplicate: false, duplicate_of: null } : q
       ));
       setDuplicates(prev => prev.filter(d => d.new_question.id !== questionId));
@@ -1272,7 +1370,7 @@ export default function Editor() {
       }
       await axios.put(`${API}/questions/${question.id}`, updates);
       pushQuestionUndo("Aceptar pregunta", createQuestionSnapshot(question));
-      setQuestions(prev => prev.map(q => 
+      setQuestions(prev => prev.map(q =>
         q.id === question.id ? { ...q, ...updates } : q
       ));
       toast.success("Pregunta aceptada");
@@ -1285,33 +1383,33 @@ export default function Editor() {
     if (!selectedBatch) return;
     setClasifying(true);
     setClasifyProgress({ current: 0, total: 0, percentage: 0 });
-    
+
     try {
       const startResponse = await axios.post(`${API}/questions/clasificar/${selectedBatch}`);
-      
+
       // Sync response path: no questions to classify
       if (!startResponse.data.task_id) {
         toast.info(startResponse.data.message || "Nada que clasificar");
         setClasifying(false);
         return;
       }
-      
+
       const taskId = startResponse.data.task_id;
       const total = startResponse.data.total || 0;
       setClasifyProgress({ current: 0, total, percentage: 0 });
       toast.info(`Clasificando ${total} comentarios con IA...`, { duration: 2500 });
-      
+
       const pollStatus = async () => {
         try {
           const statusRes = await axios.get(`${API}/questions/clasificar/status/${taskId}`);
           const s = statusRes.data;
-          
+
           setClasifyProgress({
             current: s.current || 0,
             total: s.total || 0,
             percentage: s.percentage || 0
           });
-          
+
           if (s.status === "completed") {
             if (clasifyPollRef.current) {
               clearInterval(clasifyPollRef.current);
@@ -1319,12 +1417,12 @@ export default function Editor() {
             }
             setClasifying(false);
             setClasifyProgress({ current: 0, total: 0, percentage: 0 });
-            
+
             const counts = s.counts || {};
             toast.success(
               `${s.classified_count || 0} clasificadas · ${counts.pregunta || 0} preguntas, ${counts.dudoso || 0} dudosas, ${counts.saludo || 0} saludos`
             );
-            
+
             await fetchQuestions();
             axios.delete(`${API}/questions/clasificar/status/${taskId}`).catch(() => {});
           } else if (s.status === "error") {
@@ -1341,7 +1439,7 @@ export default function Editor() {
           console.error("Error polling clasif status:", pollErr);
         }
       };
-      
+
       // Kick off immediately, then every 1.5s
       pollStatus();
       clasifyPollRef.current = setInterval(pollStatus, 1500);
@@ -1379,7 +1477,7 @@ export default function Editor() {
     if (!window.confirm(
       `¿Bloquear a ${user}?\n\nSus comentarios similares se eliminarán automáticamente en esta y futuras importaciones.`
     )) return;
-    
+
     try {
       const refText = question.corrected_text || question.original_text || "";
       await axios.post(`${API}/comentarios-bloqueados`, {
@@ -1596,6 +1694,16 @@ export default function Editor() {
     }
   };
 
+  const showAllActions = !isFocusedWorkflow;
+  const showNameActions = showAllActions || workflowMode === "names";
+  const showConfirmNameActions = showAllActions || workflowMode === "confirm_names";
+  const showClassifyActions = showAllActions || workflowMode === "classify";
+  const showFastDuplicateActions = showAllActions || workflowMode === "duplicates_fast";
+  const showAiDuplicateActions = showAllActions || workflowMode === "duplicates_ai";
+  const showReviewDuplicateActions = showAllActions || workflowMode === "duplicates_ai" || workflowMode === "review_duplicates";
+  const showSpellingActions = showAllActions || workflowMode === "spelling";
+  const showReserveActions = showAllActions || workflowMode === "reserve";
+
   return (
     <div className="p-6 md:p-10 animate-fade-in">
       <div className="fixed bottom-5 right-5 z-50">
@@ -1634,13 +1742,13 @@ export default function Editor() {
       <div className="mb-8 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
         <div>
           <h1 className="font-heading text-4xl sm:text-5xl font-bold tracking-tight mb-2">
-            EDITOR
+            {workflowConfig?.title || "EDITOR"}
           </h1>
           <p className="text-muted-foreground">
-            Revisa, corrige y filtra las preguntas importadas
+            {workflowConfig?.subtitle || "Revisa, corrige y filtra las preguntas importadas"}
           </p>
         </div>
-        
+
         <div className="flex items-center gap-3">
           <Select value={selectedBatch} onValueChange={handleSelectBatch}>
             <SelectTrigger className="w-56 rounded-sm" data-testid="batch-selector">
@@ -1678,55 +1786,60 @@ export default function Editor() {
 
       {/* Actions Bar */}
       <div className="flex flex-wrap items-center gap-4 mb-8 p-5 bg-card border border-border rounded-sm">
-        {/* 1. Actualizar nombres */}
-        <Button
-          variant="outline"
-          onClick={handleUpdateNames}
-          disabled={questions.length === 0}
-          size="lg"
-          className="rounded-sm uppercase tracking-wide text-xs"
-          data-testid="update-names-button"
-        >
-          <Users className="w-4 h-4 mr-2" />
-          Actualizar nombres
-        </Button>
+        {showNameActions && (
+          <Button
+            variant="outline"
+            onClick={handleUpdateNames}
+            disabled={questions.length === 0}
+            size="lg"
+            className="rounded-sm uppercase tracking-wide text-xs"
+            data-testid="update-names-button"
+          >
+            <Users className="w-4 h-4 mr-2" />
+            Actualizar nombres
+          </Button>
+        )}
 
-        <Button
-          variant="outline"
-          onClick={handleConfirmDerivedNames}
-          disabled={questions.length === 0}
-          size="lg"
-          className="rounded-sm uppercase tracking-wide text-xs"
-          data-testid="confirm-derived-names-button"
-        >
-          <Check className="w-4 h-4 mr-2" />
-          Confirmar nombres derivados
-        </Button>
+        {showConfirmNameActions && (
+          <Button
+            variant="outline"
+            onClick={handleConfirmDerivedNames}
+            disabled={questions.length === 0}
+            size="lg"
+            className="rounded-sm uppercase tracking-wide text-xs"
+            data-testid="confirm-derived-names-button"
+          >
+            <Check className="w-4 h-4 mr-2" />
+            Confirmar nombres derivados
+          </Button>
+        )}
 
         {/* 2. Clasificar con IA */}
-        <Button
-          variant="outline"
-          onClick={handleClasificarIA}
-          disabled={clasifying || questions.length === 0}
-          size="lg"
-          className="rounded-sm uppercase tracking-wide text-xs"
-          data-testid="clasificar-ia-button"
-        >
-          {clasifying ? (
-            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-          ) : (
-            <Filter className="w-4 h-4 mr-2" />
-          )}
-          {clasifying && clasifyProgress.total > 0
-            ? `Clasificando ${clasifyProgress.percentage}%`
-            : "Clasificar con IA"}
-        </Button>
+        {showClassifyActions && (
+          <Button
+            variant="outline"
+            onClick={handleClasificarIA}
+            disabled={clasifying || questions.length === 0}
+            size="lg"
+            className="rounded-sm uppercase tracking-wide text-xs"
+            data-testid="clasificar-ia-button"
+          >
+            {clasifying ? (
+              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+            ) : (
+              <Filter className="w-4 h-4 mr-2" />
+            )}
+            {clasifying && clasifyProgress.total > 0
+              ? `Clasificando ${clasifyProgress.percentage}%`
+              : "Clasificar con IA"}
+          </Button>
+        )}
 
         {/* AI Classification Progress */}
-        {clasifying && clasifyProgress.total > 0 && (
+        {showClassifyActions && clasifying && clasifyProgress.total > 0 && (
           <div className="flex-1 max-w-sm" data-testid="clasif-progress">
             <div className="h-2 bg-secondary rounded-full overflow-hidden">
-              <div 
+              <div
                 className="h-full bg-primary transition-all duration-300"
                 style={{ width: `${clasifyProgress.percentage}%` }}
               />
@@ -1739,23 +1852,26 @@ export default function Editor() {
         )}
 
         {/* 3. Duplicados (rápido) */}
-        <Button
-          variant="outline"
-          onClick={handleCheckDuplicates}
-          disabled={checkingDuplicates || questions.length === 0}
-          size="lg"
-          className="rounded-sm uppercase tracking-wide text-xs"
-          data-testid="check-duplicates-button"
-        >
-          {checkingDuplicates ? (
-            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-          ) : (
-            <Search className="w-4 h-4 mr-2" />
-          )}
-          Duplicados (rápido)
-        </Button>
+        {showFastDuplicateActions && (
+          <Button
+            variant="outline"
+            onClick={handleCheckDuplicates}
+            disabled={checkingDuplicates || questions.length === 0}
+            size="lg"
+            className="rounded-sm uppercase tracking-wide text-xs"
+            data-testid="check-duplicates-button"
+          >
+            {checkingDuplicates ? (
+              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+            ) : (
+              <Search className="w-4 h-4 mr-2" />
+            )}
+            Duplicados (rápido)
+          </Button>
+        )}
 
         {/* 4. Buscar duplicados con IA (+ selector de modelo) */}
+        {showAiDuplicateActions && (
         <div className="flex items-center gap-2">
           <Select value={aiModel} onValueChange={setAiModel} disabled={checkingDuplicates}>
             <SelectTrigger className="w-[180px] h-10 rounded-sm text-xs">
@@ -1769,7 +1885,7 @@ export default function Editor() {
               ))}
             </SelectContent>
           </Select>
-          
+
           <Button
             variant="default"
             onClick={handleCheckDuplicatesAI}
@@ -1783,18 +1899,19 @@ export default function Editor() {
             ) : (
               <Sparkles className="w-4 h-4 mr-2" />
             )}
-            {checkingDuplicates && duplicateProgress.total > 0 
-              ? `${duplicateProgress.percentage}%` 
+            {checkingDuplicates && duplicateProgress.total > 0
+              ? `${duplicateProgress.percentage}%`
               : "Buscar con IA"
             }
           </Button>
         </div>
-        
+        )}
+
         {/* AI Duplicate Search Progress */}
-        {checkingDuplicates && duplicateProgress.total > 0 && (
+        {showAiDuplicateActions && checkingDuplicates && duplicateProgress.total > 0 && (
           <div className="flex-1 max-w-sm">
             <div className="h-2 bg-secondary rounded-full overflow-hidden">
-              <div 
+              <div
                 className="h-full bg-primary transition-all duration-300"
                 style={{ width: `${duplicateProgress.percentage}%` }}
               />
@@ -1808,7 +1925,7 @@ export default function Editor() {
           </div>
         )}
 
-        {duplicates.length > 0 && !checkingDuplicates && (
+        {showReviewDuplicateActions && duplicates.length > 0 && !checkingDuplicates && (
           <Button
             variant="secondary"
             onClick={() => setShowDuplicatesModal(true)}
@@ -1822,58 +1939,62 @@ export default function Editor() {
         )}
 
         {/* 5. Corregir todo con IA */}
-        <Button
-          onClick={() => handleCorrectAll(false)}
-          disabled={correcting || questions.length === 0}
-          size="lg"
-          className="rounded-sm uppercase tracking-wide text-xs min-w-[200px]"
-          data-testid="correct-all-button"
-        >
-          {correcting && correctingMode === "correct" ? (
-            <>
-              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-              {correctingProgress.total > 0 
-                ? `Corrigiendo ${correctingProgress.current}/${correctingProgress.total}...`
-                : "Iniciando..."
-              }
-            </>
-          ) : (
-            <>
-              <Wand2 className="w-4 h-4 mr-2" />
-              Corregir todo con IA
-            </>
-          )}
-        </Button>
+        {showSpellingActions && (
+          <>
+            <Button
+              onClick={() => handleCorrectAll(false)}
+              disabled={correcting || questions.length === 0}
+              size="lg"
+              className="rounded-sm uppercase tracking-wide text-xs min-w-[200px]"
+              data-testid="correct-all-button"
+            >
+              {correcting && correctingMode === "correct" ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  {correctingProgress.total > 0
+                    ? `Corrigiendo ${correctingProgress.current}/${correctingProgress.total}...`
+                    : "Iniciando..."
+                  }
+                </>
+              ) : (
+                <>
+                  <Wand2 className="w-4 h-4 mr-2" />
+                  Corregir todo con IA
+                </>
+              )}
+            </Button>
 
-        <Button
-          onClick={() => handleCorrectAll(true)}
-          disabled={correcting || questions.length === 0}
-          size="lg"
-          variant="outline"
-          className="rounded-sm uppercase tracking-wide text-xs min-w-[210px]"
-          data-testid="recorrect-all-button"
-        >
-          {correcting && correctingMode === "recorrect" ? (
-            <>
-              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-              {correctingProgress.total > 0
-                ? `Procesando ${correctingProgress.current}/${correctingProgress.total}...`
-                : "Iniciando..."
-              }
-            </>
-          ) : (
-            <>
-              <Wand2 className="w-4 h-4 mr-2" />
-              Recorregir todo con IA
-            </>
-          )}
-        </Button>
-        
+            <Button
+              onClick={() => handleCorrectAll(true)}
+              disabled={correcting || questions.length === 0}
+              size="lg"
+              variant="outline"
+              className="rounded-sm uppercase tracking-wide text-xs min-w-[210px]"
+              data-testid="recorrect-all-button"
+            >
+              {correcting && correctingMode === "recorrect" ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  {correctingProgress.total > 0
+                    ? `Procesando ${correctingProgress.current}/${correctingProgress.total}...`
+                    : "Iniciando..."
+                  }
+                </>
+              ) : (
+                <>
+                  <Wand2 className="w-4 h-4 mr-2" />
+                  Recorregir todo con IA
+                </>
+              )}
+            </Button>
+          </>
+        )}
+
         {/* Progress bar for Correct All */}
-        {correcting && correctingProgress.total > 0 && (
+        {showSpellingActions && correcting && correctingProgress.total > 0 && (
           <div className="flex-1 max-w-xs">
             <div className="h-2 bg-secondary rounded-full overflow-hidden">
-              <div 
+              <div
                 className="h-full bg-primary transition-all duration-300"
                 style={{ width: `${(correctingProgress.current / correctingProgress.total) * 100}%` }}
               />
@@ -1885,31 +2006,35 @@ export default function Editor() {
         )}
 
         {/* 6. Reserva */}
-        <Button
-          variant={globalReserveMode ? "default" : "outline"}
-          onClick={handleOpenGlobalReserve}
-          size="lg"
-          className="rounded-sm uppercase tracking-wide text-xs"
-          data-testid="open-reserve-button"
-        >
-          <Inbox className="w-4 h-4 mr-2" />
-          Reserva
-        </Button>
+        {showReserveActions && (
+          <Button
+            variant={globalReserveMode ? "default" : "outline"}
+            onClick={handleOpenGlobalReserve}
+            size="lg"
+            className="rounded-sm uppercase tracking-wide text-xs"
+            data-testid="open-reserve-button"
+          >
+            <Inbox className="w-4 h-4 mr-2" />
+            Reserva
+          </Button>
+        )}
 
         {/* Herramienta auxiliar */}
-        <Button
-          variant="outline"
-          onClick={() => setShowSearchModal(true)}
-          size="lg"
-          className="rounded-sm uppercase tracking-wide text-xs"
-          data-testid="search-all-button"
-        >
-          <Search className="w-4 h-4 mr-2" />
-          Buscar en todo
-        </Button>
+        {showAllActions && (
+          <Button
+            variant="outline"
+            onClick={() => setShowSearchModal(true)}
+            size="lg"
+            className="rounded-sm uppercase tracking-wide text-xs"
+            data-testid="search-all-button"
+          >
+            <Search className="w-4 h-4 mr-2" />
+            Buscar en todo
+          </Button>
+        )}
 
         <div className="flex-1" />
-        
+
         <div className="flex items-center gap-6 text-sm">
           <div className="flex items-center gap-2">
             <div className="w-3 h-3 rounded-full bg-green-500" />
@@ -1974,8 +2099,8 @@ export default function Editor() {
                   }
                 }}
                 className={`flex items-center gap-2 px-3 py-1 rounded transition-colors cursor-pointer border ${
-                  showOnlyNoName 
-                    ? 'bg-yellow-500 text-white border-yellow-500' 
+                  showOnlyNoName
+                    ? 'bg-yellow-500 text-white border-yellow-500'
                     : 'hover:bg-yellow-50 border-yellow-400'
                 }`}
                 title={showOnlyNoName ? "Ver todas las preguntas" : "Filtrar solo sin nombre"}
@@ -1997,8 +2122,8 @@ export default function Editor() {
                 }
               }}
               className={`flex items-center gap-2 px-3 py-1 rounded transition-colors cursor-pointer border ${
-                showOnlyDuplicates 
-                  ? 'bg-red-500 text-white border-red-500' 
+                showOnlyDuplicates
+                  ? 'bg-red-500 text-white border-red-500'
                   : 'hover:bg-red-50 border-red-300'
               }`}
               title={showOnlyDuplicates ? "Ver todas las preguntas" : "Filtrar solo duplicados"}
@@ -2172,13 +2297,13 @@ export default function Editor() {
                 filteredQuestions = filteredQuestions.filter(q => q.clasificacion === clasificationFilter);
               }
             }
-            
+
             return filteredQuestions.map((question, index) => (
-            <Card 
+            <Card
               key={question.id}
               className={`bg-card border rounded-sm transition-all ${
-                question.is_greeting ? "opacity-50 border-yellow-500/50 bg-yellow-500/5" : 
-                question.is_duplicate ? "border-red-500 bg-red-500/5" : 
+                question.is_greeting ? "opacity-50 border-yellow-500/50 bg-yellow-500/5" :
+                question.is_duplicate ? "border-red-500 bg-red-500/5" :
                 "border-border hover:border-foreground/20"
               }`}
               data-testid={`question-card-${question.id}`}
@@ -2189,13 +2314,13 @@ export default function Editor() {
                   <div className="w-9 h-9 rounded-full bg-primary/10 text-primary flex items-center justify-center font-bold text-sm flex-shrink-0">
                     {index + 1}
                   </div>
-                  
+
                   <EditableUsername question={question} onSave={handleUpdateQuestion} />
-                  
+
                   <span className="text-muted-foreground flex-shrink-0">→</span>
-                  
+
                   <EditableName question={question} onSave={handleUpdateQuestion} />
-                  
+
                   {!question.real_name_confirmed && (
                     <Button
                       variant="ghost"
@@ -2209,7 +2334,7 @@ export default function Editor() {
                       Nombre
                     </Button>
                   )}
-                  
+
                   <div className="flex gap-2 ml-auto flex-shrink-0">
                     {(() => {
                       const state = getNameState(question);
@@ -2349,8 +2474,8 @@ export default function Editor() {
                       </Badge>
                     )}
                     {question.is_duplicate && (
-                      <Badge 
-                        variant="destructive" 
+                      <Badge
+                        variant="destructive"
                         className="text-xs cursor-pointer hover:bg-red-700"
                         onClick={() => handleViewDuplicate(question)}
                         title="Ver pregunta duplicada"
@@ -2360,12 +2485,12 @@ export default function Editor() {
                     )}
                   </div>
                 </div>
-                
+
                 {/* Question Text */}
                 <div className="mb-4">
                   <EditableText question={question} onSave={handleUpdateQuestion} />
                 </div>
-                
+
                 {/* Action Buttons */}
                 <div className="flex items-center gap-2 pt-3 border-t border-border">
                   <Button
@@ -2385,7 +2510,7 @@ export default function Editor() {
                       {question.is_corrected ? "Recorregir IA" : "Corregir IA"}
                     </span>
                   </Button>
-                  
+
                   <Button
                     variant="outline"
                     size="sm"
@@ -2396,7 +2521,7 @@ export default function Editor() {
                     <CheckCircle className="w-3.5 h-3.5" />
                     <span className="ml-1.5 hidden sm:inline">Aceptar</span>
                   </Button>
-                  
+
                   {question.clasificacion && question.clasificacion !== "pregunta" && (
                     <Button
                       variant="outline"
@@ -2429,14 +2554,14 @@ export default function Editor() {
                       <span className="ml-1.5 hidden sm:inline">Incluir</span>
                     </Button>
                   )}
-                  
+
                   <Button
                     variant="outline"
                     size="sm"
                     onClick={() => handleToggleGreeting(question)}
                     className={`rounded-sm text-xs ${
                       isGreetingQuestion(question)
-                        ? "text-yellow-700 border-yellow-500 bg-yellow-50" 
+                        ? "text-yellow-700 border-yellow-500 bg-yellow-50"
                         : "text-muted-foreground"
                     }`}
                     data-testid={`greeting-btn-${question.id}`}
@@ -2446,9 +2571,9 @@ export default function Editor() {
                       {isGreetingQuestion(question) ? "Es saludo" : "Saludo"}
                     </span>
                   </Button>
-                  
+
                   <div className="flex-1" />
-                  
+
                   <Button
                     variant="ghost"
                     size="sm"
@@ -2460,7 +2585,7 @@ export default function Editor() {
                     <Ban className="w-3.5 h-3.5" />
                     <span className="ml-1.5 hidden sm:inline">Bloquear usuario</span>
                   </Button>
-                  
+
                   <Button
                     variant="ghost"
                     size="sm"
@@ -2487,9 +2612,9 @@ export default function Editor() {
         onDelete={handleDeleteQuestion}
         onKeep={handleKeepBoth}
         batches={batches}
-        currentBatchName={batches.find(b => b.id === selectedBatch)?.name || 
-          (batches.find(b => b.id === selectedBatch)?.created_at ? 
-            new Date(batches.find(b => b.id === selectedBatch).created_at).toLocaleDateString('es-ES', { day: 'numeric', month: 'long', year: 'numeric' }) : 
+        currentBatchName={batches.find(b => b.id === selectedBatch)?.name ||
+          (batches.find(b => b.id === selectedBatch)?.created_at ?
+            new Date(batches.find(b => b.id === selectedBatch).created_at).toLocaleDateString('es-ES', { day: 'numeric', month: 'long', year: 'numeric' }) :
             'Importación actual')}
       />
 
