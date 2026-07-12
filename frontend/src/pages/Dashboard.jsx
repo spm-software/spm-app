@@ -353,6 +353,7 @@ export default function Dashboard() {
                           className="group/date flex items-center gap-2 hover:bg-secondary/50 rounded px-1 -ml-1 transition-colors"
                         >
                           <p className="text-sm text-muted-foreground">
+                            {batch.name ? "Importada el " : ""}
                             {new Date(batch.created_at).toLocaleDateString('es-ES', {
                               day: 'numeric',
                               month: 'long',
