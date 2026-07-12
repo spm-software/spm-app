@@ -44,7 +44,12 @@ export const AuthProvider = ({ children }) => {
     }
     axios
       .get(`${API}/auth/me`)
-      .then((res) => setUser(res.data))
+      .then((res) => {
+        if (!res.data || typeof res.data !== "object" || !res.data.email) {
+          throw new Error("Respuesta de autenticación inválida");
+        }
+        setUser(res.data);
+      })
       .catch(() => {
         localStorage.removeItem(TOKEN_KEY);
         setUser(null);
