@@ -355,22 +355,6 @@ export default function Layout() {
         </div>
       </main>
 
-      <button
-        type="button"
-        onClick={handleToggleTheme}
-        className="fixed bottom-20 left-4 z-50 flex h-11 items-center gap-2 rounded-full border border-border bg-card px-4 text-xs font-semibold uppercase tracking-wide text-foreground shadow-lg transition-colors hover:bg-secondary md:bottom-4 md:left-[17rem]"
-        title={isDarkMode ? "Activar modo claro" : "Activar modo oscuro"}
-        aria-label={isDarkMode ? "Activar modo claro" : "Activar modo oscuro"}
-        data-testid="floating-theme-toggle-button"
-      >
-        {isDarkMode ? (
-          <Sun className="h-4 w-4" />
-        ) : (
-          <Moon className="h-4 w-4" />
-        )}
-        {isDarkMode ? "Modo claro" : "Modo oscuro"}
-      </button>
-
       <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-card border-t border-border pb-[env(safe-area-inset-bottom)]">
         <div className="mobile-bottom-nav flex overflow-x-auto overscroll-x-contain">
           {navItems.map((item) => (
@@ -391,6 +375,23 @@ export default function Layout() {
               <span className="leading-none truncate max-w-full px-0.5">{item.label}</span>
             </NavLink>
           ))}
+          <button
+            type="button"
+            onClick={handleToggleTheme}
+            className="h-16 min-w-[76px] flex-1 flex flex-col items-center justify-center gap-1 px-1 text-[10px] font-medium text-muted-foreground transition-colors hover:text-foreground"
+            title={isDarkMode ? "Activar modo claro" : "Activar modo oscuro"}
+            aria-label={isDarkMode ? "Activar modo claro" : "Activar modo oscuro"}
+            data-testid="mobile-theme-toggle-button"
+          >
+            {isDarkMode ? (
+              <Sun className="w-5 h-5" strokeWidth={1.5} />
+            ) : (
+              <Moon className="w-5 h-5" strokeWidth={1.5} />
+            )}
+            <span className="leading-none truncate max-w-full px-0.5">
+              {isDarkMode ? "Claro" : "Oscuro"}
+            </span>
+          </button>
         </div>
       </nav>
     </div>
