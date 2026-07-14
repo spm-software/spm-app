@@ -160,9 +160,9 @@ export default function Layout() {
   const isLastWorkflowStep = workflowIndex >= workflowSteps.length - 1;
 
   return (
-    <div className="flex min-h-screen">
+    <div className="min-h-screen md:h-screen md:overflow-hidden md:pl-64">
       {/* Sidebar */}
-      <aside className="hidden md:flex w-64 bg-card border-r border-border flex-col">
+      <aside className="fixed inset-y-0 left-0 z-50 hidden w-64 bg-card border-r border-border md:flex flex-col">
         {/* Logo */}
         <div className="p-6 border-b border-border">
           <div className="flex items-center gap-3">
@@ -245,7 +245,7 @@ export default function Layout() {
       </aside>
 
       {/* Main content */}
-      <div className="md:hidden fixed top-0 left-0 right-0 z-40 bg-card border-b border-border">
+      <div className="md:hidden fixed top-0 left-0 right-0 z-50 bg-card border-b border-border shadow-sm">
         <div className="h-16 px-4 flex items-center justify-between">
           <div className="flex items-center gap-3 min-w-0">
             <img
@@ -262,18 +262,34 @@ export default function Layout() {
               </p>
             </div>
           </div>
-          <button
-            onClick={logout}
-            className="w-10 h-10 rounded-sm flex items-center justify-center text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors"
-            aria-label="Cerrar sesión"
-            data-testid="mobile-logout-button"
-          >
-            <LogOut className="w-5 h-5" strokeWidth={1.5} />
-          </button>
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={handleToggleTheme}
+              className="w-10 h-10 rounded-sm flex items-center justify-center text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors"
+              title={isDarkMode ? "Activar modo claro" : "Activar modo oscuro"}
+              aria-label={isDarkMode ? "Activar modo claro" : "Activar modo oscuro"}
+              data-testid="mobile-header-theme-toggle-button"
+            >
+              {isDarkMode ? (
+                <Sun className="w-5 h-5" strokeWidth={1.5} />
+              ) : (
+                <Moon className="w-5 h-5" strokeWidth={1.5} />
+              )}
+            </button>
+            <button
+              onClick={logout}
+              className="w-10 h-10 rounded-sm flex items-center justify-center text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors"
+              aria-label="Cerrar sesión"
+              data-testid="mobile-logout-button"
+            >
+              <LogOut className="w-5 h-5" strokeWidth={1.5} />
+            </button>
+          </div>
         </div>
       </div>
 
-      <main className="app-main flex-1 overflow-auto pt-16 pb-24 md:pt-0 md:pb-0">
+      <main className="app-main h-screen overflow-auto pt-16 pb-24 md:pt-0 md:pb-0">
         <div className="sticky top-0 z-30 border-b border-border bg-background/95 px-4 py-3 backdrop-blur md:px-8">
           <div className="flex items-center gap-2">
               <div className="workflow-step-strip flex min-w-0 flex-1 overflow-x-auto">
@@ -375,23 +391,6 @@ export default function Layout() {
               <span className="leading-none truncate max-w-full px-0.5">{item.label}</span>
             </NavLink>
           ))}
-          <button
-            type="button"
-            onClick={handleToggleTheme}
-            className="h-16 min-w-[76px] flex-1 flex flex-col items-center justify-center gap-1 px-1 text-[10px] font-medium text-muted-foreground transition-colors hover:text-foreground"
-            title={isDarkMode ? "Activar modo claro" : "Activar modo oscuro"}
-            aria-label={isDarkMode ? "Activar modo claro" : "Activar modo oscuro"}
-            data-testid="mobile-theme-toggle-button"
-          >
-            {isDarkMode ? (
-              <Sun className="w-5 h-5" strokeWidth={1.5} />
-            ) : (
-              <Moon className="w-5 h-5" strokeWidth={1.5} />
-            )}
-            <span className="leading-none truncate max-w-full px-0.5">
-              {isDarkMode ? "Claro" : "Oscuro"}
-            </span>
-          </button>
         </div>
       </nav>
     </div>
