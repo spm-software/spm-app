@@ -115,7 +115,9 @@ export default function Importador() {
       const importResponse = await axios.post(`${API}/youtube/import-comments`, {
         comments: response.data.comments,
         batch_name: formatImportRangeName(fechaDesde, fechaHasta),
-        batch_created_at: fechaHasta
+        batch_created_at: fechaHasta,
+        fecha_desde: fechaDesde,
+        fecha_hasta: fechaHasta
       });
       
       setFetchProgress(100);

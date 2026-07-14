@@ -3975,6 +3975,17 @@ async def youtube_fetch_comments(request: YouTubeFetchRequest):
         elif request.empezar_desde_ultimo:
             logger.info("[YouTube] empezar_desde_ultimo=True IGNORED — date range always prevails, dedup handled by comment_id")
 
+        def _parse_comment_datetime(value: Optional[str]) -> datetime:
+            if not value:
+                return datetime.min.replace(tzinfo=timezone.utc)
+            try:
+                parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+                if parsed.tzinfo is None:
+                    return parsed.replace(tzinfo=timezone.utc)
+                return parsed.astimezone(timezone.utc)
+            except Exception:
+                return datetime.min.replace(tzinfo=timezone.utc)
+
         # Fetch comments for each video
         all_comments = []
         greetings_filtered = 0
@@ -4006,6 +4017,9 @@ async def youtube_fetch_comments(request: YouTubeFetchRequest):
 
                         username = comment.get('authorDisplayName', '')
                         text = comment.get('textDisplay', '')
+                        comment_published_at = _parse_comment_datetime(comment.get('publishedAt'))
+                        if comment_published_at < fecha_desde or comment_published_at > fecha_hasta:
+                            continue
 
                         # Cutoff ONLY by manual text match (explicit user action)
                         if cutoff_text_normalized:
@@ -4042,12 +4056,13 @@ async def youtube_fetch_comments(request: YouTubeFetchRequest):
                         break
                     raise
 
+        all_comments.sort(key=lambda item: _parse_comment_datetime(item.get('published_at')))
         logger.info(f"Total comments fetched: {len(all_comments)}, greetings filtered: {greetings_filtered}")
 
-        # Keep a fetch history log if we have comments. The cutoff anchor is updated
-        # only after comments are actually imported as NEW questions.
+        # Keep a fetch history log after filtering by the real comment date.
+        # The cutoff anchor is updated only after comments are imported.
         if all_comments:
-            newest_comment = all_comments[0]
+            newest_comment = all_comments[-1]
 
             await db.youtube_imports.insert_one({
                 "created_at": datetime.now(timezone.utc),
@@ -4061,9 +4076,6 @@ async def youtube_fetch_comments(request: YouTubeFetchRequest):
                 "channel_id": channel_id,
                 "channel_title": channel_title
             })
-
-        # Reverse to oldest→newest for the caller (UI/import pipeline)
-        all_comments.reverse()
 
         return {
             "success": True,
@@ -4089,6 +4101,8 @@ class YouTubeImportCommentsRequest(BaseModel):
     comments: List[Dict]
     batch_name: Optional[str] = None
     batch_created_at: Optional[str] = None
+    fecha_desde: Optional[str] = None
+    fecha_hasta: Optional[str] = None
 
 
 @api_router.post("/youtube/import-comments")
@@ -4111,7 +4125,7 @@ async def youtube_import_comments(request: YouTubeImportCommentsRequest):
     imported_count = 0
     updated_count = 0
     blocked_count = 0
-    newest_imported_comment: Optional[Dict] = None
+    newest_processed_comment: Optional[Dict] = None
 
     def _parse_youtube_datetime(value: Optional[str]) -> datetime:
         if not value:
@@ -4141,9 +4155,39 @@ async def youtube_import_comments(request: YouTubeImportCommentsRequest):
         except Exception:
             return now
 
+    def _parse_range_start(value: Optional[str]) -> Optional[datetime]:
+        if not value:
+            return None
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            return parsed.astimezone(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+        except Exception:
+            return None
+
+    def _parse_range_end(value: Optional[str]) -> Optional[datetime]:
+        if not value:
+            return None
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            return parsed.astimezone(timezone.utc).replace(hour=23, minute=59, second=59, microsecond=999999)
+        except Exception:
+            return None
+
+    range_start = _parse_range_start(request.fecha_desde)
+    range_end = _parse_range_end(request.fecha_hasta)
+
     for c in request.comments:
         yt_id = c.get("comment_id")
         if not yt_id:
+            continue
+        published_at = _parse_youtube_datetime(c.get("published_at"))
+        if range_start and published_at < range_start:
+            continue
+        if range_end and published_at > range_end:
             continue
 
         text = clean_html_to_plain_text((c.get("text") or "").strip())
@@ -4181,6 +4225,8 @@ async def youtube_import_comments(request: YouTubeImportCommentsRequest):
                 }}
             )
             updated_count += 1
+            if _is_newer_comment(c, newest_processed_comment):
+                newest_processed_comment = c
         else:
             # Lazy-create the batch on first new question
             if batch_id is None:
@@ -4213,8 +4259,8 @@ async def youtube_import_comments(request: YouTubeImportCommentsRequest):
             doc['created_at'] = serialize_datetime(doc['created_at'])
             await db.questions.insert_one(doc)
             imported_count += 1
-            if _is_newer_comment(c, newest_imported_comment):
-                newest_imported_comment = c
+            if _is_newer_comment(c, newest_processed_comment):
+                newest_processed_comment = c
 
     # Update batch question_count if a batch was created
     if batch_id and imported_count > 0:
@@ -4224,16 +4270,16 @@ async def youtube_import_comments(request: YouTubeImportCommentsRequest):
         )
 
     last_anchor = await get_youtube_last_anchor()
-    if newest_imported_comment:
+    if newest_processed_comment:
         anchor_doc = {
             "type": "last_anchor",
-            "comment_id": newest_imported_comment.get("comment_id"),
-            "raw_text": newest_imported_comment.get("text"),
-            "raw_username": newest_imported_comment.get("raw_username") or newest_imported_comment.get("youtube_username"),
-            "comment_published_at": newest_imported_comment.get("published_at"),
+            "comment_id": newest_processed_comment.get("comment_id"),
+            "raw_text": newest_processed_comment.get("text"),
+            "raw_username": newest_processed_comment.get("raw_username") or newest_processed_comment.get("youtube_username"),
+            "comment_published_at": newest_processed_comment.get("published_at"),
             "imported_at": now.isoformat(),
-            "video_id": newest_imported_comment.get("video_id"),
-            "video_title": newest_imported_comment.get("video_title"),
+            "video_id": newest_processed_comment.get("video_id"),
+            "video_title": newest_processed_comment.get("video_title"),
             "source": "youtube_import_comments"
         }
         await db.youtube_last_imported.update_one(

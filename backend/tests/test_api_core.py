@@ -316,7 +316,7 @@ def test_blocked_comments_skip_youtube_import_and_remove_existing(client, auth_h
     assert imported.json()["questions_imported"] == 1
 
 
-def test_youtube_import_anchor_updates_only_for_new_questions(client, auth_headers, fake_db):
+def test_youtube_import_anchor_tracks_latest_processed_comment(client, auth_headers, fake_db):
     first_comment = {
         "comment_id": "yt-comment-1",
         "youtube_username": "@ana",
@@ -359,12 +359,61 @@ def test_youtube_import_anchor_updates_only_for_new_questions(client, auth_heade
     assert updated.json()["questions_imported"] == 0
     assert updated.json()["questions_updated"] == 1
     assert updated.json()["last_anchor"]["comment_id"] == "yt-comment-1"
-    assert updated.json()["last_anchor"]["raw_text"] == "Primera pregunta nueva"
-    assert updated.json()["last_anchor"]["comment_published_at"] == "2026-07-10T10:00:00Z"
+    assert updated.json()["last_anchor"]["raw_text"] == "Primera pregunta nueva editada"
+    assert updated.json()["last_anchor"]["comment_published_at"] == "2026-07-12T10:00:00Z"
 
     anchor = auth_get(client, "/api/youtube/last-import-anchor", auth_headers)
     assert anchor.status_code == 200
     assert anchor.json()["last_anchor"]["comment_id"] == "yt-comment-1"
+
+
+def test_youtube_import_anchor_ignores_comments_outside_selected_range(client, auth_headers):
+    in_range_first = {
+        "comment_id": "yt-june-16",
+        "youtube_username": "@ana",
+        "raw_username": "Ana",
+        "text": "Primera del rango",
+        "video_id": "video-1",
+        "video_title": "Video uno",
+        "published_at": "2026-06-16T08:00:00Z",
+    }
+    in_range_last = {
+        "comment_id": "yt-june-30",
+        "youtube_username": "@luis",
+        "raw_username": "Luis",
+        "text": "Última del rango",
+        "video_id": "video-1",
+        "video_title": "Video uno",
+        "published_at": "2026-06-30T22:30:00Z",
+    }
+    out_of_range = {
+        "comment_id": "yt-july-06",
+        "youtube_username": "@marta",
+        "raw_username": "Marta",
+        "text": "No debe ser ancla",
+        "video_id": "video-1",
+        "video_title": "Video uno",
+        "published_at": "2026-07-06T12:28:00Z",
+    }
+
+    imported = auth_post(
+        client,
+        "/api/youtube/import-comments",
+        auth_headers,
+        json={
+            "comments": [out_of_range, in_range_last, in_range_first],
+            "fecha_desde": "2026-06-16",
+            "fecha_hasta": "2026-06-30",
+            "batch_name": "16/06 al 30/06",
+            "batch_created_at": "2026-06-30",
+        },
+    )
+
+    assert imported.status_code == 200
+    assert imported.json()["questions_imported"] == 2
+    assert imported.json()["last_anchor"]["comment_id"] == "yt-june-30"
+    assert imported.json()["last_anchor"]["raw_text"] == "Última del rango"
+    assert imported.json()["last_anchor"]["comment_published_at"] == "2026-06-30T22:30:00Z"
 
 
 def test_duplicate_detection_in_batch_and_history(client, auth_headers, fake_db):
