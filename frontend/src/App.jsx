@@ -12,6 +12,7 @@ import Configuracion from "@/pages/Configuracion";
 import Exportar from "@/pages/Exportar";
 import Login from "@/pages/Login";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
+import { UndoProvider } from "@/contexts/UndoContext";
 
 const RequireAuth = ({ children }) => {
   const { user, loading } = useAuth();
@@ -37,7 +38,9 @@ function App() {
               path="/"
               element={
                 <RequireAuth>
-                  <Layout />
+                  <UndoProvider>
+                    <Layout />
+                  </UndoProvider>
                 </RequireAuth>
               }
             >

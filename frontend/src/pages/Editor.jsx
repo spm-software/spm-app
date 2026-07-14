@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState, useRef } from "react";
+import { useLocation } from "react-router-dom";
 import axios from "axios";
 import { toast } from "sonner";
 import { Card, CardContent } from "@/components/ui/card";
@@ -35,10 +36,10 @@ import {
   Filter,
   Ban,
   Video,
-  Undo2,
   Inbox
 } from "lucide-react";
 import { API_BASE_URL as API } from "@/lib/api";
+import { useUndo } from "@/contexts/UndoContext";
 
 /**
  * Returns one of three states for a question's real_name:
@@ -685,6 +686,9 @@ const SearchModal = ({ open, onClose }) => {
 };
 
 export default function Editor({ workflowMode = null }) {
+  const location = useLocation();
+  const undoScope = location.pathname;
+  const { pushUndo, registerUndoHandler, setActiveScope } = useUndo();
   const workflowConfig = workflowMode ? workflowModeConfig[workflowMode] : null;
   const isFocusedWorkflow = Boolean(workflowConfig);
   const [batches, setBatches] = useState([]);
@@ -700,8 +704,6 @@ export default function Editor({ workflowMode = null }) {
   const [correctingProgress, setCorrectingProgress] = useState({ current: 0, total: 0 });
   const [correctingId, setCorrectingId] = useState(null);
   const [movingQuestionId, setMovingQuestionId] = useState(null);
-  const [undoStack, setUndoStack] = useState([]);
-  const [undoing, setUndoing] = useState(false);
   const [checkingDuplicates, setCheckingDuplicates] = useState(false);
   const [duplicateProgress, setDuplicateProgress] = useState({ current: 0, total: 0, percentage: 0, duplicatesFound: 0 });
   const [duplicates, setDuplicates] = useState([]);
@@ -1585,14 +1587,11 @@ export default function Editor({ workflowMode = null }) {
   const pushQuestionUndo = (label, snapshots) => {
     const normalizedSnapshots = (Array.isArray(snapshots) ? snapshots : [snapshots]).filter(Boolean);
     if (normalizedSnapshots.length === 0) return;
-    setUndoStack(prev => [
-      ...prev,
-      {
-        type: "question_snapshot",
-        label,
-        snapshots: normalizedSnapshots,
-      }
-    ]);
+    pushUndo(undoScope, {
+      type: "question_snapshot",
+      label,
+      snapshots: normalizedSnapshots,
+    });
   };
 
   const handleIncludeReserveQuestion = async (question) => {
@@ -1629,17 +1628,14 @@ export default function Editor({ workflowMode = null }) {
           const response = await axios.post(`${API}/questions/${questionId}/move`, {
             target_program_id: program.id
           });
-          setUndoStack(prev => [
-            ...prev,
-            {
-              type: "move",
-              questionId,
-              questionLabel: question.real_name || question.youtube_username || "Pregunta",
-              fromProgramId: question.program_id,
-              fromProgramName: programById.get(question.program_id)?.name || "Reserva",
-              toProgramName: response.data.target_program || program.name,
-            }
-          ]);
+          pushUndo(undoScope, {
+            type: "move",
+            questionId,
+            questionLabel: question.real_name || question.youtube_username || "Pregunta",
+            fromProgramId: question.program_id,
+            fromProgramName: programById.get(question.program_id)?.name || "Reserva",
+            toProgramName: response.data.target_program || program.name,
+          });
           await Promise.all([fetchPrograms(), fetchQuestions()]);
           toast.success(`Pregunta añadida a la edición en curso (${response.data.target_program || program.name})`);
           return;
@@ -1660,16 +1656,14 @@ export default function Editor({ workflowMode = null }) {
     }
   };
 
-  const handleUndoLastAction = async () => {
-    const action = undoStack[undoStack.length - 1];
+  const handleUndoAction = useCallback(async (action) => {
     if (!action) {
-      return;
+      return false;
     }
 
-    setUndoing(true);
     try {
       if (action.type === "move") {
-        if (!action.fromProgramId) return;
+        if (!action.fromProgramId) return false;
         await axios.post(`${API}/questions/${action.questionId}/move`, {
           target_program_id: action.fromProgramId
         });
@@ -1678,21 +1672,29 @@ export default function Editor({ workflowMode = null }) {
           axios.put(`${API}/questions/${snapshot.id}`, snapshot)
         )));
       } else {
-        return;
+        return false;
       }
-      setUndoStack(prev => prev.slice(0, -1));
       await Promise.all([fetchPrograms(), fetchQuestions()]);
       toast.success(action.type === "move"
         ? `Deshecho: pregunta devuelta a ${action.fromProgramName}`
         : `Deshecho: ${action.label}`
       );
+      return true;
     } catch (error) {
       console.error("Error undoing last action:", error);
       toast.error(error.response?.data?.detail || "No se pudo deshacer la última acción");
-    } finally {
-      setUndoing(false);
+      return false;
     }
-  };
+  }, [fetchPrograms, fetchQuestions]);
+
+  useEffect(() => {
+    setActiveScope(undoScope);
+    const unregister = registerUndoHandler(undoScope, handleUndoAction);
+    return () => {
+      unregister();
+      setActiveScope(null);
+    };
+  }, [handleUndoAction, registerUndoHandler, setActiveScope, undoScope]);
 
   const showAllActions = !isFocusedWorkflow;
   const showNameActions = showAllActions || workflowMode === "names";
@@ -1706,38 +1708,6 @@ export default function Editor({ workflowMode = null }) {
 
   return (
     <div className="p-6 md:p-10 animate-fade-in">
-      <div className="fixed right-4 top-[4.75rem] z-40 md:right-5 md:top-5">
-        <Button
-          variant="default"
-          size="sm"
-          onClick={handleUndoLastAction}
-          disabled={undoStack.length === 0 || undoing}
-          className="rounded-full shadow-lg uppercase tracking-wide text-xs"
-          data-testid="undo-last-action-button"
-          title={
-            undoStack.length > 0
-              ? `Deshacer: ${
-                  undoStack[undoStack.length - 1].type === "move"
-                    ? `${undoStack[undoStack.length - 1].questionLabel} a ${undoStack[undoStack.length - 1].fromProgramName}`
-                    : undoStack[undoStack.length - 1].label
-                }`
-              : "No hay acciones para deshacer"
-          }
-        >
-          {undoing ? (
-            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-          ) : (
-            <Undo2 className="w-4 h-4 mr-2" />
-          )}
-          Deshacer
-          {undoStack.length > 0 && (
-            <Badge variant="secondary" className="ml-2 rounded-full px-2 py-0 text-[10px]">
-              {undoStack.length}
-            </Badge>
-          )}
-        </Button>
-      </div>
-
       {/* Header */}
       <div className="mb-8 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
         <div>
