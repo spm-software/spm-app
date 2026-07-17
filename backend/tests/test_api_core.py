@@ -436,6 +436,36 @@ def test_duplicate_detection_in_batch_and_history(client, auth_headers, fake_db)
     assert data["duplicates"][0]["original_question"]["batch_name"] == "Historial"
     assert fake_db.questions.docs[1]["is_duplicate"] is True
 
+    pairs_response = auth_get(client, "/api/questions/duplicate-pairs/current", auth_headers)
+    assert pairs_response.status_code == 200
+    pairs = pairs_response.json()
+    assert pairs["duplicates_count"] == 1
+    assert pairs["orphans_count"] == 0
+    assert pairs["duplicates"][0]["new_question"]["id"] == "c1"
+    assert pairs["duplicates"][0]["new_question"]["batch_name"] == "Actual"
+    assert pairs["duplicates"][0]["original_question"]["id"] == "h1"
+    assert pairs["duplicates"][0]["original_question"]["batch_name"] == "Historial"
+
+
+def test_duplicate_pairs_skip_missing_originals(client, auth_headers, fake_db):
+    fake_db.questions.docs.append({
+        "id": "orphan",
+        "youtube_username": "@ana",
+        "original_text": "Pregunta sin original",
+        "is_duplicate": True,
+        "duplicate_of": "missing",
+        "created_at": "2026-07-01T10:00:00+00:00",
+        "import_batch_id": "current",
+    })
+
+    response = auth_get(client, "/api/questions/duplicate-pairs/current", auth_headers)
+    assert response.status_code == 200
+    assert response.json() == {
+        "duplicates_count": 0,
+        "duplicates": [],
+        "orphans_count": 1,
+    }
+
 
 def test_distribution_move_export_and_clear(client, auth_headers):
     imported = auth_post(

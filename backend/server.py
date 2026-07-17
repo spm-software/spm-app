@@ -2402,6 +2402,77 @@ async def cleanup_duplicate_check_task(task_id: str):
     raise HTTPException(status_code=404, detail="Tarea no encontrada")
 
 
+def _duplicate_question_payload(question: Dict, batches_by_id: Dict[str, Dict]) -> Dict:
+    batch_id = question.get("import_batch_id")
+    batch = batches_by_id.get(batch_id, {})
+    return {
+        "id": question["id"],
+        "username": question.get("youtube_username"),
+        "real_name": question.get("real_name"),
+        "text": question.get("corrected_text") or question.get("original_text"),
+        "created_at": question.get("created_at"),
+        "batch_id": batch_id,
+        "batch_name": batch.get("name"),
+        "batch_date": batch.get("created_at"),
+        "video_id": question.get("youtube_video_id"),
+        "video_title": question.get("youtube_video_title"),
+    }
+
+
+@api_router.get("/questions/duplicate-pairs/{batch_id}")
+async def get_duplicate_pairs(batch_id: str):
+    """Return persisted duplicate pairs for a batch, including comparison metadata."""
+    duplicate_questions = await db.questions.find(
+        {
+            "import_batch_id": batch_id,
+            "is_duplicate": True,
+            "duplicate_of": {"$ne": None},
+        },
+        {"_id": 0},
+    ).sort("created_at", 1).to_list(2000)
+
+    if not duplicate_questions:
+        return {"duplicates_count": 0, "duplicates": [], "orphans_count": 0}
+
+    original_ids = list({question["duplicate_of"] for question in duplicate_questions})
+    original_questions = await db.questions.find(
+        {"id": {"$in": original_ids}},
+        {"_id": 0},
+    ).to_list(2000)
+    originals_by_id = {question["id"]: question for question in original_questions}
+
+    batch_ids = {
+        question.get("import_batch_id")
+        for question in [*duplicate_questions, *original_questions]
+        if question.get("import_batch_id")
+    }
+    batches = await db.import_batches.find(
+        {"id": {"$in": list(batch_ids)}},
+        {"_id": 0, "id": 1, "name": 1, "created_at": 1},
+    ).to_list(2000)
+    batches_by_id = {batch["id"]: batch for batch in batches}
+
+    pairs = []
+    orphans_count = 0
+    for duplicate in duplicate_questions:
+        original = originals_by_id.get(duplicate.get("duplicate_of"))
+        if not original:
+            orphans_count += 1
+            continue
+        pairs.append({
+            "new_question": _duplicate_question_payload(duplicate, batches_by_id),
+            "original_question": _duplicate_question_payload(original, batches_by_id),
+            "similarity": None,
+            "type": "pending_review",
+        })
+
+    return {
+        "duplicates_count": len(pairs),
+        "duplicates": pairs,
+        "orphans_count": orphans_count,
+    }
+
+
 @api_router.post("/duplicates/cleanup-orphans")
 async def cleanup_orphan_duplicates():
     """Clean up duplicate flags that point to non-existent questions."""

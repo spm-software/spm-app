@@ -36,7 +36,12 @@ import {
   Filter,
   Ban,
   Video,
-  Inbox
+  Inbox,
+  CalendarDays,
+  ChevronLeft,
+  ChevronRight,
+  ExternalLink,
+  RefreshCw
 } from "lucide-react";
 import { API_BASE_URL as API } from "@/lib/api";
 import { useUndo } from "@/contexts/UndoContext";
@@ -321,15 +326,100 @@ const EditableText = ({ question, onSave }) => {
   );
 };
 
-// Modal de duplicados
-const DuplicatesModal = ({ open, onClose, duplicates, onDelete, onKeep, currentBatchName, batches }) => {
+const formatDuplicateDate = (value) => {
+  if (!value) return "Fecha no disponible";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Fecha no disponible";
+  return date.toLocaleString("es-ES", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+};
+
+const DuplicateQuestionPanel = ({ question, label, tone, onDelete, deleting, busy }) => {
+  const videoUrl = getYoutubeVideoUrl(question.video_id);
+  const toneClasses = tone === "original"
+    ? "border-sky-300 bg-sky-50/40 dark:bg-sky-950/20"
+    : "border-amber-300 bg-amber-50/40 dark:bg-amber-950/20";
+  const badgeClasses = tone === "original"
+    ? "border-sky-300 bg-sky-50 text-sky-800 dark:bg-sky-950 dark:text-sky-200"
+    : "border-amber-300 bg-amber-50 text-amber-800 dark:bg-amber-950 dark:text-amber-200";
+
+  return (
+    <section className={`flex min-h-[390px] min-w-0 flex-col border-2 p-5 ${toneClasses}`}>
+      <div className="mb-5 flex flex-wrap items-center justify-between gap-2 border-b border-current/10 pb-4">
+        <Badge variant="outline" className={`rounded-sm text-xs font-bold ${badgeClasses}`}>
+          {label}
+        </Badge>
+        <span className="text-xs text-muted-foreground">{question.batch_name || "Lote desconocido"}</span>
+      </div>
+
+      <div className="mb-5 space-y-3 text-sm">
+        <div>
+          <p className="font-semibold text-base">{question.real_name || question.username || "Usuario desconocido"}</p>
+          {question.username && (
+            <p className="font-mono text-xs text-muted-foreground">{question.username}</p>
+          )}
+        </div>
+        <div className="flex items-start gap-2 text-muted-foreground">
+          <CalendarDays className="mt-0.5 h-4 w-4 flex-shrink-0" />
+          <div>
+            <p className="text-xs font-semibold uppercase">Importada el</p>
+            <p>{formatDuplicateDate(question.created_at)}</p>
+          </div>
+        </div>
+        {question.video_title && (
+          <div className="flex items-start gap-2 text-muted-foreground">
+            <Video className="mt-0.5 h-4 w-4 flex-shrink-0" />
+            <div className="min-w-0">
+              <p className="break-words">{question.video_title}</p>
+              {videoUrl && (
+                <a
+                  href={videoUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="mt-1 inline-flex items-center gap-1 text-xs text-primary underline-offset-4 hover:underline"
+                >
+                  Ver vídeo <ExternalLink className="h-3 w-3" />
+                </a>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="flex-1 border-y border-border bg-background/70 p-4">
+        <p className="whitespace-pre-wrap text-base leading-relaxed">{question.text}</p>
+      </div>
+
+      <Button
+        variant="outline"
+        size="lg"
+        onClick={onDelete}
+        disabled={busy}
+        className="mt-5 rounded-sm border-destructive/50 text-xs uppercase text-destructive hover:bg-destructive hover:text-destructive-foreground"
+      >
+        {deleting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Trash2 className="mr-2 h-4 w-4" />}
+        Eliminar {tone === "original" ? "original" : "duplicada"}
+      </Button>
+    </section>
+  );
+};
+
+const DuplicateReview = ({ duplicates, loading, onDelete, onKeep, onRefresh, focusQuestionId }) => {
   const [activeIndex, setActiveIndex] = useState(0);
+  const [decision, setDecision] = useState(null);
 
   useEffect(() => {
-    if (open) {
-      setActiveIndex(0);
-    }
-  }, [open]);
+    if (!focusQuestionId) return;
+    const focusIndex = duplicates.findIndex((pair) => (
+      pair.new_question.id === focusQuestionId || pair.original_question.id === focusQuestionId
+    ));
+    if (focusIndex >= 0) setActiveIndex(focusIndex);
+  }, [duplicates, focusQuestionId]);
 
   useEffect(() => {
     if (!duplicates || duplicates.length === 0) {
@@ -339,214 +429,154 @@ const DuplicatesModal = ({ open, onClose, duplicates, onDelete, onKeep, currentB
     setActiveIndex((current) => Math.min(current, duplicates.length - 1));
   }, [duplicates]);
 
-  if (!duplicates || duplicates.length === 0) return null;
+  if (loading) {
+    return (
+      <div className="border border-border bg-card py-20 text-center">
+        <Loader2 className="mx-auto mb-4 h-8 w-8 animate-spin" />
+        <p className="text-muted-foreground">Cargando comparaciones pendientes...</p>
+      </div>
+    );
+  }
+
+  if (!duplicates || duplicates.length === 0) {
+    return (
+      <div className="border border-green-300 bg-green-50 px-6 py-16 text-center dark:bg-green-950/20">
+        <CheckCircle className="mx-auto mb-4 h-10 w-10 text-green-600" />
+        <h2 className="font-heading text-2xl">REVISIÓN COMPLETADA</h2>
+        <p className="mt-2 text-sm text-muted-foreground">No quedan parejas de duplicados pendientes en este lote.</p>
+        <Button variant="outline" onClick={onRefresh} className="mt-5 rounded-sm">
+          <RefreshCw className="mr-2 h-4 w-4" />
+          Comprobar de nuevo
+        </Button>
+      </div>
+    );
+  }
 
   const activeDuplicate = duplicates[activeIndex] || duplicates[0];
   const isFirstDuplicate = activeIndex === 0;
   const isLastDuplicate = activeIndex >= duplicates.length - 1;
 
-  const formatBatchInfo = (question, type, isNewQuestion = false) => {
-    // First, try to use the question's own batch info (works for both new and original)
-    if (question.batch_name) {
-      return question.batch_name;
+  const runDecision = async (key, action) => {
+    setDecision(key);
+    try {
+      await action();
+    } finally {
+      setDecision(null);
     }
-
-    if (question.batch_date) {
-      return new Date(question.batch_date).toLocaleDateString('es-ES', {
-        day: 'numeric',
-        month: 'long',
-        year: 'numeric'
-      });
-    }
-
-    // Try to find batch in the batches list
-    if (question.batch_id && batches) {
-      const batch = batches.find(b => b.id === question.batch_id);
-      if (batch) {
-        return batch.name || new Date(batch.created_at).toLocaleDateString('es-ES', {
-          day: 'numeric',
-          month: 'long',
-          year: 'numeric'
-        });
-      }
-    }
-
-    // For new question without batch info, use current batch as fallback
-    if (isNewQuestion && currentBatchName) {
-      return currentBatchName;
-    }
-
-    // Last resort - show batch_id shortened if available
-    if (question.batch_id) {
-      return `Lote ${question.batch_id.slice(0, 8)}...`;
-    }
-
-    return "Desconocido";
   };
 
-  const advanceAfterDecision = () => {
-    if (duplicates.length <= 1) {
-      onClose();
-      return;
-    }
-    setActiveIndex((current) => Math.min(current, duplicates.length - 2));
-  };
-
-  const handleDiscardNew = async () => {
+  const handleDiscardDuplicate = () => runDecision("duplicate", async () => {
     await onDelete(activeDuplicate.new_question.id);
-    advanceAfterDecision();
-  };
+  });
 
-  const handleDiscardOriginal = async () => {
+  const handleDiscardOriginal = () => runDecision("original", async () => {
     if (!window.confirm("¿Seguro que quieres eliminar la pregunta anterior y conservar la nueva?")) {
       return;
     }
     await onDelete(activeDuplicate.original_question.id);
-    advanceAfterDecision();
-  };
+  });
 
-  const handleKeepBoth = async () => {
+  const handleKeepBoth = () => runDecision("both", async () => {
     await onKeep(activeDuplicate.new_question.id);
-    advanceAfterDecision();
-  };
+  });
 
-  const handleDeleteBoth = async () => {
+  const handleDeleteBoth = () => runDecision("delete-both", async () => {
     if (!window.confirm("¿Seguro que quieres eliminar ambas preguntas? Esta acción puede quitar una pregunta antigua.")) {
       return;
     }
     await onDelete(activeDuplicate.new_question.id);
     await onDelete(activeDuplicate.original_question.id);
-    advanceAfterDecision();
-  };
+  });
 
   return (
-    <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className="max-w-5xl max-h-[90vh] overflow-hidden flex flex-col">
-        <DialogHeader className="pb-4 border-b">
-          <DialogTitle className="font-heading text-2xl uppercase tracking-tight flex items-center gap-3">
-            <Copy className="w-6 h-6 text-red-500" />
-            COMPARAR DUPLICADOS
-            <Badge variant="destructive" className="text-base px-3 py-1">{duplicates.length}</Badge>
-          </DialogTitle>
-          <p className="text-sm text-muted-foreground mt-2">
-            Revisa un par cada vez. La pregunta nueva ya está marcada como duplicada y no entrará en la distribución salvo que decidas mantener ambas.
+    <div className="border border-border bg-card p-4 sm:p-6" data-testid="duplicate-review">
+      <div className="mb-6 flex flex-col gap-4 border-b border-border pb-5 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <div className="flex items-center gap-3">
+            <Copy className="h-6 w-6 text-destructive" />
+            <h2 className="font-heading text-2xl">COMPARAR DUPLICADOS</h2>
+            <Badge variant="destructive" className="rounded-sm">{duplicates.length}</Badge>
+          </div>
+          <p className="mt-2 text-sm text-muted-foreground">
+            Compara una pareja cada vez y decide qué preguntas deben continuar.
           </p>
-        </DialogHeader>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="icon"
+            onClick={() => setActiveIndex((current) => Math.max(0, current - 1))}
+            disabled={isFirstDuplicate || Boolean(decision)}
+            title="Comparación anterior"
+          >
+            <ChevronLeft className="h-4 w-4" />
+          </Button>
+          <span className="min-w-[110px] text-center text-sm font-semibold">
+            {activeIndex + 1} de {duplicates.length}
+          </span>
+          <Button
+            variant="outline"
+            size="icon"
+            onClick={() => setActiveIndex((current) => Math.min(duplicates.length - 1, current + 1))}
+            disabled={isLastDuplicate || Boolean(decision)}
+            title="Comparación siguiente"
+          >
+            <ChevronRight className="h-4 w-4" />
+          </Button>
+        </div>
+      </div>
 
-        <div className="flex-1 overflow-y-auto py-4">
-          <div className="mb-4 flex flex-col gap-3 rounded-sm border border-border bg-secondary/30 p-4 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                Duplicado {activeIndex + 1} de {duplicates.length}
-              </p>
-              <p className="font-bold text-lg">
-                {activeDuplicate.new_question.real_name || activeDuplicate.new_question.username}
-              </p>
-              <p className="text-xs text-muted-foreground font-mono">
-                {activeDuplicate.new_question.username}
-              </p>
-            </div>
-            <Badge variant={activeDuplicate.type === "ai_detected" || activeDuplicate.type === "ai_same_batch" ? "default" : "destructive"} className="w-fit">
-              {activeDuplicate.type === "ai_detected" || activeDuplicate.type === "ai_same_batch" ? "Detectado por IA" : `${activeDuplicate.similarity}% similar`}
-            </Badge>
-          </div>
+      <div className="grid grid-cols-1 items-stretch gap-4 lg:grid-cols-[minmax(0,1fr)_48px_minmax(0,1fr)]">
+        <DuplicateQuestionPanel
+          question={activeDuplicate.original_question}
+          label="ORIGINAL"
+          tone="original"
+          onDelete={handleDiscardOriginal}
+          deleting={decision === "original"}
+          busy={Boolean(decision)}
+        />
 
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-            <div className="rounded-sm border-2 border-blue-300 bg-blue-50/30 p-4">
-              <div className="mb-3 flex flex-wrap items-center gap-2">
-                <Badge variant="outline" className="text-xs font-bold bg-blue-50 text-blue-700 border-blue-300">
-                  NUEVA
-                </Badge>
-                <span className="text-xs text-muted-foreground">
-                  {formatBatchInfo(activeDuplicate.new_question, activeDuplicate.type, true)}
-                </span>
-              </div>
-              <p className="min-h-[180px] text-base leading-relaxed whitespace-pre-wrap">
-                {activeDuplicate.new_question.text}
-              </p>
-            </div>
-
-            <div className="rounded-sm border-2 border-amber-300 bg-amber-50/30 p-4">
-              <div className="mb-3 flex flex-wrap items-center gap-2">
-                <Badge variant="outline" className="text-xs font-bold bg-amber-50 text-amber-700 border-amber-300">
-                  POSIBLE ORIGINAL
-                </Badge>
-                <span className="text-xs text-muted-foreground">
-                  {formatBatchInfo(activeDuplicate.original_question, activeDuplicate.type, false)}
-                </span>
-              </div>
-              <p className="min-h-[180px] text-base leading-relaxed whitespace-pre-wrap">
-                {activeDuplicate.original_question.text}
-              </p>
-            </div>
-          </div>
-
-          <div className="mt-5 grid grid-cols-1 gap-3 border-t border-dashed pt-4 md:grid-cols-2">
-            <Button
-              variant="default"
-              size="lg"
-              onClick={handleDiscardNew}
-              className="rounded-sm uppercase tracking-wide text-xs"
-            >
-              <Check className="w-4 h-4 mr-2" />
-              Descartar nueva duplicada
-            </Button>
-            <Button
-              variant="outline"
-              size="lg"
-              onClick={handleKeepBoth}
-              className="rounded-sm uppercase tracking-wide text-xs"
-            >
-              Mantener ambas
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleDiscardOriginal}
-              className="rounded-sm text-xs text-muted-foreground"
-            >
-              Conservar nueva y eliminar anterior
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={handleDeleteBoth}
-              className="rounded-sm text-xs text-red-500 hover:text-red-700 hover:bg-red-50"
-            >
-              <Trash2 className="w-3.5 h-3.5 mr-1" />
-              Eliminar ambas
-            </Button>
-          </div>
+        <div className="relative flex items-center justify-center" aria-hidden="true">
+          <div className="hidden h-full w-px bg-border lg:block" />
+          <span className="absolute bg-card px-2 text-xs font-bold text-muted-foreground">VS</span>
         </div>
 
-        <div className="pt-4 border-t flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <p className="text-sm text-muted-foreground">
-            {duplicates.length} par{duplicates.length > 1 ? 'es' : ''} pendiente{duplicates.length > 1 ? 's' : ''} de revisión
-          </p>
-          <div className="flex items-center gap-2">
-            <Button
-              onClick={() => setActiveIndex((current) => Math.max(0, current - 1))}
-              variant="outline"
-              className="rounded-sm"
-              disabled={isFirstDuplicate}
-            >
-              Anterior
-            </Button>
-            <Button
-              onClick={() => setActiveIndex((current) => Math.min(duplicates.length - 1, current + 1))}
-              variant="outline"
-              className="rounded-sm"
-              disabled={isLastDuplicate}
-            >
-              Siguiente
-            </Button>
-            <Button onClick={onClose} variant="outline" className="rounded-sm">
-              Cerrar
-            </Button>
-          </div>
-        </div>
-      </DialogContent>
-    </Dialog>
+        <DuplicateQuestionPanel
+          question={activeDuplicate.new_question}
+          label="POSIBLE DUPLICADA"
+          tone="duplicate"
+          onDelete={handleDiscardDuplicate}
+          deleting={decision === "duplicate"}
+          busy={Boolean(decision)}
+        />
+      </div>
+
+      <div className="mt-6 grid grid-cols-1 gap-3 border-t border-dashed border-border pt-5 sm:grid-cols-2">
+        <Button
+          size="lg"
+          onClick={handleKeepBoth}
+          disabled={Boolean(decision)}
+          className="rounded-sm bg-green-600 text-xs uppercase hover:bg-green-700"
+        >
+          {decision === "both" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Check className="mr-2 h-4 w-4" />}
+          No son duplicadas: conservar las dos
+        </Button>
+        <Button
+          variant="destructive"
+          size="lg"
+          onClick={handleDeleteBoth}
+          disabled={Boolean(decision)}
+          className="rounded-sm text-xs uppercase"
+        >
+          {decision === "delete-both" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Trash2 className="mr-2 h-4 w-4" />}
+          Eliminar las dos
+        </Button>
+      </div>
+
+      <p className="mt-4 text-center text-xs text-muted-foreground">
+        Al decidir, esta pareja desaparece y se muestra automáticamente la siguiente.
+      </p>
+    </div>
   );
 };
 
@@ -707,7 +737,8 @@ export default function Editor({ workflowMode = null }) {
   const [checkingDuplicates, setCheckingDuplicates] = useState(false);
   const [duplicateProgress, setDuplicateProgress] = useState({ current: 0, total: 0, percentage: 0, duplicatesFound: 0 });
   const [duplicates, setDuplicates] = useState([]);
-  const [showDuplicatesModal, setShowDuplicatesModal] = useState(false);
+  const [loadingDuplicatePairs, setLoadingDuplicatePairs] = useState(false);
+  const [duplicateFocusId, setDuplicateFocusId] = useState(null);
   const [showSearchModal, setShowSearchModal] = useState(false);
   const [showOnlyDuplicates, setShowOnlyDuplicates] = useState(false);
   const [showOnlyNoName, setShowOnlyNoName] = useState(false);
@@ -790,6 +821,30 @@ export default function Editor({ workflowMode = null }) {
     }
   }, [selectedBatch, globalReserveMode]);
 
+  const fetchDuplicatePairs = useCallback(async () => {
+    if (!selectedBatch || globalReserveMode) {
+      setDuplicates([]);
+      return [];
+    }
+
+    setLoadingDuplicatePairs(true);
+    try {
+      const response = await axios.get(`${API}/questions/duplicate-pairs/${selectedBatch}`);
+      const pairs = response.data.duplicates || [];
+      setDuplicates(pairs);
+      if (response.data.orphans_count > 0) {
+        toast.warning(`${response.data.orphans_count} referencia${response.data.orphans_count === 1 ? "" : "s"} de duplicado sin original`);
+      }
+      return pairs;
+    } catch (error) {
+      console.error("Error fetching duplicate pairs:", error);
+      toast.error("No se pudieron cargar las comparaciones de duplicados");
+      return [];
+    } finally {
+      setLoadingDuplicatePairs(false);
+    }
+  }, [selectedBatch, globalReserveMode]);
+
   const fetchPrograms = useCallback(async () => {
     if (!selectedBatch && !globalReserveMode) {
       setPrograms([]);
@@ -822,6 +877,8 @@ export default function Editor({ workflowMode = null }) {
     setGlobalReserveMode(false);
     setAssignmentFilter("all");
     setShowOnlyUnconfirmedNames(false);
+    setDuplicates([]);
+    setDuplicateFocusId(null);
     setSelectedBatch(batchId);
   };
 
@@ -876,17 +933,13 @@ export default function Editor({ workflowMode = null }) {
       if (detail.key === "review_duplicates") {
         setShowOnlyNoName(false);
         setShowOnlyUnconfirmedNames(false);
-        if (duplicates.length > 0) {
-          setShowDuplicatesModal(true);
-        } else {
-          setShowOnlyDuplicates(true);
-        }
+        setShowOnlyDuplicates(true);
       }
     };
 
     window.addEventListener("spm-workflow-step", handleWorkflowStep);
     return () => window.removeEventListener("spm-workflow-step", handleWorkflowStep);
-  }, [batches, duplicates.length, globalReserveMode, selectedBatch]);
+  }, [batches, globalReserveMode, selectedBatch]);
 
   useEffect(() => {
     if (!workflowMode) return;
@@ -930,11 +983,7 @@ export default function Editor({ workflowMode = null }) {
       setClasificationFilter("all");
       setShowOnlyNoName(false);
       setShowOnlyUnconfirmedNames(false);
-      if (duplicates.length > 0) {
-        setShowDuplicatesModal(true);
-      } else {
-        setShowOnlyDuplicates(true);
-      }
+      setShowOnlyDuplicates(true);
       return;
     }
 
@@ -943,7 +992,15 @@ export default function Editor({ workflowMode = null }) {
     setShowOnlyDuplicates(false);
     setShowOnlyNoName(false);
     setShowOnlyUnconfirmedNames(false);
-  }, [workflowMode, batches, duplicates.length, globalReserveMode, selectedBatch]);
+  }, [workflowMode, batches, globalReserveMode, selectedBatch]);
+
+  const duplicateReviewActive = workflowMode === "review_duplicates" || showOnlyDuplicates;
+
+  useEffect(() => {
+    if (duplicateReviewActive && selectedBatch && !globalReserveMode) {
+      fetchDuplicatePairs();
+    }
+  }, [duplicateReviewActive, selectedBatch, globalReserveMode, fetchDuplicatePairs]);
 
   const handleCorrectAll = async (force = false) => {
     if (force && !window.confirm("¿Recorregir todas las preguntas válidas de este lote? Esto volverá a consumir créditos IA.")) {
@@ -1053,14 +1110,18 @@ export default function Editor({ workflowMode = null }) {
     setCheckingDuplicates(true);
     try {
       const response = await axios.post(`${API}/questions/check-duplicates/${selectedBatch}`);
-      setDuplicates(response.data.duplicates);
       if (response.data.duplicates.length > 0) {
-        setShowDuplicatesModal(true);
+        if (duplicateReviewActive) {
+          await fetchDuplicatePairs();
+        } else {
+          setShowOnlyDuplicates(true);
+        }
         toast.info(`${response.data.duplicates_count} duplicados encontrados`);
       } else {
+        setDuplicates([]);
         toast.success("No se encontraron duplicados");
       }
-      fetchQuestions();
+      await fetchQuestions();
     } catch (error) {
       console.error("Error checking duplicates:", error);
       toast.error("Error al buscar duplicados");
@@ -1104,18 +1165,22 @@ export default function Editor({ workflowMode = null }) {
               pollingIntervalRef.current = null;
             }
 
-            setDuplicates(status.duplicates || []);
             setCheckingDuplicates(false);
             setDuplicateProgress({ current: 0, total: 0, percentage: 0, duplicatesFound: 0 });
 
             if (status.duplicates_count > 0) {
-              setShowDuplicatesModal(true);
+              if (duplicateReviewActive) {
+                await fetchDuplicatePairs();
+              } else {
+                setShowOnlyDuplicates(true);
+              }
               toast.success(`${status.duplicates_count} duplicados encontrados con ${modelLabel}`);
             } else {
+              setDuplicates([]);
               toast.success(`No se encontraron duplicados con ${modelLabel}`);
             }
 
-            fetchQuestions();
+            await fetchQuestions();
 
             // Cleanup the task from server memory
             axios.delete(`${API}/duplicates/status/${taskId}`).catch(() => {});
@@ -1154,94 +1219,10 @@ export default function Editor({ workflowMode = null }) {
   };
 
   const handleViewDuplicate = async (question) => {
-    // First check if we already have this duplicate in memory
-    const existingDup = duplicates.find(d =>
-      d.new_question.id === question.id || d.original_question.id === question.id
-    );
-
-    if (existingDup) {
-      setDuplicates([existingDup]);
-      setShowDuplicatesModal(true);
-      return;
-    }
-
-    // If not, fetch the duplicate directly by ID
     if (question.duplicate_of) {
-      try {
-        // Fetch both questions with their batch info
-        const [originalResponse, newQuestionResponse] = await Promise.all([
-          axios.get(`${API}/questions/by-id/${question.duplicate_of}`).catch(err => {
-            console.error("Error fetching original question:", err);
-            return null;
-          }),
-          axios.get(`${API}/questions/by-id/${question.id}`).catch(err => {
-            console.error("Error fetching new question:", err);
-            return null;
-          })
-        ]);
-
-        // Check if original question was found
-        if (!originalResponse || !originalResponse.data || originalResponse.data.detail) {
-          toast.error("La pregunta duplicada original fue eliminada. Limpiando referencia...");
-          // Clear the duplicate flag since original no longer exists
-          try {
-            await axios.put(`${API}/questions/${question.id}`, {
-              is_duplicate: false,
-              duplicate_of: null
-            });
-          } catch (e) {
-            console.error("Error clearing duplicate flag:", e);
-          }
-          fetchQuestions();
-          return;
-        }
-
-        const originalQ = originalResponse.data;
-        const newQ = newQuestionResponse?.data || question;
-
-        setDuplicates([{
-          new_question: {
-            id: question.id,
-            username: question.youtube_username,
-            real_name: question.real_name,
-            text: question.corrected_text || question.original_text,
-            batch_id: newQ.import_batch_id || question.import_batch_id,
-            batch_name: newQ.batch_name,
-            batch_date: newQ.batch_date
-          },
-          original_question: {
-            id: originalQ.id,
-            username: originalQ.youtube_username,
-            real_name: originalQ.real_name,
-            text: originalQ.corrected_text || originalQ.original_text,
-            batch_id: originalQ.import_batch_id,
-            batch_name: originalQ.batch_name,
-            batch_date: originalQ.batch_date
-          },
-          type: "ai_detected",
-          similarity: 100
-        }]);
-        setShowDuplicatesModal(true);
-      } catch (error) {
-        console.error("Error finding duplicate:", error);
-        if (error.response?.status === 404) {
-          toast.error("La pregunta original fue eliminada");
-          // Clear the duplicate flag since original no longer exists
-          try {
-            await axios.put(`${API}/questions/${question.id}`, {
-              is_duplicate: false,
-              duplicate_of: null
-            });
-          } catch (e) {
-            console.error("Error clearing duplicate flag:", e);
-          }
-          fetchQuestions();
-        } else {
-          toast.error("Error al buscar el duplicado");
-        }
-      }
+      setDuplicateFocusId(question.id);
+      setShowOnlyDuplicates(true);
     } else {
-      // No duplicate_of set, need to run AI check
       toast.info("Ejecuta 'DUPLICADOS CON IA' para encontrar la pregunta original");
     }
   };
@@ -1333,7 +1314,12 @@ export default function Editor({ workflowMode = null }) {
     const scrollY = window.scrollY;
     try {
       await axios.delete(`${API}/questions/${questionId}`);
-      setQuestions(prev => prev.filter(q => q.id !== questionId));
+      setQuestions(prev => prev
+        .filter(q => q.id !== questionId)
+        .map(q => q.duplicate_of === questionId
+          ? { ...q, is_duplicate: false, duplicate_of: null }
+          : q
+        ));
       setDuplicates(prev => prev.filter(d =>
         d.new_question.id !== questionId && d.original_question.id !== questionId
       ));
@@ -1895,16 +1881,24 @@ export default function Editor({ workflowMode = null }) {
           </div>
         )}
 
-        {showReviewDuplicateActions && duplicates.length > 0 && !checkingDuplicates && (
+        {showReviewDuplicateActions && !checkingDuplicates && (
           <Button
             variant="secondary"
-            onClick={() => setShowDuplicatesModal(true)}
+            onClick={() => {
+              setShowOnlyDuplicates(true);
+              fetchDuplicatePairs();
+            }}
+            disabled={loadingDuplicatePairs || !selectedBatch}
             size="lg"
             className="rounded-sm uppercase tracking-wide text-xs"
             data-testid="review-duplicates-button"
           >
-            <Copy className="w-4 h-4 mr-2" />
-            Ver {duplicates.length} duplicados
+            {loadingDuplicatePairs ? (
+              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+            ) : (
+              <RefreshCw className="w-4 h-4 mr-2" />
+            )}
+            {duplicates.length} parejas pendientes
           </Button>
         )}
 
@@ -2107,6 +2101,8 @@ export default function Editor({ workflowMode = null }) {
         </div>
       </div>
 
+      {!duplicateReviewActive && (
+        <>
       {/* Assignment Filter */}
       <div className="flex items-center gap-2 mb-6 flex-wrap" data-testid="assignment-filters">
         <span
@@ -2227,8 +2223,20 @@ export default function Editor({ workflowMode = null }) {
           })()}
         </div>
       )}
+        </>
+      )}
 
       {/* Questions List */}
+      {duplicateReviewActive ? (
+        <DuplicateReview
+          duplicates={duplicates}
+          loading={loadingDuplicatePairs}
+          onDelete={handleDeleteQuestion}
+          onKeep={handleKeepBoth}
+          onRefresh={fetchDuplicatePairs}
+          focusQuestionId={duplicateFocusId}
+        />
+      ) : (
       <div className="space-y-4">
         {loading ? (
           <div className="py-16 text-center">
@@ -2573,20 +2581,7 @@ export default function Editor({ workflowMode = null }) {
           })()
         )}
       </div>
-
-      {/* Duplicates Modal */}
-      <DuplicatesModal
-        open={showDuplicatesModal}
-        onClose={() => setShowDuplicatesModal(false)}
-        duplicates={duplicates}
-        onDelete={handleDeleteQuestion}
-        onKeep={handleKeepBoth}
-        batches={batches}
-        currentBatchName={batches.find(b => b.id === selectedBatch)?.name ||
-          (batches.find(b => b.id === selectedBatch)?.created_at ?
-            new Date(batches.find(b => b.id === selectedBatch).created_at).toLocaleDateString('es-ES', { day: 'numeric', month: 'long', year: 'numeric' }) :
-            'Importación actual')}
-      />
+      )}
 
       <SearchModal
         open={showSearchModal}
