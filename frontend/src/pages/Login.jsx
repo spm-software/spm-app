@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import axios from "axios";
 import { toast } from "sonner";
@@ -14,6 +14,7 @@ export default function Login() {
   const { user, loading, login } = useAuth();
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+  const callbackStartedRef = useRef(false);
 
   // Redirect if already authenticated
   useEffect(() => {
@@ -34,7 +35,11 @@ export default function Login() {
       return;
     }
     
-    if (code) {
+    if (code && !callbackStartedRef.current) {
+      callbackStartedRef.current = true;
+      // OAuth codes are single-use. Remove it before the async exchange so
+      // React StrictMode or a hot reload cannot submit the same code twice.
+      window.history.replaceState({}, "", "/login");
       (async () => {
         setSubmitting(true);
         try {
@@ -45,7 +50,6 @@ export default function Login() {
           });
           login(res.data.token, res.data.user);
           toast.success(`Bienvenido, ${res.data.user.name || res.data.user.email}`);
-          window.history.replaceState({}, "", "/login");
           navigate("/", { replace: true });
         } catch (err) {
           const status = err?.response?.status;
@@ -55,7 +59,6 @@ export default function Login() {
           } else {
             setError(`Error al iniciar sesión: ${detail}`);
           }
-          window.history.replaceState({}, "", "/login");
         } finally {
           setSubmitting(false);
         }

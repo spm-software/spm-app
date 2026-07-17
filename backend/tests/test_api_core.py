@@ -2,6 +2,8 @@ import io
 import zipfile
 from datetime import datetime, timedelta, timezone
 
+import server
+
 
 def auth_get(client, path, headers, **kwargs):
     return client.get(path, headers=headers, **kwargs)
@@ -23,6 +25,46 @@ def test_jwt_middleware_requires_token(client):
     response = client.get("/api/settings")
     assert response.status_code == 401
     assert response.json()["detail"] == "Falta token de autenticación"
+
+
+def test_google_callback_allows_small_clock_skew(client, auth_headers, monkeypatch):
+    verified = {}
+    monkeypatch.setattr(server, "GOOGLE_CLIENT_ID", "test-client-id")
+    monkeypatch.setattr(server, "GOOGLE_CLIENT_SECRET", "test-client-secret")
+
+    class FakeFlow:
+        credentials = type("Credentials", (), {"id_token": "test-id-token"})()
+
+        def fetch_token(self, code):
+            assert code == "single-use-code"
+
+    monkeypatch.setattr(
+        server.Flow,
+        "from_client_config",
+        lambda *args, **kwargs: FakeFlow(),
+    )
+
+    def fake_verify(token, request, audience, **kwargs):
+        verified.update(kwargs)
+        return {
+            "email": "admin@example.com",
+            "name": "Admin",
+            "picture": "",
+        }
+
+    monkeypatch.setattr(server.google_id_token, "verify_oauth2_token", fake_verify)
+
+    response = client.post(
+        "/api/auth/google-callback",
+        json={
+            "code": "single-use-code",
+            "redirect_uri": "http://localhost:3000/login",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["user"]["email"] == "admin@example.com"
+    assert verified["clock_skew_in_seconds"] == 10
 
 
 def test_settings_default_and_update(client, auth_headers):

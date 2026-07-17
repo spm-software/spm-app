@@ -4402,6 +4402,7 @@ JWT_EXP_DAYS = 7
 GOOGLE_CLIENT_ID = os.environ.get('YOUTUBE_CLIENT_ID')
 GOOGLE_CLIENT_SECRET = os.environ.get('YOUTUBE_CLIENT_SECRET')
 AUTH_SCOPES = ["openid", "https://www.googleapis.com/auth/userinfo.email", "https://www.googleapis.com/auth/userinfo.profile"]
+GOOGLE_TOKEN_CLOCK_SKEW_SECONDS = 10
 
 # Paths that bypass JWT verification
 AUTH_PUBLIC_PREFIXES = ("/api/auth/",)
@@ -4524,6 +4525,7 @@ async def auth_google_callback(data: GoogleCallbackRequest):
             credentials.id_token,
             google_auth_requests.Request(),
             GOOGLE_CLIENT_ID,
+            clock_skew_in_seconds=GOOGLE_TOKEN_CLOCK_SKEW_SECONDS,
         )
     except Exception as e:
         logger.error(f"[Auth] id_token verification failed: {e}")
