@@ -408,6 +408,139 @@ def test_youtube_import_anchor_tracks_latest_processed_comment(client, auth_head
     assert anchor.status_code == 200
     assert anchor.json()["last_anchor"]["comment_id"] == "yt-comment-1"
 
+    older_import = auth_post(
+        client,
+        "/api/youtube/import-comments",
+        auth_headers,
+        json={
+            "comments": [{
+                **first_comment,
+                "comment_id": "yt-comment-old",
+                "text": "Pregunta de un rango anterior",
+                "published_at": "2026-06-20T10:00:00Z",
+            }],
+            "expected_previous_anchor_id": "yt-comment-1",
+        },
+    )
+    assert older_import.status_code == 200
+    assert older_import.json()["anchor_advanced"] is False
+    assert older_import.json()["anchor_consistent"] is True
+    assert older_import.json()["last_anchor"]["comment_id"] == "yt-comment-1"
+
+
+def test_youtube_fetch_uses_channel_wide_comments_and_verifies_anchor(
+    client, auth_headers, fake_db, monkeypatch
+):
+    fake_db.youtube_last_imported.docs.append({
+        "type": "last_anchor",
+        "comment_id": "thread-anchor",
+        "raw_text": "Pregunta anterior",
+        "raw_username": "Ana",
+        "comment_published_at": "2026-07-10T10:00:00Z",
+    })
+
+    calls = []
+
+    class FakeRequest:
+        def __init__(self, response):
+            self.response = response
+
+        def execute(self):
+            return self.response
+
+    class FakeChannels:
+        def list(self, **kwargs):
+            return FakeRequest({
+                "items": [{"id": "channel-1", "snippet": {"title": "Canal"}}]
+            })
+
+    class FakeCommentThreads:
+        def list(self, **kwargs):
+            calls.append(kwargs)
+            return FakeRequest({
+                "items": [
+                    {
+                        "id": "thread-new",
+                        "snippet": {
+                            "videoId": "old-video",
+                            "topLevelComment": {"snippet": {
+                                "authorDisplayName": "Luis",
+                                "textDisplay": "Pregunta posterior en un video antiguo",
+                                "publishedAt": "2026-07-11T12:00:00Z",
+                                "authorChannelId": {"value": "author-luis"},
+                            }},
+                        },
+                    },
+                    {
+                        "id": "thread-anchor",
+                        "snippet": {
+                            "videoId": "old-video",
+                            "topLevelComment": {"snippet": {
+                                "authorDisplayName": "Ana",
+                                "textDisplay": "Pregunta anterior",
+                                "publishedAt": "2026-07-10T10:00:00Z",
+                                "authorChannelId": {"value": "author-ana"},
+                            }},
+                        },
+                    },
+                    {
+                        "id": "thread-too-old",
+                        "snippet": {
+                            "videoId": "old-video",
+                            "topLevelComment": {"snippet": {
+                                "authorDisplayName": "Marta",
+                                "textDisplay": "Pregunta anterior al rango efectivo",
+                                "publishedAt": "2026-07-09T23:59:59Z",
+                            }},
+                        },
+                    },
+                ]
+            })
+
+    class FakeVideos:
+        def list(self, **kwargs):
+            return FakeRequest({
+                "items": [{"id": "old-video", "snippet": {"title": "Video antiguo"}}]
+            })
+
+    class FakeYouTube:
+        def channels(self):
+            return FakeChannels()
+
+        def commentThreads(self):
+            return FakeCommentThreads()
+
+        def videos(self):
+            return FakeVideos()
+
+    async def fake_get_youtube_service():
+        return FakeYouTube()
+
+    monkeypatch.setattr(server, "get_youtube_service", fake_get_youtube_service)
+
+    response = auth_post(
+        client,
+        "/api/youtube/fetch-comments",
+        auth_headers,
+        json={
+            "fecha_desde": "2026-07-11",
+            "fecha_hasta": "2026-07-12",
+            "empezar_desde_ultimo": True,
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert calls[0]["allThreadsRelatedToChannelId"] == "channel-1"
+    assert "videoId" not in calls[0]
+    assert data["comments_count"] == 2
+    assert data["videos_count"] == 1
+    assert data["comments"][1]["video_title"] == "Video antiguo"
+    assert data["continuity"]["status"] == "verified"
+    assert data["continuity"]["previous_anchor_found"] is True
+    assert data["continuity"]["overlap_applied"] is True
+    assert data["continuity"]["comments_after_anchor"] == 1
+
 
 def test_youtube_import_anchor_ignores_comments_outside_selected_range(client, auth_headers):
     in_range_first = {

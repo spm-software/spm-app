@@ -15,7 +15,9 @@ import {
   CirclePlay as Youtube,
   Link2,
   Download,
-  History
+  History,
+  AlertTriangle,
+  ShieldCheck
 } from "lucide-react";
 import { API_BASE_URL as API } from "@/lib/api";
 
@@ -48,18 +50,21 @@ export default function Importador() {
         loading: false 
       });
       setLastAnchor(response.data.last_anchor || null);
-      
-      // The anchor is purely informational now — never auto-cutoff.
-      // Manual textarea is always visible (empty by default = no cutoff, full range).
       setManualCutoffText("");
-      
-      // Set default dates
+
       const today = new Date();
       const twoWeeksAgo = new Date(today);
       twoWeeksAgo.setDate(today.getDate() - 15);
-      
-      setFechaHasta(today.toISOString().split('T')[0]);
-      setFechaDesde(twoWeeksAgo.toISOString().split('T')[0]);
+      const toLocalDateInput = (date) => {
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, "0");
+        const day = String(date.getDate()).padStart(2, "0");
+        return `${year}-${month}-${day}`;
+      };
+      const anchorDate = response.data.last_anchor?.comment_published_at?.slice(0, 10);
+
+      setFechaHasta(toLocalDateInput(today));
+      setFechaDesde(anchorDate || toLocalDateInput(twoWeeksAgo));
       
     } catch (error) {
       console.error("Error checking YouTube auth:", error);
@@ -70,7 +75,7 @@ export default function Importador() {
   const formatImportRangeName = (from, to) => {
     if (!from || !to) return "";
     const format = (value) => {
-      const [year, month, day] = value.split("-");
+      const [, month, day] = value.split("-");
       return day && month ? `${day}/${month}` : value;
     };
     return `${format(from)} al ${format(to)}`;
@@ -89,12 +94,11 @@ export default function Importador() {
     try {
       setFetchProgress(30);
       
-      // Determine cutoff to send: only `texto_corte` is honored.
-      // Date range ALWAYS prevails — anchor is never used as automatic cutoff.
       const manualText = manualCutoffText.trim();
       const payload = {
         fecha_desde: fechaDesde,
-        fecha_hasta: fechaHasta
+        fecha_hasta: fechaHasta,
+        empezar_desde_ultimo: true,
       };
       if (manualText) payload.texto_corte = manualText;
       
@@ -111,13 +115,15 @@ export default function Importador() {
       
       // Now import the comments directly (dedup by youtube_comment_id in backend)
       setFetchProgress(85);
-      
+      const effectiveFrom = response.data.continuity?.effective_from?.slice(0, 10) || fechaDesde;
+
       const importResponse = await axios.post(`${API}/youtube/import-comments`, {
         comments: response.data.comments,
-        batch_name: formatImportRangeName(fechaDesde, fechaHasta),
+        batch_name: formatImportRangeName(effectiveFrom, fechaHasta),
         batch_created_at: fechaHasta,
-        fecha_desde: fechaDesde,
-        fecha_hasta: fechaHasta
+        fecha_desde: effectiveFrom,
+        fecha_hasta: fechaHasta,
+        expected_previous_anchor_id: response.data.continuity?.previous_anchor_id || null,
       });
       
       setFetchProgress(100);
@@ -133,7 +139,15 @@ export default function Importador() {
       
       const n = importResponse.data.questions_imported || 0;
       const u = importResponse.data.questions_updated || 0;
-      if (n > 0 && u > 0) {
+      const continuityStatus = response.data.continuity?.status;
+      const continuityVerified = continuityStatus === "verified" && importResponse.data.anchor_consistent;
+      if (continuityVerified) {
+        toast.success(`Continuidad verificada · ${n} nuevas · ${u} ya existentes`);
+      } else if (continuityStatus === "anchor_not_found") {
+        toast.warning(`Importación completada, pero no se localizó el corte anterior · ${n} nuevas`);
+      } else if (continuityStatus === "manual_cutoff") {
+        toast.warning(`Importación detenida en el corte manual · ${n} nuevas`);
+      } else if (n > 0 && u > 0) {
         toast.success(`${n} nuevas importadas · ${u} actualizadas (ya existían)`);
       } else if (n > 0) {
         toast.success(`${n} preguntas importadas de YouTube`);
@@ -215,7 +229,7 @@ Pedro López - Gracias por el contenido! Mi pregunta es: ¿Cuánto tiempo tarda 
             )}
           </div>
           <p className="text-xs text-muted-foreground">
-            Este es el punto de corte que debes usar como referencia para no dejar preguntas fuera en la siguiente importación.
+            La próxima importación comenzará automáticamente desde el día de este comentario y comprobará que el corte sigue presente.
           </p>
         </>
       ) : (
@@ -341,13 +355,13 @@ Pedro López - Gracias por el contenido! Mi pregunta es: ¿Cuánto tiempo tarda 
                       <div className="space-y-2">
                         <Label htmlFor="texto-corte" className="text-xs uppercase tracking-wide flex items-center gap-2">
                           <Link2 className="w-3 h-3" />
-                          Texto de corte manual (opcional)
+                          Corte manual excepcional (opcional)
                         </Label>
                         <Textarea
                           id="texto-corte"
                           value={manualCutoffText}
                           onChange={(e) => setManualCutoffText(e.target.value)}
-                          placeholder="Pega el texto exacto de un comentario donde quieras parar la descarga. Déjalo vacío para descargar todo el rango."
+                          placeholder="Normalmente debe quedar vacío. Úsalo solo si necesitas detener deliberadamente la descarga en un comentario concreto."
                           className="rounded-sm text-sm min-h-[70px] resize-none"
                           data-testid="texto-corte-input"
                         />
@@ -395,14 +409,69 @@ Pedro López - Gracias por el contenido! Mi pregunta es: ¿Cuánto tiempo tarda 
             <div className="space-y-6">
               {/* YouTube Result */}
               {youtubeResult && (
-                <Card className="bg-card border border-primary/50 rounded-sm animate-fade-in">
+                <Card className={`bg-card border rounded-sm animate-fade-in ${
+                  ["anchor_not_found", "manual_cutoff"].includes(youtubeResult.continuity?.status)
+                    ? "border-amber-400"
+                    : "border-green-500/50"
+                }`}>
                   <CardHeader>
                     <CardTitle className="font-heading text-lg uppercase tracking-tight flex items-center gap-2">
-                      <CheckCircle className="w-5 h-5 text-green-500" />
-                      DESCARGADO
+                      {["anchor_not_found", "manual_cutoff"].includes(youtubeResult.continuity?.status) ? (
+                        <AlertTriangle className="w-5 h-5 text-amber-500" />
+                      ) : (
+                        <ShieldCheck className="w-5 h-5 text-green-500" />
+                      )}
+                      IMPORTACIÓN COMPROBADA
                     </CardTitle>
                   </CardHeader>
                   <CardContent className="space-y-3">
+                    {youtubeResult.continuity && (
+                      <div className={`border p-3 text-sm ${
+                        ["anchor_not_found", "manual_cutoff"].includes(youtubeResult.continuity.status)
+                          ? "border-amber-300 bg-amber-50 text-amber-900 dark:bg-amber-950/20 dark:text-amber-200"
+                          : "border-green-300 bg-green-50 text-green-900 dark:bg-green-950/20 dark:text-green-200"
+                      }`} data-testid="youtube-continuity-status">
+                        {youtubeResult.continuity.status === "verified" && (
+                          <>
+                            <p className="font-semibold">Corte anterior localizado</p>
+                            <p className="mt-1 text-xs">
+                              Se revisó desde el corte anterior y se encontraron {youtubeResult.continuity.comments_after_anchor} comentario{youtubeResult.continuity.comments_after_anchor === 1 ? "" : "s"} posterior{youtubeResult.continuity.comments_after_anchor === 1 ? "" : "es"}.
+                            </p>
+                          </>
+                        )}
+                        {youtubeResult.continuity.status === "first_import" && (
+                          <>
+                            <p className="font-semibold">Primera importación registrada</p>
+                            <p className="mt-1 text-xs">El último comentario procesado quedará guardado como corte para la siguiente.</p>
+                          </>
+                        )}
+                        {youtubeResult.continuity.status === "anchor_not_found" && (
+                          <>
+                            <p className="font-semibold">No se localizó el comentario de corte</p>
+                            <p className="mt-1 text-xs">
+                              Se revisó el canal desde {new Date(youtubeResult.continuity.effective_from).toLocaleDateString("es-ES")}, pero el comentario pudo haber sido eliminado de YouTube.
+                            </p>
+                          </>
+                        )}
+                        {youtubeResult.continuity.status === "manual_cutoff" && (
+                          <>
+                            <p className="font-semibold">Descarga detenida manualmente</p>
+                            <p className="mt-1 text-xs">Se encontró el texto indicado y no se descargaron comentarios anteriores a ese punto.</p>
+                          </>
+                        )}
+                        {youtubeResult.continuity.status === "historical_range" && (
+                          <>
+                            <p className="font-semibold">Rango histórico revisado</p>
+                            <p className="mt-1 text-xs">El corte actual es posterior y se ha conservado sin retroceder.</p>
+                          </>
+                        )}
+                        {youtubeResult.imported && !youtubeResult.imported.anchor_consistent && (
+                          <p className="mt-2 border-t border-current/20 pt-2 text-xs font-semibold">
+                            El corte cambió durante la descarga. Repite la comprobación antes de continuar.
+                          </p>
+                        )}
+                      </div>
+                    )}
                     <div className="flex justify-between items-center">
                       <span className="text-sm text-muted-foreground">Canal:</span>
                       <span className="font-medium text-sm">{youtubeResult.channel}</span>
@@ -425,6 +494,14 @@ Pedro López - Gracias por el contenido! Mi pregunta es: ¿Cuánto tiempo tarda 
                           <span className="text-sm text-muted-foreground">Importados:</span>
                           <span className="font-bold text-lg text-primary">
                             {youtubeResult.imported.questions_imported}
+                          </span>
+                        </div>
+                        <div className="mt-2 flex justify-between items-start gap-3">
+                          <span className="text-sm text-muted-foreground">Nuevo corte:</span>
+                          <span className="text-right text-xs font-medium">
+                            {youtubeResult.imported.last_anchor?.comment_published_at
+                              ? new Date(youtubeResult.imported.last_anchor.comment_published_at).toLocaleString("es-ES")
+                              : "Sin cambios"}
                           </span>
                         </div>
                       </div>

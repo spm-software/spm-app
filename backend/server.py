@@ -180,7 +180,7 @@ class YouTubeAuthCallback(BaseModel):
 class YouTubeFetchRequest(BaseModel):
     fecha_desde: str  # ISO date string
     fecha_hasta: str  # ISO date string
-    empezar_desde_ultimo: bool = False  # Usar anchor guardado como punto de corte
+    empezar_desde_ultimo: bool = True  # Usar anchor guardado como punto de corte seguro
     texto_corte: Optional[str] = None  # Texto del último comentario ya procesado (match manual)
 
 class BlockedComment(BaseModel):
@@ -3960,18 +3960,12 @@ async def get_youtube_service():
 
 @api_router.post("/youtube/fetch-comments")
 async def youtube_fetch_comments(request: YouTubeFetchRequest):
-    """Fetch comments from YouTube channel videos within date range"""
+    """Fetch channel-wide comments and verify continuity from the stored anchor."""
     try:
         youtube = await get_youtube_service()
 
-        # Parse dates
         fecha_desde = datetime.fromisoformat(request.fecha_desde.replace('Z', '+00:00'))
         fecha_hasta = datetime.fromisoformat(request.fecha_hasta.replace('Z', '+00:00'))
-
-        # Add time to make it end of day
-        fecha_hasta = fecha_hasta.replace(hour=23, minute=59, second=59)
-
-        # Ensure UTC-aware, then format as RFC 3339 with Z suffix for YouTube API
         if fecha_desde.tzinfo is None:
             fecha_desde = fecha_desde.replace(tzinfo=timezone.utc)
         else:
@@ -3980,13 +3974,12 @@ async def youtube_fetch_comments(request: YouTubeFetchRequest):
             fecha_hasta = fecha_hasta.replace(tzinfo=timezone.utc)
         else:
             fecha_hasta = fecha_hasta.astimezone(timezone.utc)
+        fecha_desde = fecha_desde.replace(hour=0, minute=0, second=0, microsecond=0)
+        fecha_hasta = fecha_hasta.replace(hour=23, minute=59, second=59, microsecond=999999)
 
-        published_after = fecha_desde.strftime('%Y-%m-%dT%H:%M:%SZ')
-        published_before = fecha_hasta.strftime('%Y-%m-%dT%H:%M:%SZ')
+        if fecha_desde > fecha_hasta:
+            raise HTTPException(status_code=400, detail="La fecha inicial no puede ser posterior a la fecha final")
 
-        logger.info(f"[YouTube] Fetching videos publishedAfter={published_after} publishedBefore={published_before}")
-
-        # Get authenticated user's channel
         channels_response = youtube.channels().list(
             part='id,snippet',
             mine=True
@@ -3997,54 +3990,7 @@ async def youtube_fetch_comments(request: YouTubeFetchRequest):
 
         channel_id = channels_response['items'][0]['id']
         channel_title = channels_response['items'][0]['snippet']['title']
-        logger.info(f"Found channel: {channel_title} ({channel_id})")
-
-        # Get videos from the channel within date range
-        videos = []
-        next_page_token = None
-
-        while True:
-            search_response = youtube.search().list(
-                part='id,snippet',
-                channelId=channel_id,
-                type='video',
-                publishedAfter=published_after,
-                publishedBefore=published_before,
-                maxResults=50,
-                pageToken=next_page_token,
-                order='date'
-            ).execute()
-
-            for item in search_response.get('items', []):
-                videos.append({
-                    'id': item['id']['videoId'],
-                    'title': item['snippet']['title'],
-                    'published_at': item['snippet']['publishedAt']
-                })
-
-            next_page_token = search_response.get('nextPageToken')
-            if not next_page_token:
-                break
-
-        logger.info(f"Found {len(videos)} videos in date range")
-
-        # Resolve cutoff: ONLY manual `texto_corte` is honored (explicit user action).
-        # The stored anchor is NOT used as automatic cutoff — date range always prevails.
-        # Deduplication of already-imported comments is handled at DB level by youtube_comment_id.
-        cutoff_text_normalized = None
-
-        def _normalize_for_match(s: str) -> str:
-            if not s:
-                return ""
-            stripped = re.sub(r'<[^>]+>', ' ', s)
-            stripped = re.sub(r'\s+', ' ', stripped).strip().lower()
-            return stripped
-
-        if request.texto_corte and request.texto_corte.strip():
-            cutoff_text_normalized = _normalize_for_match(request.texto_corte)
-            logger.info(f"[YouTube] Using manual text cutoff (normalized len={len(cutoff_text_normalized)})")
-        elif request.empezar_desde_ultimo:
-            logger.info("[YouTube] empezar_desde_ultimo=True IGNORED — date range always prevails, dedup handled by comment_id")
+        logger.info(f"[YouTube] Fetching channel-wide comments for {channel_title} ({channel_id})")
 
         def _parse_comment_datetime(value: Optional[str]) -> datetime:
             if not value:
@@ -4057,107 +4003,167 @@ async def youtube_fetch_comments(request: YouTubeFetchRequest):
             except Exception:
                 return datetime.min.replace(tzinfo=timezone.utc)
 
-        # Fetch comments for each video
+        def _normalize_for_match(value: str) -> str:
+            stripped = re.sub(r'<[^>]+>', ' ', value or '')
+            return re.sub(r'\s+', ' ', stripped).strip().lower()
+
+        previous_anchor = await get_youtube_last_anchor()
+        previous_anchor_id = previous_anchor.get("comment_id") if previous_anchor else None
+        previous_anchor_date = _parse_comment_datetime(
+            previous_anchor.get("comment_published_at") if previous_anchor else None
+        )
+        anchor_applies = bool(
+            request.empezar_desde_ultimo
+            and previous_anchor_id
+            and previous_anchor_date != datetime.min.replace(tzinfo=timezone.utc)
+            and previous_anchor_date <= fecha_hasta
+        )
+        effective_from = fecha_desde
+        if anchor_applies:
+            anchor_day_start = previous_anchor_date.replace(hour=0, minute=0, second=0, microsecond=0)
+            effective_from = min(fecha_desde, anchor_day_start)
+
+        cutoff_text_normalized = _normalize_for_match(request.texto_corte or "") or None
         all_comments = []
         greetings_filtered = 0
-        stop_fetching = False
+        anchor_found = False
+        manual_cutoff_found = False
+        reached_before_range = False
+        next_page_token = None
 
-        for video in videos:
-            if stop_fetching:
+        while True:
+            comments_response = youtube.commentThreads().list(
+                part='snippet',
+                allThreadsRelatedToChannelId=channel_id,
+                maxResults=100,
+                pageToken=next_page_token,
+                order='time'
+            ).execute()
+
+            for item in comments_response.get('items', []):
+                thread = item.get('snippet', {})
+                top_level = thread.get('topLevelComment', {})
+                comment = top_level.get('snippet', {})
+                comment_id = item.get('id') or top_level.get('id')
+                comment_published_at = _parse_comment_datetime(comment.get('publishedAt'))
+
+                if comment_published_at < effective_from:
+                    reached_before_range = True
+                    break
+                if comment_published_at > fecha_hasta:
+                    continue
+
+                if previous_anchor_id and comment_id == previous_anchor_id:
+                    anchor_found = True
+
+                text = comment.get('textDisplay', '')
+                if cutoff_text_normalized:
+                    normalized_comment = _normalize_for_match(text)
+                    if (
+                        normalized_comment == cutoff_text_normalized
+                        or (
+                            len(cutoff_text_normalized) >= 10
+                            and cutoff_text_normalized in normalized_comment
+                        )
+                    ):
+                        manual_cutoff_found = True
+                        logger.info(f"[YouTube] Found manual cutoff by text: {comment_id}")
+                        break
+
+                if is_greeting(text):
+                    greetings_filtered += 1
+                    continue
+
+                username = comment.get('authorDisplayName', '')
+                all_comments.append({
+                    'comment_id': comment_id,
+                    'youtube_username': f"@{username.replace('@', '')}",
+                    'raw_username': username,
+                    'text': text,
+                    'video_id': thread.get('videoId'),
+                    'video_title': None,
+                    'published_at': comment.get('publishedAt'),
+                    'author_channel_id': comment.get('authorChannelId', {}).get('value')
+                })
+
+            if reached_before_range or manual_cutoff_found:
+                break
+            next_page_token = comments_response.get('nextPageToken')
+            if not next_page_token:
                 break
 
-            logger.info(f"Fetching comments for video: {video['title']}")
-            next_page_token = None
-
-            while True:
-                if stop_fetching:
-                    break
-
-                try:
-                    comments_response = youtube.commentThreads().list(
-                        part='snippet',
-                        videoId=video['id'],
-                        maxResults=100,
-                        pageToken=next_page_token,
-                        order='time'  # API only supports newest-first; we reverse later
-                    ).execute()
-
-                    for item in comments_response.get('items', []):
-                        comment = item['snippet']['topLevelComment']['snippet']
-                        comment_id = item['id']
-
-                        username = comment.get('authorDisplayName', '')
-                        text = comment.get('textDisplay', '')
-                        comment_published_at = _parse_comment_datetime(comment.get('publishedAt'))
-                        if comment_published_at < fecha_desde or comment_published_at > fecha_hasta:
-                            continue
-
-                        # Cutoff ONLY by manual text match (explicit user action)
-                        if cutoff_text_normalized:
-                            normalized_comment = _normalize_for_match(text)
-                            if (normalized_comment == cutoff_text_normalized or
-                                (len(cutoff_text_normalized) >= 10 and cutoff_text_normalized in normalized_comment)):
-                                logger.info(f"[YouTube] Found cutoff by text match: {comment_id}")
-                                stop_fetching = True
-                                break
-
-                        # Filter greetings using existing function
-                        if is_greeting(text):
-                            greetings_filtered += 1
-                            continue
-
-                        all_comments.append({
-                            'comment_id': comment_id,
-                            'youtube_username': f"@{username.replace('@', '')}",
-                            'raw_username': username,  # exact value from YouTube
-                            'text': text,
-                            'video_id': video['id'],
-                            'video_title': video['title'],
-                            'published_at': comment.get('publishedAt'),
-                            'author_channel_id': comment.get('authorChannelId', {}).get('value')
-                        })
-
-                    next_page_token = comments_response.get('nextPageToken')
-                    if not next_page_token:
-                        break
-
-                except HttpError as e:
-                    if 'commentsDisabled' in str(e):
-                        logger.info(f"Comments disabled for video: {video['title']}")
-                        break
-                    raise
+        video_ids = sorted({comment['video_id'] for comment in all_comments if comment.get('video_id')})
+        video_titles = {}
+        for offset in range(0, len(video_ids), 50):
+            video_response = youtube.videos().list(
+                part='snippet',
+                id=','.join(video_ids[offset:offset + 50])
+            ).execute()
+            for item in video_response.get('items', []):
+                video_titles[item['id']] = item.get('snippet', {}).get('title')
+        for comment in all_comments:
+            comment['video_title'] = video_titles.get(comment.get('video_id'))
 
         all_comments.sort(key=lambda item: _parse_comment_datetime(item.get('published_at')))
-        logger.info(f"Total comments fetched: {len(all_comments)}, greetings filtered: {greetings_filtered}")
+        comments_after_anchor = sum(
+            1 for comment in all_comments
+            if previous_anchor_date == datetime.min.replace(tzinfo=timezone.utc)
+            or _parse_comment_datetime(comment.get('published_at')) > previous_anchor_date
+        )
+        continuity_status = "first_import"
+        if manual_cutoff_found:
+            continuity_status = "manual_cutoff"
+        elif anchor_applies:
+            continuity_status = "verified" if anchor_found else "anchor_not_found"
+        elif previous_anchor_id:
+            continuity_status = "historical_range"
 
-        # Keep a fetch history log after filtering by the real comment date.
-        # The cutoff anchor is updated only after comments are imported.
+        continuity = {
+            "status": continuity_status,
+            "previous_anchor_id": previous_anchor_id,
+            "previous_anchor_found": anchor_found,
+            "requested_from": fecha_desde.isoformat(),
+            "effective_from": effective_from.isoformat(),
+            "overlap_applied": effective_from < fecha_desde,
+            "comments_after_anchor": comments_after_anchor,
+            "manual_cutoff_used": bool(cutoff_text_normalized),
+            "manual_cutoff_found": manual_cutoff_found,
+        }
+        logger.info(
+            f"[YouTube] continuity={continuity_status} anchor={previous_anchor_id} "
+            f"comments={len(all_comments)} greetings={greetings_filtered}"
+        )
+
         if all_comments:
             newest_comment = all_comments[-1]
-
             await db.youtube_imports.insert_one({
                 "created_at": datetime.now(timezone.utc),
                 "fecha_desde": fecha_desde,
                 "fecha_hasta": fecha_hasta,
-                "videos_count": len(videos),
+                "effective_from": effective_from,
+                "videos_count": len(video_ids),
                 "comments_count": len(all_comments),
                 "greetings_filtered": greetings_filtered,
                 "last_comment_id": newest_comment['comment_id'],
                 "last_comment_text": newest_comment['text'],
                 "channel_id": channel_id,
-                "channel_title": channel_title
+                "channel_title": channel_title,
+                "continuity": continuity,
             })
 
         return {
             "success": True,
             "channel": channel_title,
-            "videos_count": len(videos),
+            "videos_count": len(video_ids),
             "comments_count": len(all_comments),
             "greetings_filtered": greetings_filtered,
             "comments": all_comments,
-            "last_comment_id": all_comments[-1]['comment_id'] if all_comments else None
+            "last_comment_id": all_comments[-1]['comment_id'] if all_comments else None,
+            "continuity": continuity,
         }
 
+    except HTTPException:
+        raise
     except HttpError as e:
         logger.error(f"YouTube API error: {e}")
         if 'quotaExceeded' in str(e):
@@ -4174,6 +4180,7 @@ class YouTubeImportCommentsRequest(BaseModel):
     batch_created_at: Optional[str] = None
     fecha_desde: Optional[str] = None
     fecha_hasta: Optional[str] = None
+    expected_previous_anchor_id: Optional[str] = None
 
 
 @api_router.post("/youtube/import-comments")
@@ -4197,6 +4204,7 @@ async def youtube_import_comments(request: YouTubeImportCommentsRequest):
     updated_count = 0
     blocked_count = 0
     newest_processed_comment: Optional[Dict] = None
+    previous_anchor = await get_youtube_last_anchor()
 
     def _parse_youtube_datetime(value: Optional[str]) -> datetime:
         if not value:
@@ -4340,9 +4348,10 @@ async def youtube_import_comments(request: YouTubeImportCommentsRequest):
             {"$set": {"question_count": imported_count}}
         )
 
-    last_anchor = await get_youtube_last_anchor()
+    last_anchor = previous_anchor
+    anchor_advanced = False
     if newest_processed_comment:
-        anchor_doc = {
+        candidate_anchor = {
             "type": "last_anchor",
             "comment_id": newest_processed_comment.get("comment_id"),
             "raw_text": newest_processed_comment.get("text"),
@@ -4353,16 +4362,37 @@ async def youtube_import_comments(request: YouTubeImportCommentsRequest):
             "video_title": newest_processed_comment.get("video_title"),
             "source": "youtube_import_comments"
         }
-        await db.youtube_last_imported.update_one(
-            {"type": "last_anchor"},
-            {"$set": anchor_doc},
-            upsert=True
+        previous_date = _parse_youtube_datetime(
+            previous_anchor.get("comment_published_at") if previous_anchor else None
         )
-        last_anchor = await get_youtube_last_anchor()
-        logger.info(
-            f"[YouTube] Saved last_anchor after import: id={anchor_doc['comment_id']} "
-            f"user={anchor_doc['raw_username']} date={anchor_doc['comment_published_at']}"
+        candidate_date = _parse_youtube_datetime(candidate_anchor.get("comment_published_at"))
+        same_anchor = bool(
+            previous_anchor
+            and previous_anchor.get("comment_id") == candidate_anchor.get("comment_id")
         )
+        if not previous_anchor or candidate_date > previous_date or same_anchor:
+            await db.youtube_last_imported.update_one(
+                {"type": "last_anchor"},
+                {"$set": candidate_anchor},
+                upsert=True
+            )
+            last_anchor = await get_youtube_last_anchor()
+            anchor_advanced = not previous_anchor or candidate_date > previous_date
+            logger.info(
+                f"[YouTube] Saved last_anchor after import: id={candidate_anchor['comment_id']} "
+                f"user={candidate_anchor['raw_username']} date={candidate_anchor['comment_published_at']}"
+            )
+        else:
+            logger.info(
+                f"[YouTube] Kept newer stored anchor {previous_anchor.get('comment_id')} "
+                f"instead of older candidate {candidate_anchor.get('comment_id')}"
+            )
+
+    previous_anchor_id = previous_anchor.get("comment_id") if previous_anchor else None
+    anchor_consistent = (
+        request.expected_previous_anchor_id is None
+        or request.expected_previous_anchor_id == previous_anchor_id
+    )
 
     logger.info(
         f"[YouTube] import-comments: {imported_count} new, {updated_count} updated, "
@@ -4375,7 +4405,10 @@ async def youtube_import_comments(request: YouTubeImportCommentsRequest):
         "questions_updated": updated_count,
         "blocked_count": blocked_count,
         "total": imported_count + updated_count,
-        "last_anchor": last_anchor
+        "last_anchor": last_anchor,
+        "anchor_advanced": anchor_advanced,
+        "anchor_consistent": anchor_consistent,
+        "previous_anchor_id": previous_anchor_id,
     }
 
 
