@@ -1521,12 +1521,22 @@ export default function Editor({ workflowMode = null }) {
   const handleConfirmName = async (questionId) => {
     try {
       const question = questions.find(q => q.id === questionId);
-      await axios.post(`${API}/questions/${questionId}/confirm-name`);
-      pushQuestionUndo("Confirmar nombre", question ? createQuestionSnapshot(question) : null);
+      const response = await axios.post(`${API}/questions/${questionId}/confirm-name`);
+      const confirmedName = response.data.real_name;
+      const targetUsername = normalizeYoutubeUsername(response.data.youtube_username || question?.youtube_username);
+      pushUndo(undoScope, {
+        type: "name_confirmation",
+        label: "Confirmar nombre",
+        questionIds: response.data.newly_confirmed_ids || [],
+        mappingId: response.data.mapping_created ? response.data.mapping_id : null,
+      });
       setQuestions(prev => prev.map(q =>
-        q.id === questionId ? { ...q, real_name_confirmed: true } : q
+        normalizeYoutubeUsername(q.youtube_username) === targetUsername
+          ? { ...q, real_name: confirmedName, real_name_confirmed: true }
+          : q
       ));
-      toast.success("Nombre confirmado");
+      const count = response.data.confirmed_count || 0;
+      toast.success(count > 1 ? `Nombre confirmado en ${count} preguntas` : "Nombre confirmado");
     } catch (error) {
       console.error("Error confirming name:", error);
       toast.error("Error al confirmar nombre");
@@ -1692,6 +1702,11 @@ export default function Editor({ workflowMode = null }) {
         await Promise.all(action.snapshots.map(snapshot => (
           axios.put(`${API}/questions/${snapshot.id}`, snapshot)
         )));
+      } else if (action.type === "name_confirmation") {
+        await axios.post(`${API}/questions/undo-confirm-name`, {
+          question_ids: action.questionIds || [],
+          mapping_id: action.mappingId || null,
+        });
       } else {
         return false;
       }
@@ -2383,13 +2398,7 @@ export default function Editor({ workflowMode = null }) {
                       const handleConfirm = async () => {
                         if (state === "confirmed") return;
                         if (!window.confirm(`¿Confirmar "${question.real_name || question.youtube_username}" como nombre correcto?`)) return;
-                        try {
-                          await axios.post(`${API}/questions/${question.id}/confirm-name`);
-                          toast.success("Nombre confirmado");
-                          fetchQuestions();
-                        } catch {
-                          toast.error("Error al confirmar nombre");
-                        }
+                        await handleConfirmName(question.id);
                       };
                       return (
                         <Badge

@@ -295,6 +295,72 @@ def test_questions_create_update_confirm_and_delete(client, auth_headers, fake_d
     assert auth_delete(client, f"/api/questions/{question['id']}", auth_headers).status_code == 404
 
 
+def test_confirm_name_propagates_to_same_user_and_future_imports(client, auth_headers, fake_db):
+    fake_db.questions.docs.extend([
+        {
+            "id": "q-name-1",
+            "youtube_username": "@ana123",
+            "real_name": "Ana",
+            "real_name_confirmed": False,
+            "original_text": "Pregunta uno",
+            "import_batch_id": "batch-1",
+        },
+        {
+            "id": "q-name-2",
+            "youtube_username": "ANA123",
+            "real_name": "Ana",
+            "real_name_confirmed": False,
+            "original_text": "Pregunta dos",
+            "import_batch_id": "batch-2",
+        },
+        {
+            "id": "q-other-ana",
+            "youtube_username": "@otra-ana",
+            "real_name": "Ana",
+            "real_name_confirmed": False,
+            "original_text": "Otra persona con el mismo nombre",
+            "import_batch_id": "batch-2",
+        },
+    ])
+
+    confirmed = auth_post(client, "/api/questions/q-name-1/confirm-name", auth_headers)
+
+    assert confirmed.status_code == 200
+    payload = confirmed.json()
+    assert payload["confirmed_count"] == 2
+    assert set(payload["newly_confirmed_ids"]) == {"q-name-1", "q-name-2"}
+    assert payload["mapping_created"] is True
+    assert fake_db.questions.docs[0]["real_name_confirmed"] is True
+    assert fake_db.questions.docs[1]["real_name_confirmed"] is True
+    assert fake_db.questions.docs[2]["real_name_confirmed"] is False
+
+    undone = auth_post(
+        client,
+        "/api/questions/undo-confirm-name",
+        auth_headers,
+        json={
+            "question_ids": payload["newly_confirmed_ids"],
+            "mapping_id": payload["mapping_id"],
+        },
+    )
+    assert undone.status_code == 200
+    assert fake_db.questions.docs[0]["real_name_confirmed"] is False
+    assert fake_db.questions.docs[1]["real_name_confirmed"] is False
+    assert fake_db.user_mappings.docs == []
+
+    confirmed_again = auth_post(client, "/api/questions/q-name-1/confirm-name", auth_headers)
+    assert confirmed_again.status_code == 200
+    future = auth_post(
+        client,
+        "/api/questions",
+        auth_headers,
+        json={"youtube_username": "@ANA123", "original_text": "Pregunta futura"},
+    )
+    assert future.status_code == 200
+    assert future.json()["real_name"] == "Ana"
+    assert future.json()["real_name_confirmed"] is True
+
+
 def test_import_search_batch_info_and_batch_update(client, auth_headers):
     imported = auth_post(
         client,

@@ -192,6 +192,11 @@ class AIJobRequest(BaseModel):
     model: Optional[str] = None
     force: bool = False
 
+
+class NameConfirmationUndoRequest(BaseModel):
+    question_ids: List[str]
+    mapping_id: Optional[str] = None
+
 class YouTubeAuthCallback(BaseModel):
     code: str
     redirect_uri: str
@@ -2307,17 +2312,67 @@ async def get_question_by_id(question_id: str):
 
 @api_router.post("/questions/{question_id}/confirm-name")
 async def confirm_question_name(question_id: str):
-    """Confirm that the real_name is correct (even if it matches username)"""
+    """Confirm a user's name everywhere and remember it for future imports."""
     question = await db.questions.find_one({"id": question_id}, {"_id": 0})
     if not question:
         raise HTTPException(status_code=404, detail="Pregunta no encontrada")
 
-    await db.questions.update_one(
-        {"id": question_id},
-        {"$set": {"real_name_confirmed": True}}
+    username = question.get("youtube_username", "")
+    normalized_username = _normalize_username(username)
+    real_name = (question.get("real_name") or username).strip()
+    if not normalized_username or not real_name:
+        raise HTTPException(status_code=400, detail="La pregunta no tiene un usuario o nombre válido")
+
+    username_pattern = f"^@*{re.escape(normalized_username)}$"
+    username_query = {"youtube_username": {"$regex": username_pattern, "$options": "i"}}
+    existing_mapping = await db.user_mappings.find_one(username_query, {"_id": 0})
+    mapping_created = False
+
+    if existing_mapping:
+        real_name = existing_mapping.get("real_name") or real_name
+        mapping_id = existing_mapping.get("id")
+    else:
+        mapping = UserMapping(youtube_username=username, real_name=real_name)
+        mapping_doc = mapping.model_dump()
+        mapping_doc["created_at"] = serialize_datetime(mapping_doc["created_at"])
+        mapping_doc["updated_at"] = serialize_datetime(mapping_doc["updated_at"])
+        await db.user_mappings.insert_one(mapping_doc)
+        mapping_id = mapping.id
+        mapping_created = True
+
+    unconfirmed = await db.questions.find(
+        {**username_query, "real_name_confirmed": {"$ne": True}},
+        {"_id": 0, "id": 1},
+    ).to_list(length=None)
+    newly_confirmed_ids = [item["id"] for item in unconfirmed]
+
+    await db.questions.update_many(
+        username_query,
+        {"$set": {"real_name": real_name, "real_name_confirmed": True}},
     )
 
-    return {"message": "Nombre confirmado", "real_name": question.get("real_name")}
+    return {
+        "message": "Nombre confirmado en todas sus apariciones",
+        "real_name": real_name,
+        "youtube_username": username,
+        "confirmed_count": len(newly_confirmed_ids),
+        "newly_confirmed_ids": newly_confirmed_ids,
+        "mapping_id": mapping_id,
+        "mapping_created": mapping_created,
+    }
+
+
+@api_router.post("/questions/undo-confirm-name")
+async def undo_confirm_question_name(data: NameConfirmationUndoRequest):
+    """Undo only the confirmations introduced by one confirm-name action."""
+    if data.question_ids:
+        await db.questions.update_many(
+            {"id": {"$in": data.question_ids}},
+            {"$set": {"real_name_confirmed": False}},
+        )
+    if data.mapping_id:
+        await db.user_mappings.delete_one({"id": data.mapping_id})
+    return {"message": "Confirmación de nombre deshecha", "restored_count": len(data.question_ids)}
 
 
 @api_router.post("/questions/confirm-derived-names/{batch_id}")
