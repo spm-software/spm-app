@@ -762,6 +762,8 @@ export default function Editor({ workflowMode = null }) {
   const [showOnlyDuplicates, setShowOnlyDuplicates] = useState(false);
   const [showOnlyNoName, setShowOnlyNoName] = useState(false);
   const [showOnlyUnconfirmedNames, setShowOnlyUnconfirmedNames] = useState(false);
+  const [updatingNames, setUpdatingNames] = useState(false);
+  const [nameUpdateResult, setNameUpdateResult] = useState(null);
   const [assignmentFilter, setAssignmentFilter] = useState(() => (
     typeof window !== "undefined"
       ? sessionStorage.getItem('editorAssignmentFilter') || "all"
@@ -1059,6 +1061,7 @@ export default function Editor({ workflowMode = null }) {
     setGlobalReserveMode(false);
     setAssignmentFilter("all");
     setShowOnlyUnconfirmedNames(false);
+    setNameUpdateResult(null);
     setDuplicates([]);
     setDuplicateFocusId(null);
     setSelectedBatch(batchId);
@@ -1219,9 +1222,23 @@ export default function Editor({ workflowMode = null }) {
 
   const handleUpdateNames = async () => {
     const scrollY = window.scrollY;
+    setUpdatingNames(true);
+    setNameUpdateResult(null);
     try {
       const response = await axios.post(`${API}/questions/update-names/${selectedBatch}`);
-      toast.success(`${response.data.updated_count} nombres actualizados`);
+      const result = response.data;
+      const resolution = result.name_resolution;
+      setNameUpdateResult(result);
+      if (resolution?.unresolved_count > 0) {
+        toast.warning(
+          `${resolution.unresolved_count} usuario${resolution.unresolved_count === 1 ? " no se pudo" : "s no se pudieron"} consultar en YouTube`,
+          { duration: 8000 }
+        );
+      } else {
+        toast.success(
+          `${result.updated_count} pregunta${result.updated_count === 1 ? " actualizada" : "s actualizadas"}; todos los nombres disponibles quedaron confirmados`
+        );
+      }
       await fetchQuestions();
       requestAnimationFrame(() => {
         window.scrollTo(0, scrollY);
@@ -1229,6 +1246,8 @@ export default function Editor({ workflowMode = null }) {
     } catch (error) {
       console.error("Error updating names:", error);
       toast.error("Error al actualizar nombres");
+    } finally {
+      setUpdatingNames(false);
     }
   };
 
@@ -1798,13 +1817,17 @@ export default function Editor({ workflowMode = null }) {
           <Button
             variant="outline"
             onClick={handleUpdateNames}
-            disabled={questions.length === 0}
+            disabled={updatingNames || questions.length === 0}
             size="lg"
             className="rounded-sm uppercase tracking-wide text-xs"
             data-testid="update-names-button"
           >
-            <Users className="w-4 h-4 mr-2" />
-            Actualizar nombres
+            {updatingNames ? (
+              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+            ) : (
+              <Users className="w-4 h-4 mr-2" />
+            )}
+            {updatingNames ? "Consultando YouTube..." : "Actualizar nombres"}
           </Button>
         )}
 
@@ -2160,6 +2183,47 @@ export default function Editor({ workflowMode = null }) {
           )}
         </div>
       </div>
+
+      {showNameActions && nameUpdateResult?.name_resolution && (
+        <div
+          className={`mb-8 border p-4 rounded-sm ${
+            nameUpdateResult.name_resolution.complete
+              ? "border-green-300 bg-green-50 text-green-900 dark:border-green-800 dark:bg-green-950/30 dark:text-green-100"
+              : "border-amber-300 bg-amber-50 text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100"
+          }`}
+          data-testid="name-resolution-result"
+        >
+          <div className="flex items-start gap-3">
+            {nameUpdateResult.name_resolution.complete ? (
+              <CheckCircle className="w-5 h-5 mt-0.5 shrink-0" />
+            ) : (
+              <AlertTriangle className="w-5 h-5 mt-0.5 shrink-0" />
+            )}
+            <div>
+              <p className="font-semibold">
+                {nameUpdateResult.name_resolution.complete
+                  ? "Actualización de nombres completada"
+                  : `${nameUpdateResult.name_resolution.unresolved_count} usuario${nameUpdateResult.name_resolution.unresolved_count === 1 ? " pendiente" : "s pendientes"}`}
+              </p>
+              <p className="text-sm mt-1">
+                YouTube identificó {nameUpdateResult.name_resolution.resolved_users} de {nameUpdateResult.name_resolution.total_users} usuario{nameUpdateResult.name_resolution.total_users === 1 ? "" : "s"}. Se actualizaron {nameUpdateResult.updated_count} pregunta{nameUpdateResult.updated_count === 1 ? "" : "s"}.
+              </p>
+              {nameUpdateResult.name_resolution.unresolved_count > 0 && (
+                <ul className="mt-2 text-sm space-y-1">
+                  {nameUpdateResult.name_resolution.unresolved.slice(0, 8).map((item, index) => (
+                    <li key={`${item.youtube_username}-${index}`}>
+                      <strong>{item.youtube_username || "Usuario desconocido"}</strong>: {item.reason}
+                    </li>
+                  ))}
+                  {nameUpdateResult.name_resolution.unresolved_count > 8 && (
+                    <li>Y {nameUpdateResult.name_resolution.unresolved_count - 8} usuario{nameUpdateResult.name_resolution.unresolved_count - 8 === 1 ? "" : "s"} más.</li>
+                  )}
+                </ul>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {!duplicateReviewActive && (
         <>

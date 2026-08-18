@@ -91,8 +91,11 @@ class Question(BaseModel):
     youtube_comment_id: Optional[str] = None  # Para deduplicar por ID del comentario de YouTube
     youtube_video_id: Optional[str] = None
     youtube_video_title: Optional[str] = None
+    youtube_channel_id: Optional[str] = None
+    youtube_channel_title: Optional[str] = None
     real_name: Optional[str] = None
     real_name_confirmed: bool = False  # True if the real_name was manually confirmed
+    real_name_source: Optional[str] = None
     original_text: str
     corrected_text: Optional[str] = None
     is_corrected: bool = False
@@ -122,6 +125,8 @@ class QuestionUpdate(BaseModel):
     motivo_clasificacion: Optional[str] = None
     youtube_video_id: Optional[str] = None
     youtube_video_title: Optional[str] = None
+    youtube_channel_id: Optional[str] = None
+    youtube_channel_title: Optional[str] = None
 
 class Program(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -2043,7 +2048,8 @@ async def update_user_mapping(user_id: str, data: UserMappingUpdate):
         {"$set": {
             "youtube_username": next_username,
             "real_name": next_real_name,
-            "real_name_confirmed": True
+            "real_name_confirmed": True,
+            "real_name_source": "manual",
         }}
     )
 
@@ -2198,6 +2204,7 @@ async def create_question(data: QuestionCreate):
         youtube_username=data.youtube_username,
         real_name=real_name,
         real_name_confirmed=real_name_confirmed,
+        real_name_source="manual_mapping" if real_name_confirmed else "derived_handle",
         original_text=clean_html_to_plain_text(data.original_text)
     )
     doc = question.model_dump()
@@ -2211,6 +2218,7 @@ async def update_question(question_id: str, update: QuestionUpdate):
 
     # If updating real_name, also save to user_mappings for future use
     if "real_name" in update_data and update_data["real_name"]:
+        update_data["real_name_source"] = "manual"
         question = await db.questions.find_one({"id": question_id}, {"_id": 0})
         if question and question.get("youtube_username"):
             username = question["youtube_username"]
@@ -2240,7 +2248,8 @@ async def update_question(question_id: str, update: QuestionUpdate):
                 username_query,
                 {"$set": {
                     "real_name": update_data["real_name"],
-                    "real_name_confirmed": update_data.get("real_name_confirmed", True)
+                    "real_name_confirmed": update_data.get("real_name_confirmed", True),
+                    "real_name_source": "manual",
                 }}
             )
 
@@ -2348,7 +2357,11 @@ async def confirm_question_name(question_id: str):
 
     await db.questions.update_many(
         username_query,
-        {"$set": {"real_name": real_name, "real_name_confirmed": True}},
+        {"$set": {
+            "real_name": real_name,
+            "real_name_confirmed": True,
+            "real_name_source": "manual",
+        }},
     )
 
     return {
@@ -3087,10 +3100,10 @@ async def clear_duplicate_flag(question_id: str):
 
 @api_router.post("/questions/update-names/{batch_id}")
 async def update_names_from_mappings(batch_id: str):
-    """Update all question names from stored user mappings.
+    """Update names from manual mappings and public YouTube channel profiles.
 
     Only operates on questions classified as 'pregunta' (or all, if none in the
-    batch has been classified yet).
+    batch has been classified yet). Manual mappings always take precedence.
     """
     clasif_filter = await build_clasificacion_filter(batch_id)
     questions = await db.questions.find(
@@ -3098,17 +3111,106 @@ async def update_names_from_mappings(batch_id: str):
         {"_id": 0}
     ).to_list(500)
 
-    updated = 0
-    for question in questions:
-        stored_name = await get_real_name(question.get("youtube_username", ""))
-        if stored_name and (stored_name != question.get("real_name") or question.get("real_name_confirmed") is not True):
-            await db.questions.update_one(
-                {"id": question["id"]},
-                {"$set": {"real_name": stored_name, "real_name_confirmed": True}}
-            )
-            updated += 1
+    mappings = await db.user_mappings.find(
+        {},
+        {"_id": 0, "youtube_username": 1, "real_name": 1},
+    ).to_list(5000)
+    names_by_user = {
+        _normalize_username(mapping.get("youtube_username")): mapping.get("real_name")
+        for mapping in mappings
+        if mapping.get("youtube_username") and mapping.get("real_name")
+    }
 
-    return {"updated_count": updated}
+    mapping_updated = 0
+    pending_by_user: Dict[str, Dict[str, Optional[str]]] = {}
+    for question in questions:
+        username = question.get("youtube_username", "")
+        normalized_username = _normalize_username(username)
+        stored_name = names_by_user.get(normalized_username)
+        if stored_name:
+            result = await db.questions.update_one(
+                {"id": question["id"]},
+                {"$set": {
+                    "real_name": stored_name,
+                    "real_name_confirmed": True,
+                    "real_name_source": "manual_mapping",
+                }}
+            )
+            mapping_updated += result.modified_count
+            continue
+
+        if question.get("real_name_confirmed") is True or not normalized_username:
+            continue
+        pending = pending_by_user.setdefault(normalized_username, {
+            "youtube_username": username,
+            "youtube_channel_id": None,
+        })
+        if question.get("youtube_channel_id"):
+            pending["youtube_channel_id"] = question["youtube_channel_id"]
+
+    empty_resolution = {
+        "complete": True,
+        "total_users": 0,
+        "resolved_users": 0,
+        "unresolved_count": 0,
+        "unresolved": [],
+        "requests_count": 0,
+    }
+    if not pending_by_user:
+        return {
+            "updated_count": mapping_updated,
+            "mapping_updated_count": mapping_updated,
+            "youtube_updated_count": 0,
+            "name_resolution": empty_resolution,
+        }
+
+    pending_users = list(pending_by_user.values())
+    try:
+        youtube = await get_youtube_service()
+        name_resolution = resolve_youtube_user_profiles(youtube, pending_users)
+    except Exception as exc:
+        if isinstance(exc, HTTPException):
+            reason = str(exc.detail)
+        else:
+            reason = "No se pudo conectar con YouTube"
+            logger.warning("[YouTube] Could not start channel name resolution: %s", exc)
+        name_resolution = {
+            "complete": False,
+            "total_users": len(pending_users),
+            "resolved_users": 0,
+            "unresolved_count": len(pending_users),
+            "unresolved": [
+                {**user, "reason": reason}
+                for user in pending_users
+            ],
+            "requests_count": 0,
+        }
+
+    youtube_updated = 0
+    for profile in name_resolution.pop("profiles", []):
+        normalized_username = _normalize_username(profile.get("youtube_username"))
+        username_pattern = f"^@*{re.escape(normalized_username)}$"
+        result = await db.questions.update_many(
+            {
+                "youtube_username": {"$regex": username_pattern, "$options": "i"},
+                "real_name_confirmed": {"$ne": True},
+            },
+            {"$set": {
+                "real_name": profile["youtube_channel_title"],
+                "real_name_confirmed": True,
+                "real_name_source": "youtube_channel",
+                "youtube_channel_id": profile.get("youtube_channel_id"),
+                "youtube_channel_title": profile["youtube_channel_title"],
+            }},
+        )
+        youtube_updated += result.modified_count
+
+    return {
+        "updated_count": mapping_updated + youtube_updated,
+        "mapping_updated_count": mapping_updated,
+        "youtube_updated_count": youtube_updated,
+        "name_resolution": name_resolution,
+    }
 
 @api_router.get("/questions/search")
 async def search_all_questions(q: str = Query(..., min_length=2)):
@@ -4492,6 +4594,184 @@ async def get_youtube_service():
     return build('youtube', 'v3', credentials=credentials, cache_discovery=False)
 
 
+def resolve_youtube_author_names(youtube, comments: List[Dict]) -> Dict[str, Any]:
+    """Resolve public channel titles in batches without failing the import."""
+    authors_by_key: Dict[str, Dict[str, Optional[str]]] = {}
+    for comment in comments:
+        channel_id = (comment.get("author_channel_id") or "").strip()
+        username = (comment.get("youtube_username") or "").strip()
+        key = channel_id or f"username:{_normalize_username(username)}"
+        if key and key != "username:":
+            authors_by_key.setdefault(key, {
+                "youtube_username": username,
+                "author_channel_id": channel_id or None,
+            })
+
+    channel_ids = sorted({
+        author["author_channel_id"]
+        for author in authors_by_key.values()
+        if author.get("author_channel_id")
+    })
+    titles_by_channel: Dict[str, str] = {}
+    failed_channel_ids = set()
+    requests_count = 0
+
+    for offset in range(0, len(channel_ids), 50):
+        chunk = channel_ids[offset:offset + 50]
+        try:
+            requests_count += 1
+            response = youtube.channels().list(
+                part="snippet",
+                id=",".join(chunk),
+                maxResults=50,
+            ).execute()
+            for item in response.get("items", []):
+                title = (item.get("snippet", {}).get("title") or "").strip()
+                if item.get("id") and title:
+                    titles_by_channel[item["id"]] = title
+        except Exception as exc:
+            failed_channel_ids.update(chunk)
+            logger.warning("[YouTube] Could not resolve author channel names for %s: %s", chunk, exc)
+
+    unresolved = []
+    for author in authors_by_key.values():
+        channel_id = author.get("author_channel_id")
+        if not channel_id:
+            reason = "YouTube no devolvió el identificador del canal"
+        elif channel_id in failed_channel_ids:
+            reason = "Error al consultar la ficha del canal"
+        elif channel_id not in titles_by_channel:
+            reason = "La ficha del canal no está disponible"
+        else:
+            continue
+        unresolved.append({**author, "reason": reason})
+
+    for comment in comments:
+        channel_id = comment.get("author_channel_id")
+        comment["youtube_channel_title"] = titles_by_channel.get(channel_id)
+
+    resolved_users = sum(
+        1
+        for author in authors_by_key.values()
+        if author.get("author_channel_id") in titles_by_channel
+    )
+    return {
+        "complete": len(unresolved) == 0,
+        "total_users": len(authors_by_key),
+        "resolved_users": resolved_users,
+        "unresolved_count": len(unresolved),
+        "unresolved": unresolved,
+        "requests_count": requests_count,
+    }
+
+
+def resolve_youtube_user_profiles(youtube, users: List[Dict]) -> Dict[str, Any]:
+    """Resolve one public channel profile per unique YouTube user.
+
+    Channel IDs are batched. Legacy records without an ID require one handle
+    lookup per unique user because the YouTube API accepts a single forHandle.
+    """
+    users_by_name: Dict[str, Dict[str, Optional[str]]] = {}
+    for user in users:
+        username = (user.get("youtube_username") or "").strip()
+        normalized_username = _normalize_username(username)
+        if not normalized_username:
+            continue
+        stored = users_by_name.setdefault(normalized_username, {
+            "youtube_username": username,
+            "youtube_channel_id": None,
+        })
+        if user.get("youtube_channel_id"):
+            stored["youtube_channel_id"] = user["youtube_channel_id"]
+
+    profiles_by_name: Dict[str, Dict[str, str]] = {}
+    unresolved_reasons: Dict[str, str] = {}
+    requests_count = 0
+
+    names_by_channel_id: Dict[str, List[str]] = {}
+    for normalized_username, user in users_by_name.items():
+        channel_id = user.get("youtube_channel_id")
+        if channel_id:
+            names_by_channel_id.setdefault(channel_id, []).append(normalized_username)
+
+    channel_ids = sorted(names_by_channel_id)
+    for offset in range(0, len(channel_ids), 50):
+        chunk = channel_ids[offset:offset + 50]
+        try:
+            requests_count += 1
+            response = youtube.channels().list(
+                part="snippet",
+                id=",".join(chunk),
+                maxResults=50,
+            ).execute()
+            items_by_id = {
+                item.get("id"): item
+                for item in response.get("items", [])
+                if item.get("id")
+            }
+            for channel_id in chunk:
+                item = items_by_id.get(channel_id)
+                title = (item or {}).get("snippet", {}).get("title", "").strip()
+                for normalized_username in names_by_channel_id[channel_id]:
+                    if title:
+                        profiles_by_name[normalized_username] = {
+                            "youtube_username": users_by_name[normalized_username]["youtube_username"],
+                            "youtube_channel_id": channel_id,
+                            "youtube_channel_title": title,
+                        }
+                    else:
+                        unresolved_reasons[normalized_username] = "La ficha del canal no está disponible"
+        except Exception as exc:
+            logger.warning("[YouTube] Could not resolve channel IDs %s: %s", chunk, exc)
+            for channel_id in chunk:
+                for normalized_username in names_by_channel_id[channel_id]:
+                    unresolved_reasons[normalized_username] = "Error al consultar la ficha del canal"
+
+    for normalized_username, user in users_by_name.items():
+        if user.get("youtube_channel_id"):
+            continue
+        try:
+            requests_count += 1
+            response = youtube.channels().list(
+                part="snippet",
+                forHandle=f"@{normalized_username}",
+                maxResults=1,
+            ).execute()
+            item = next(iter(response.get("items", [])), None)
+            title = (item or {}).get("snippet", {}).get("title", "").strip()
+            channel_id = (item or {}).get("id")
+            if title and channel_id:
+                profiles_by_name[normalized_username] = {
+                    "youtube_username": user["youtube_username"],
+                    "youtube_channel_id": channel_id,
+                    "youtube_channel_title": title,
+                }
+            else:
+                unresolved_reasons[normalized_username] = "No se encontró un canal público para este usuario"
+        except Exception as exc:
+            logger.warning("[YouTube] Could not resolve handle @%s: %s", normalized_username, exc)
+            unresolved_reasons[normalized_username] = "Error al consultar la ficha del canal"
+
+    unresolved = [
+        {
+            **users_by_name[normalized_username],
+            "reason": unresolved_reasons.get(normalized_username, "No se pudo obtener el nombre del canal"),
+        }
+        for normalized_username in users_by_name
+        if normalized_username not in profiles_by_name
+    ]
+    profiles = list(profiles_by_name.values())
+    return {
+        "complete": len(unresolved) == 0,
+        "total_users": len(users_by_name),
+        "resolved_users": len(profiles),
+        "unresolved_count": len(unresolved),
+        "unresolved": unresolved,
+        "requests_count": requests_count,
+        "profiles": profiles,
+    }
+
+
 @api_router.post("/youtube/fetch-comments")
 async def youtube_fetch_comments(request: YouTubeFetchRequest):
     """Fetch channel-wide comments and verify continuity from the stored anchor."""
@@ -4626,6 +4906,8 @@ async def youtube_fetch_comments(request: YouTubeFetchRequest):
             if not next_page_token:
                 break
 
+        name_resolution = resolve_youtube_author_names(youtube, all_comments)
+
         video_ids = sorted({comment['video_id'] for comment in all_comments if comment.get('video_id')})
         video_titles = {}
         for offset in range(0, len(video_ids), 50):
@@ -4694,6 +4976,7 @@ async def youtube_fetch_comments(request: YouTubeFetchRequest):
             "comments": all_comments,
             "last_comment_id": all_comments[-1]['comment_id'] if all_comments else None,
             "continuity": continuity,
+            "name_resolution": name_resolution,
         }
 
     except HTTPException:
@@ -4807,6 +5090,8 @@ async def youtube_import_comments(request: YouTubeImportCommentsRequest):
         username = c.get("youtube_username") or ""
         video_id = c.get("video_id")
         video_title = c.get("video_title")
+        youtube_channel_id = c.get("author_channel_id")
+        youtube_channel_title = (c.get("youtube_channel_title") or "").strip() or None
         if not text or not username:
             continue
 
@@ -4824,18 +5109,36 @@ async def youtube_import_comments(request: YouTubeImportCommentsRequest):
 
         existing = await db.questions.find_one(
             {"youtube_comment_id": yt_id},
-            {"_id": 0, "id": 1}
+            {
+                "_id": 0,
+                "id": 1,
+                "real_name_confirmed": 1,
+                "real_name_source": 1,
+            }
         )
 
         if existing:
+            update_fields = {
+                "original_text": text,
+                "youtube_username": username,
+                "youtube_video_id": video_id,
+                "youtube_video_title": video_title,
+                "youtube_channel_id": youtube_channel_id,
+                "youtube_channel_title": youtube_channel_title,
+            }
+            can_refresh_from_youtube = (
+                not existing.get("real_name_confirmed")
+                or existing.get("real_name_source") == "youtube_channel"
+            )
+            if youtube_channel_title and can_refresh_from_youtube:
+                update_fields.update({
+                    "real_name": youtube_channel_title,
+                    "real_name_confirmed": True,
+                    "real_name_source": "youtube_channel",
+                })
             await db.questions.update_one(
                 {"youtube_comment_id": yt_id},
-                {"$set": {
-                    "original_text": text,
-                    "youtube_username": username,
-                    "youtube_video_id": video_id,
-                    "youtube_video_title": video_title
-                }}
+                {"$set": update_fields}
             )
             updated_count += 1
             if _is_newer_comment(c, newest_processed_comment):
@@ -4855,16 +5158,26 @@ async def youtube_import_comments(request: YouTubeImportCommentsRequest):
 
             real_name = await get_real_name(username)
             real_name_confirmed = bool(real_name)
-            if not real_name:
+            if real_name:
+                real_name_source = "manual_mapping"
+            elif youtube_channel_title:
+                real_name = youtube_channel_title
+                real_name_confirmed = True
+                real_name_source = "youtube_channel"
+            else:
                 real_name = await extract_display_name(username)
+                real_name_source = "derived_handle"
 
             question = Question(
                 youtube_username=username,
                 youtube_comment_id=yt_id,
                 youtube_video_id=video_id,
                 youtube_video_title=video_title,
+                youtube_channel_id=youtube_channel_id,
+                youtube_channel_title=youtube_channel_title,
                 real_name=real_name,
                 real_name_confirmed=real_name_confirmed,
+                real_name_source=real_name_source,
                 original_text=text,
                 import_batch_id=batch_id
             )

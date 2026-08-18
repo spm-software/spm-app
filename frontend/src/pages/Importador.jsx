@@ -133,6 +133,14 @@ export default function Importador() {
         imported: importResponse.data
       });
       setLastAnchor(importResponse.data.last_anchor || null);
+
+      const unresolvedNames = response.data.name_resolution?.unresolved_count || 0;
+      if (unresolvedNames > 0) {
+        toast.warning(
+          `Importación completada, pero ${unresolvedNames} usuario${unresolvedNames === 1 ? " necesita" : "s necesitan"} revisión de nombre`,
+          { duration: 7000 }
+        );
+      }
       
       // Refresh auth/anchor info so the aviso shows the new last comment
       await checkYoutubeAuth();
@@ -238,6 +246,12 @@ Pedro López - Gracias por el contenido! Mi pregunta es: ¿Cuánto tiempo tarda 
         </p>
       )}
     </div>
+  );
+
+  const nameResolution = youtubeResult?.name_resolution;
+  const youtubeImportHasWarnings = (
+    ["anchor_not_found", "manual_cutoff"].includes(youtubeResult?.continuity?.status)
+    || (nameResolution?.unresolved_count || 0) > 0
   );
 
   return (
@@ -410,13 +424,13 @@ Pedro López - Gracias por el contenido! Mi pregunta es: ¿Cuánto tiempo tarda 
               {/* YouTube Result */}
               {youtubeResult && (
                 <Card className={`bg-card border rounded-sm animate-fade-in ${
-                  ["anchor_not_found", "manual_cutoff"].includes(youtubeResult.continuity?.status)
+                  youtubeImportHasWarnings
                     ? "border-amber-400"
                     : "border-green-500/50"
                 }`}>
                   <CardHeader>
                     <CardTitle className="font-heading text-lg uppercase tracking-tight flex items-center gap-2">
-                      {["anchor_not_found", "manual_cutoff"].includes(youtubeResult.continuity?.status) ? (
+                      {youtubeImportHasWarnings ? (
                         <AlertTriangle className="w-5 h-5 text-amber-500" />
                       ) : (
                         <ShieldCheck className="w-5 h-5 text-green-500" />
@@ -469,6 +483,41 @@ Pedro López - Gracias por el contenido! Mi pregunta es: ¿Cuánto tiempo tarda 
                           <p className="mt-2 border-t border-current/20 pt-2 text-xs font-semibold">
                             El corte cambió durante la descarga. Repite la comprobación antes de continuar.
                           </p>
+                        )}
+                      </div>
+                    )}
+                    {nameResolution && (
+                      <div className={`border p-3 text-sm ${
+                        nameResolution.complete
+                          ? "border-green-300 bg-green-50 text-green-900 dark:bg-green-950/20 dark:text-green-200"
+                          : "border-amber-300 bg-amber-50 text-amber-900 dark:bg-amber-950/20 dark:text-amber-200"
+                      }`} data-testid="youtube-name-resolution-status">
+                        {nameResolution.complete ? (
+                          <>
+                            <p className="font-semibold">Nombres obtenidos desde YouTube</p>
+                            <p className="mt-1 text-xs">
+                              Se identificaron correctamente {nameResolution.resolved_users} de {nameResolution.total_users} usuario{nameResolution.total_users === 1 ? "" : "s"}.
+                            </p>
+                          </>
+                        ) : (
+                          <>
+                            <p className="font-semibold">
+                              {nameResolution.unresolved_count} nombre{nameResolution.unresolved_count === 1 ? " requiere" : "s requieren"} revisión
+                            </p>
+                            <p className="mt-1 text-xs">
+                              Las preguntas se importaron sin perderse. Revisa estos usuarios en el paso Nombres:
+                            </p>
+                            <ul className="mt-2 space-y-1 text-xs">
+                              {nameResolution.unresolved.slice(0, 8).map((item, index) => (
+                                <li key={`${item.author_channel_id || item.youtube_username}-${index}`}>
+                                  <span className="font-medium">{item.youtube_username || "Usuario desconocido"}</span>: {item.reason}
+                                </li>
+                              ))}
+                              {nameResolution.unresolved_count > 8 && (
+                                <li>Y {nameResolution.unresolved_count - 8} usuario{nameResolution.unresolved_count - 8 === 1 ? "" : "s"} más.</li>
+                              )}
+                            </ul>
+                          </>
                         )}
                       </div>
                     )}

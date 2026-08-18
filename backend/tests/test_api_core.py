@@ -452,6 +452,105 @@ def test_update_names_confirms_existing_stored_name(client, auth_headers, fake_d
     assert fake_db.questions.docs[0]["real_name"] == "Ana Real"
 
 
+def test_update_names_resolves_each_legacy_youtube_user_once_and_reports_failures(
+    client, auth_headers, fake_db, monkeypatch
+):
+    fake_db.questions.docs.extend([
+        {
+            "id": "q-yanet-1",
+            "youtube_username": "@YanetFigueroa-ol9lf",
+            "real_name": "Yanetfigueroa Ol9lf",
+            "real_name_confirmed": False,
+            "original_text": "Pregunta uno",
+            "import_batch_id": "batch-legacy",
+            "clasificacion": "pregunta",
+            "is_greeting": False,
+            "is_duplicate": False,
+        },
+        {
+            "id": "q-yanet-2",
+            "youtube_username": "YANETFIGUEROA-OL9LF",
+            "real_name": "Yanetfigueroa Ol9lf",
+            "real_name_confirmed": False,
+            "original_text": "Pregunta dos",
+            "import_batch_id": "batch-legacy",
+            "clasificacion": "pregunta",
+            "is_greeting": False,
+            "is_duplicate": False,
+        },
+        {
+            "id": "q-missing",
+            "youtube_username": "@canal-inexistente",
+            "real_name": "Canal Inexistente",
+            "real_name_confirmed": False,
+            "original_text": "Pregunta tres",
+            "import_batch_id": "batch-legacy",
+            "clasificacion": "pregunta",
+            "is_greeting": False,
+            "is_duplicate": False,
+        },
+        {
+            "id": "q-manual",
+            "youtube_username": "@nombre-manual",
+            "real_name": "Nombre Revisado",
+            "real_name_confirmed": True,
+            "real_name_source": "manual",
+            "original_text": "Pregunta cuatro",
+            "import_batch_id": "batch-legacy",
+            "clasificacion": "pregunta",
+            "is_greeting": False,
+            "is_duplicate": False,
+        },
+    ])
+    channel_calls = []
+
+    class FakeRequest:
+        def __init__(self, payload):
+            self.payload = payload
+
+        def execute(self):
+            return self.payload
+
+    class FakeChannels:
+        def list(self, **kwargs):
+            channel_calls.append(kwargs)
+            if kwargs.get("forHandle") == "@yanetfigueroa-ol9lf":
+                return FakeRequest({
+                    "items": [{
+                        "id": "channel-yanet",
+                        "snippet": {"title": "Yanet Figueroa"},
+                    }]
+                })
+            return FakeRequest({"items": []})
+
+    class FakeYouTube:
+        def channels(self):
+            return FakeChannels()
+
+    async def fake_get_youtube_service():
+        return FakeYouTube()
+
+    monkeypatch.setattr(server, "get_youtube_service", fake_get_youtube_service)
+
+    response = auth_post(client, "/api/questions/update-names/batch-legacy", auth_headers)
+
+    assert response.status_code == 200
+    data = response.json()
+    assert [call["forHandle"] for call in channel_calls] == [
+        "@yanetfigueroa-ol9lf",
+        "@canal-inexistente",
+    ]
+    assert data["youtube_updated_count"] == 2
+    assert data["name_resolution"]["resolved_users"] == 1
+    assert data["name_resolution"]["unresolved_count"] == 1
+    assert data["name_resolution"]["unresolved"][0]["youtube_username"] == "@canal-inexistente"
+    assert fake_db.questions.docs[0]["real_name"] == "Yanet Figueroa"
+    assert fake_db.questions.docs[1]["real_name"] == "Yanet Figueroa"
+    assert fake_db.questions.docs[0]["youtube_channel_id"] == "channel-yanet"
+    assert fake_db.questions.docs[0]["real_name_source"] == "youtube_channel"
+    assert fake_db.questions.docs[3]["real_name"] == "Nombre Revisado"
+
+
 def test_blocked_comments_skip_youtube_import_and_remove_existing(client, auth_headers):
     existing = auth_post(
         client,
@@ -572,6 +671,7 @@ def test_youtube_fetch_uses_channel_wide_comments_and_verifies_anchor(
     })
 
     calls = []
+    channel_calls = []
 
     class FakeRequest:
         def __init__(self, response):
@@ -582,6 +682,19 @@ def test_youtube_fetch_uses_channel_wide_comments_and_verifies_anchor(
 
     class FakeChannels:
         def list(self, **kwargs):
+            channel_calls.append(kwargs)
+            if kwargs.get("id"):
+                titles = {
+                    "author-luis": "Luis Pérez",
+                    "author-ana": "Ana García",
+                }
+                return FakeRequest({
+                    "items": [
+                        {"id": channel_id, "snippet": {"title": titles[channel_id]}}
+                        for channel_id in kwargs["id"].split(",")
+                        if channel_id in titles
+                    ]
+                })
             return FakeRequest({
                 "items": [{"id": "channel-1", "snippet": {"title": "Canal"}}]
             })
@@ -668,10 +781,64 @@ def test_youtube_fetch_uses_channel_wide_comments_and_verifies_anchor(
     assert data["comments_count"] == 2
     assert data["videos_count"] == 1
     assert data["comments"][1]["video_title"] == "Video antiguo"
+    assert channel_calls[1]["id"] == "author-ana,author-luis"
+    assert data["comments"][0]["youtube_channel_title"] == "Ana García"
+    assert data["comments"][1]["youtube_channel_title"] == "Luis Pérez"
+    assert data["name_resolution"]["complete"] is True
+    assert data["name_resolution"]["resolved_users"] == 2
     assert data["continuity"]["status"] == "verified"
     assert data["continuity"]["previous_anchor_found"] is True
     assert data["continuity"]["overlap_applied"] is True
     assert data["continuity"]["comments_after_anchor"] == 1
+
+
+def test_youtube_channel_name_is_applied_and_resolution_failures_are_reported(
+    client, auth_headers, fake_db
+):
+    imported = auth_post(
+        client,
+        "/api/youtube/import-comments",
+        auth_headers,
+        json={
+            "comments": [{
+                "comment_id": "yt-channel-name",
+                "youtube_username": "@YanetFigueroa-ol9lf",
+                "raw_username": "@YanetFigueroa-ol9lf",
+                "author_channel_id": "channel-yanet",
+                "youtube_channel_title": "Yanet Figueroa",
+                "text": "¿Qué significa este pasaje?",
+                "published_at": "2026-07-12T10:00:00Z",
+            }]
+        },
+    )
+
+    assert imported.status_code == 200
+    question = fake_db.questions.docs[0]
+    assert question["youtube_channel_id"] == "channel-yanet"
+    assert question["youtube_channel_title"] == "Yanet Figueroa"
+    assert question["real_name"] == "Yanet Figueroa"
+    assert question["real_name_confirmed"] is True
+    assert question["real_name_source"] == "youtube_channel"
+
+    class FailingRequest:
+        def execute(self):
+            raise RuntimeError("YouTube unavailable")
+
+    class FailingChannels:
+        def list(self, **kwargs):
+            return FailingRequest()
+
+    summary = server.resolve_youtube_author_names(
+        type("YouTube", (), {"channels": lambda self: FailingChannels()})(),
+        [{
+            "youtube_username": "@usuario",
+            "author_channel_id": "channel-failing",
+        }],
+    )
+    assert summary["complete"] is False
+    assert summary["unresolved_count"] == 1
+    assert summary["unresolved"][0]["youtube_username"] == "@usuario"
+    assert summary["unresolved"][0]["reason"] == "Error al consultar la ficha del canal"
 
 
 def test_youtube_import_anchor_ignores_comments_outside_selected_range(client, auth_headers):
