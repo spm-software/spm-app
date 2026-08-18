@@ -1177,6 +1177,8 @@ export default function Editor({ workflowMode = null }) {
   }, [workflowMode, batches, globalReserveMode, selectedBatch]);
 
   const duplicateReviewActive = workflowMode === "review_duplicates" || showOnlyDuplicates;
+  const nameReviewActive = workflowMode === "names" || workflowMode === "confirm_names";
+  const filterUnconfirmedNames = showOnlyUnconfirmedNames || nameReviewActive;
 
   useEffect(() => {
     if (duplicateReviewActive && selectedBatch && !globalReserveMode) {
@@ -2320,7 +2322,7 @@ export default function Editor({ workflowMode = null }) {
             }
             if (showOnlyDuplicates) {
               filteredQuestions = filteredQuestions.filter(q => q.is_duplicate);
-            } else if (showOnlyUnconfirmedNames) {
+            } else if (filterUnconfirmedNames) {
               filteredQuestions = filteredQuestions.filter(q => getNameState(q) !== "confirmed");
             } else if (showOnlyNoName) {
               filteredQuestions = filteredQuestions.filter(q => getNameState(q) === "missing");
