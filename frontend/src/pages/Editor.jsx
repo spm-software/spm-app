@@ -770,21 +770,22 @@ export default function Editor({ workflowMode = null }) {
   const [clasificationFilter, setClasificationFilter] = useState("dudoso"); // "all" | "pregunta" | "dudoso" | "saludo"
   const [clasifying, setClasifying] = useState(false);
   const [clasifyProgress, setClasifyProgress] = useState({ current: 0, total: 0, percentage: 0 });
-  const clasifyPollRef = useRef(null);
   const [aiSettings, setAiSettings] = useState(DEFAULT_AI_SETTINGS);
   const [savingAiSetting, setSavingAiSetting] = useState(null);
   const initialBatchLoaded = useRef(false);
-  const pollingIntervalRef = useRef(null);
+  const selectedBatchRef = useRef(selectedBatch);
+  const aiJobMonitorsRef = useRef(new Map());
+  const aiJobRequestsRef = useRef(new Set());
 
-  // Cleanup polling on unmount
   useEffect(() => {
+    selectedBatchRef.current = selectedBatch;
+  }, [selectedBatch]);
+
+  useEffect(() => {
+    const monitors = aiJobMonitorsRef.current;
     return () => {
-      if (pollingIntervalRef.current) {
-        clearInterval(pollingIntervalRef.current);
-      }
-      if (clasifyPollRef.current) {
-        clearInterval(clasifyPollRef.current);
-      }
+      monitors.forEach((intervalId) => clearInterval(intervalId));
+      monitors.clear();
     };
   }, []);
 
@@ -904,6 +905,137 @@ export default function Editor({ workflowMode = null }) {
     }
   }, [selectedBatch, globalReserveMode]);
 
+  const updateAiJobUi = useCallback((job) => {
+    const active = job.status === "pending" || job.status === "running";
+    if (job.type === "classification") {
+      setClasifying(active);
+      setClasifyProgress({
+        current: job.current || 0,
+        total: job.total || 0,
+        percentage: job.percentage || 0,
+      });
+    } else if (job.type === "correction") {
+      setCorrecting(active);
+      setCorrectingMode(job.force ? "recorrect" : "correct");
+      setCorrectingProgress({ current: job.current || 0, total: job.total || 0 });
+    } else if (job.type === "duplicates") {
+      setCheckingDuplicates(active);
+      setDuplicateProgress({
+        current: job.current || 0,
+        total: job.total || 0,
+        percentage: job.percentage || 0,
+        duplicatesFound: job.result?.duplicates_found || 0,
+      });
+    }
+  }, []);
+
+  const monitorAiJob = useCallback((initialJob, { announceStart = false } = {}) => {
+    if (!initialJob?.id || aiJobMonitorsRef.current.has(initialJob.id)) return;
+
+    const jobId = initialJob.id;
+    const retryInitialError = announceStart && initialJob.status === "error";
+    let currentJob = initialJob;
+    let finished = false;
+    let warnedConnection = false;
+
+    const stopMonitor = () => {
+      const intervalId = aiJobMonitorsRef.current.get(jobId);
+      if (intervalId) clearInterval(intervalId);
+      aiJobMonitorsRef.current.delete(jobId);
+      aiJobRequestsRef.current.delete(jobId);
+    };
+
+    const finishJob = async (job) => {
+      if (finished) return;
+      finished = true;
+      stopMonitor();
+      updateAiJobUi(job);
+
+      if (job.type === "classification") {
+        setClasifying(false);
+        if (job.status === "completed") {
+          const counts = job.result?.counts || {};
+          toast.success(`${job.result?.classified_count || 0} clasificadas con ${getAiModelLabel(job.model)} · ${counts.pregunta || 0} preguntas, ${counts.dudoso || 0} dudosas, ${counts.saludo || 0} saludos`);
+        }
+      } else if (job.type === "correction") {
+        setCorrecting(false);
+        setCorrectingMode(null);
+        if (job.status === "completed") {
+          toast.success(`${job.result?.corrected_count || 0} preguntas ${job.force ? "recorregidas" : "corregidas"}`);
+        }
+      } else {
+        setCheckingDuplicates(false);
+        if (job.status === "completed") {
+          const count = job.result?.duplicates_found || 0;
+          toast.success(count > 0 ? `${count} duplicados encontrados con ${getAiModelLabel(job.model)}` : `No se encontraron duplicados con ${getAiModelLabel(job.model)}`);
+        }
+      }
+
+      if (job.status === "error") {
+        toast.error(`El proceso se detuvo, pero el avance está guardado: ${job.error || "error desconocido"}`);
+      }
+
+      if (job.batch_id === selectedBatchRef.current) {
+        await fetchQuestions();
+        if (job.type === "duplicates") await fetchDuplicatePairs();
+      }
+    };
+
+    let launchRun;
+    const poll = async () => {
+      if (finished) return;
+      try {
+        const response = await axios.get(`${API}/ai-jobs/${jobId}`);
+        currentJob = response.data;
+        updateAiJobUi(currentJob);
+        if (currentJob.status === "completed" || currentJob.status === "error") {
+          await finishJob(currentJob);
+        } else if (currentJob.can_resume && !aiJobRequestsRef.current.has(jobId)) {
+          launchRun();
+        }
+      } catch (error) {
+        console.error("Error polling AI job:", error);
+      }
+    };
+
+    launchRun = async () => {
+      if (finished || aiJobRequestsRef.current.has(jobId)) return;
+      aiJobRequestsRef.current.add(jobId);
+      try {
+        const response = await axios.post(`${API}/ai-jobs/${jobId}/run`, null, { timeout: 0 });
+        currentJob = response.data;
+        warnedConnection = false;
+        updateAiJobUi(currentJob);
+        if (currentJob.status === "completed" || currentJob.status === "error") {
+          await finishJob(currentJob);
+        }
+      } catch (error) {
+        console.error("AI job request interrupted:", error);
+        if (!warnedConnection) {
+          warnedConnection = true;
+          toast.warning("La conexión se interrumpió; el avance está guardado y se retomará automáticamente");
+        }
+      } finally {
+        aiJobRequestsRef.current.delete(jobId);
+      }
+    };
+
+    updateAiJobUi(retryInitialError ? { ...initialJob, status: "pending" } : initialJob);
+    if (announceStart && initialJob.status !== "completed") {
+      toast.info(`Proceso iniciado con ${getAiModelLabel(initialJob.model)}. Puedes cambiar de pestaña.`, { duration: 3500 });
+    }
+
+    const intervalId = setInterval(poll, 2000);
+    aiJobMonitorsRef.current.set(jobId, intervalId);
+    if (initialJob.status === "completed" || (initialJob.status === "error" && !retryInitialError)) {
+      finishJob(initialJob);
+    } else if (initialJob.status === "pending" || initialJob.can_resume || retryInitialError) {
+      launchRun();
+    } else {
+      poll();
+    }
+  }, [fetchDuplicatePairs, fetchQuestions, updateAiJobUi]);
+
   useEffect(() => {
     fetchBatches();
     fetchAiSettings();
@@ -915,6 +1047,13 @@ export default function Editor({ workflowMode = null }) {
       fetchQuestions();
     }
   }, [selectedBatch, globalReserveMode, fetchPrograms, fetchQuestions]);
+
+  useEffect(() => {
+    if (!selectedBatch || globalReserveMode) return;
+    axios.get(`${API}/ai-jobs-active/${selectedBatch}`)
+      .then((response) => response.data.forEach((job) => monitorAiJob(job)))
+      .catch((error) => console.error("Error restoring AI jobs:", error));
+  }, [selectedBatch, globalReserveMode, monitorAiJob]);
 
   const handleSelectBatch = (batchId) => {
     setGlobalReserveMode(false);
@@ -1055,61 +1194,21 @@ export default function Editor({ workflowMode = null }) {
     setCorrectingProgress({ current: 0, total: 0 });
 
     try {
-      // First, get the list of questions to correct
-      const initResponse = await axios.post(`${API}/questions/correct-all/${selectedBatch}`, null, {
-        params: { force }
+      const correctionModel = aiSettings.correction_model;
+      const response = await axios.post(`${API}/ai-jobs/create/correction/${selectedBatch}`, {
+        model: correctionModel,
+        force,
       });
-      const questionIds = initResponse.data.question_ids;
-      const total = questionIds.length;
-
-      if (total === 0) {
+      if (response.data.total === 0) {
         toast.info(force ? "No hay preguntas válidas para recorregir" : "No hay preguntas pendientes de corregir");
         setCorrecting(false);
-        fetchQuestions();
+        await fetchQuestions();
         return;
       }
-
-      setCorrectingProgress({ current: 0, total });
-      const correctionModel = aiSettings.correction_model;
-      const correctionModelLabel = getAiModelLabel(correctionModel);
-      toast.info(`${force ? "Recorrigiendo" : "Corrigiendo"} con ${correctionModelLabel}...`, { duration: 2500 });
-
-      // Process in batches of 5
-      const batchSize = 5;
-      let correctedCount = 0;
-      let errorCount = 0;
-
-      for (let i = 0; i < questionIds.length; i += batchSize) {
-        const batch = questionIds.slice(i, i + batchSize);
-
-        try {
-          const response = await axios.post(`${API}/questions/correct-batch`, {
-            question_ids: batch,
-            model: correctionModel,
-          }, {
-            params: { force }
-          });
-          correctedCount += response.data.corrected.length;
-          errorCount += response.data.errors.length;
-        } catch (error) {
-          console.error("Error in batch:", error);
-          errorCount += batch.length;
-        }
-
-        setCorrectingProgress({ current: Math.min(i + batchSize, total), total });
-      }
-
-      if (errorCount > 0) {
-        toast.warning(`${correctedCount} ${force ? "recorregidas" : "corregidas"}, ${errorCount} errores`);
-      } else {
-        toast.success(`${correctedCount} preguntas ${force ? "recorregidas" : "corregidas"}`);
-      }
-
-      fetchQuestions();
+      monitorAiJob(response.data, { announceStart: true });
     } catch (error) {
       console.error("Error correcting:", error);
       toast.error("Error al iniciar corrección");
-    } finally {
       setCorrecting(false);
       setCorrectingMode(null);
       setCorrectingProgress({ current: 0, total: 0 });
@@ -1185,80 +1284,15 @@ export default function Editor({ workflowMode = null }) {
     const modelLabel = getAiModelLabel(duplicateModel);
 
     try {
-      // Start the background task
-      const startResponse = await axios.post(`${API}/questions/check-duplicates-ai-start/${selectedBatch}`, {
+      const response = await axios.post(`${API}/ai-jobs/create/duplicates/${selectedBatch}`, {
         model: duplicateModel
       });
-
-      const taskId = startResponse.data.task_id;
-      toast.info(`Búsqueda iniciada con ${modelLabel}...`, { duration: 3000 });
-
-      // Poll for status
-      const pollStatus = async () => {
-        try {
-          const statusResponse = await axios.get(`${API}/duplicates/status/${taskId}`);
-          const status = statusResponse.data;
-
-          // Update progress
-          setDuplicateProgress({
-            current: status.current || 0,
-            total: status.total || 0,
-            percentage: status.percentage || 0,
-            duplicatesFound: status.duplicates_found || 0
-          });
-
-          if (status.status === "completed") {
-            // Stop polling
-            if (pollingIntervalRef.current) {
-              clearInterval(pollingIntervalRef.current);
-              pollingIntervalRef.current = null;
-            }
-
-            setCheckingDuplicates(false);
-            setDuplicateProgress({ current: 0, total: 0, percentage: 0, duplicatesFound: 0 });
-
-            if (status.duplicates_count > 0) {
-              if (duplicateReviewActive) {
-                await fetchDuplicatePairs();
-              } else {
-                setShowOnlyDuplicates(true);
-              }
-              toast.success(`${status.duplicates_count} duplicados encontrados con ${modelLabel}`);
-            } else {
-              setDuplicates([]);
-              toast.success(`No se encontraron duplicados con ${modelLabel}`);
-            }
-
-            await fetchQuestions();
-
-            // Cleanup the task from server memory
-            axios.delete(`${API}/duplicates/status/${taskId}`).catch(() => {});
-
-          } else if (status.status === "error") {
-            // Stop polling on error
-            if (pollingIntervalRef.current) {
-              clearInterval(pollingIntervalRef.current);
-              pollingIntervalRef.current = null;
-            }
-
-            setCheckingDuplicates(false);
-            setDuplicateProgress({ current: 0, total: 0, percentage: 0, duplicatesFound: 0 });
-            toast.error(`Error: ${status.error || 'Error desconocido'}`);
-
-            // Cleanup
-            axios.delete(`${API}/duplicates/status/${taskId}`).catch(() => {});
-          }
-        } catch (pollError) {
-          console.error("Error polling status:", pollError);
-        }
-      };
-
-      // Start polling every 1.5 seconds
-      pollingIntervalRef.current = setInterval(pollStatus, 1500);
-
-      // Also poll immediately
-      pollStatus();
-
+      if (response.data.total === 0) {
+        toast.success(`No se encontraron candidatos a duplicado con ${modelLabel}`);
+        setCheckingDuplicates(false);
+        return;
+      }
+      monitorAiJob(response.data, { announceStart: true });
     } catch (error) {
       console.error("Error starting AI duplicate check:", error);
       setCheckingDuplicates(false);
@@ -1423,67 +1457,15 @@ export default function Editor({ workflowMode = null }) {
 
     try {
       const classificationModel = aiSettings.classification_model;
-      const modelLabel = getAiModelLabel(classificationModel);
-      const startResponse = await axios.post(`${API}/questions/clasificar/${selectedBatch}`, {
+      const response = await axios.post(`${API}/ai-jobs/create/classification/${selectedBatch}`, {
         model: classificationModel,
       });
-
-      // Sync response path: no questions to classify
-      if (!startResponse.data.task_id) {
-        toast.info(startResponse.data.message || "Nada que clasificar");
+      if (response.data.total === 0) {
+        toast.info("Nada que clasificar");
         setClasifying(false);
         return;
       }
-
-      const taskId = startResponse.data.task_id;
-      const total = startResponse.data.total || 0;
-      setClasifyProgress({ current: 0, total, percentage: 0 });
-      toast.info(`Clasificando ${total} comentarios con ${modelLabel}...`, { duration: 2500 });
-
-      const pollStatus = async () => {
-        try {
-          const statusRes = await axios.get(`${API}/questions/clasificar/status/${taskId}`);
-          const s = statusRes.data;
-
-          setClasifyProgress({
-            current: s.current || 0,
-            total: s.total || 0,
-            percentage: s.percentage || 0
-          });
-
-          if (s.status === "completed") {
-            if (clasifyPollRef.current) {
-              clearInterval(clasifyPollRef.current);
-              clasifyPollRef.current = null;
-            }
-            setClasifying(false);
-            setClasifyProgress({ current: 0, total: 0, percentage: 0 });
-
-            const counts = s.counts || {};
-            toast.success(
-              `${s.classified_count || 0} clasificadas con ${getAiModelLabel(s.model_used || classificationModel)} · ${counts.pregunta || 0} preguntas, ${counts.dudoso || 0} dudosas, ${counts.saludo || 0} saludos`
-            );
-
-            await fetchQuestions();
-            axios.delete(`${API}/questions/clasificar/status/${taskId}`).catch(() => {});
-          } else if (s.status === "error") {
-            if (clasifyPollRef.current) {
-              clearInterval(clasifyPollRef.current);
-              clasifyPollRef.current = null;
-            }
-            setClasifying(false);
-            setClasifyProgress({ current: 0, total: 0, percentage: 0 });
-            toast.error(`Error al clasificar: ${s.error || 'desconocido'}`);
-            axios.delete(`${API}/questions/clasificar/status/${taskId}`).catch(() => {});
-          }
-        } catch (pollErr) {
-          console.error("Error polling clasif status:", pollErr);
-        }
-      };
-
-      // Kick off immediately, then every 1.5s
-      pollStatus();
-      clasifyPollRef.current = setInterval(pollStatus, 1500);
+      monitorAiJob(response.data, { announceStart: true });
     } catch (error) {
       console.error("Error starting classification:", error);
       toast.error("Error al iniciar clasificación");

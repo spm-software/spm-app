@@ -187,6 +187,11 @@ class CorrectionRequest(BaseModel):
 class AIModelRequest(BaseModel):
     model: Optional[str] = None
 
+
+class AIJobRequest(BaseModel):
+    model: Optional[str] = None
+    force: bool = False
+
 class YouTubeAuthCallback(BaseModel):
     code: str
     redirect_uri: str
@@ -1179,7 +1184,10 @@ async def check_duplicates_with_ai_progress(
     all_questions: List[Dict],
     current_batch_id: str,
     model: str = DEFAULT_AI_MODEL,
-    task_id: str = None
+    task_id: str = None,
+    raise_errors: bool = False,
+    processed_pair_keys: Optional[List[List[str]]] = None,
+    job_marker: Optional[str] = None,
 ) -> List[Dict]:
     """Use AI to find semantic duplicates from the SAME USER with progress tracking.
 
@@ -1190,7 +1198,11 @@ async def check_duplicates_with_ai_progress(
     Only flags duplicates from the SAME user - different users asking similar questions is NOT a duplicate.
     """
     duplicates_found = []
-    processed_pairs = set()  # To avoid checking the same pair twice
+    processed_pairs = {
+        tuple(sorted(pair))
+        for pair in (processed_pair_keys or [])
+        if isinstance(pair, list) and len(pair) == 2
+    }
     model_name = resolve_openai_model(model)
     logger.info(f"Using OpenAI model: {model_name}")
 
@@ -1286,6 +1298,8 @@ OTRAS PREGUNTAS DEL MISMO USUARIO:
 
                     response = await call_openai_text(system_message, user_prompt, model_name)
                     response = response.strip().upper() if response else ""
+                    if not response and raise_errors:
+                        raise RuntimeError(f"La IA no devolvió respuesta para la pregunta {new_id}")
                     break  # Success, exit retry loop
 
                 except Exception as api_error:
@@ -1294,12 +1308,18 @@ OTRAS PREGUNTAS DEL MISMO USUARIO:
                         await asyncio.sleep(retry_delay * (attempt + 1))
                     else:
                         logger.error(f"Failed after {max_retries} attempts for question {new_id}")
+                        if raise_errors:
+                            raise
                         response = ""
 
             if response and response != "NINGUNA":
                 # Parse the response to get duplicate numbers
                 try:
                     numbers = [int(n.strip()) for n in response.replace(".", ",").split(",") if n.strip().isdigit()]
+                    if raise_errors and not numbers:
+                        raise ValueError(f"Respuesta de duplicados no reconocida: {response[:100]}")
+                    if raise_errors and any(num < 1 or num > min(len(user_questions), 20) for num in numbers):
+                        raise ValueError(f"La IA devolvió una referencia fuera de rango: {response[:100]}")
                     for num in numbers:
                         if 1 <= num <= len(user_questions):
                             hist_q = user_questions[num - 1]
@@ -1361,10 +1381,16 @@ OTRAS PREGUNTAS DEL MISMO USUARIO:
                             # Mark as duplicate in DB
                             await db.questions.update_one(
                                 {"id": new_q["id"]},
-                                {"$set": {"is_duplicate": True, "duplicate_of": hist_q["id"]}}
+                                {"$set": {
+                                    "is_duplicate": True,
+                                    "duplicate_of": hist_q["id"],
+                                    **({"ai_duplicate_job_id": job_marker} if job_marker else {}),
+                                }}
                             )
                 except Exception as parse_error:
                     logger.error(f"Error parsing AI response: {parse_error}")
+                    if raise_errors:
+                        raise
 
         # Final progress update
         update_progress(total_to_process, total_to_process, "completed", len(duplicates_found))
@@ -1373,6 +1399,8 @@ OTRAS PREGUNTAS DEL MISMO USUARIO:
         logger.error(f"Error in AI duplicate check: {e}")
         if task_id:
             update_progress(0, 0, "error")
+        if raise_errors:
+            raise
 
     return duplicates_found
 
@@ -1430,11 +1458,422 @@ async def check_duplicates_with_ai(questions_to_check: List[Dict], all_questions
     """Legacy function - calls the new progress version without task tracking"""
     return await check_duplicates_with_ai_progress(questions_to_check, all_questions, current_batch_id, model, None)
 
+
+# ==================== DURABLE AI JOBS ====================
+
+AI_JOB_TYPES = {"classification", "correction", "duplicates"}
+AI_JOB_LEASE_SECONDS = 330
+
+
+def _utcnow_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _ai_job_public(job: Dict) -> Dict:
+    """Return job state without the potentially large question-id snapshots."""
+    if not job:
+        return job
+    payload = {key: value for key, value in job.items() if key not in {"_id", "question_ids", "processed_ids", "lease_token"}}
+    total = job.get("total", 0)
+    current = job.get("current", 0)
+    payload["percentage"] = round((current / total) * 100) if total else (100 if job.get("status") == "completed" else 0)
+
+    lease_expires_at = job.get("lease_expires_at")
+    lease_expired = True
+    if lease_expires_at:
+        try:
+            lease_expired = datetime.fromisoformat(lease_expires_at) <= datetime.now(timezone.utc)
+        except (TypeError, ValueError):
+            lease_expired = True
+    payload["can_resume"] = job.get("status") in {"pending", "error"} or (
+        job.get("status") == "running" and lease_expired
+    )
+    return payload
+
+
+async def _question_ids_for_ai_job(job_type: str, batch_id: str, force: bool) -> List[str]:
+    if job_type == "classification":
+        questions = await db.questions.find(
+            {"import_batch_id": batch_id},
+            {"_id": 0, "id": 1},
+        ).to_list(length=None)
+        return [question["id"] for question in questions]
+
+    if job_type == "correction":
+        query = {
+            "import_batch_id": batch_id,
+            "is_greeting": {"$ne": True},
+            "is_duplicate": {"$ne": True},
+            "clasificacion": {"$ne": "saludo"},
+        }
+        if not force:
+            query.update(await build_clasificacion_filter(batch_id))
+            query["is_corrected"] = {"$ne": True}
+        questions = await db.questions.find(query, {"_id": 0, "id": 1}).to_list(length=None)
+        return [question["id"] for question in questions]
+
+    all_questions = await db.questions.find(
+        {"is_greeting": {"$ne": True}},
+        {"_id": 0, "id": 1, "import_batch_id": 1, "real_name": 1, "youtube_username": 1},
+    ).to_list(length=None)
+    counts_by_user: Dict[str, int] = {}
+    for question in all_questions:
+        user = normalize_text(question.get("real_name") or question.get("youtube_username") or "")
+        counts_by_user[user] = counts_by_user.get(user, 0) + 1
+    return [
+        question["id"]
+        for question in all_questions
+        if question.get("import_batch_id") == batch_id
+        and counts_by_user.get(normalize_text(question.get("real_name") or question.get("youtube_username") or ""), 0) > 1
+    ]
+
+
+async def _create_or_resume_ai_job(job_type: str, batch_id: str, request: AIJobRequest) -> Dict:
+    if job_type not in AI_JOB_TYPES:
+        raise HTTPException(status_code=400, detail="Tipo de trabajo IA no válido")
+
+    existing = await db.ai_jobs.find_one(
+        {
+            "type": job_type,
+            "batch_id": batch_id,
+            "status": {"$in": ["pending", "running", "error"]},
+        },
+        {"_id": 0},
+    )
+    if existing:
+        return existing
+
+    settings = await get_settings()
+    configured_models = {
+        "classification": settings.classification_model,
+        "correction": settings.correction_model,
+        "duplicates": settings.duplicate_model,
+    }
+    model_name = resolve_openai_model(request.model or configured_models[job_type])
+    question_ids = await _question_ids_for_ai_job(job_type, batch_id, request.force)
+    now = _utcnow_iso()
+    job = {
+        "id": str(uuid.uuid4()),
+        "type": job_type,
+        "batch_id": batch_id,
+        "model": model_name,
+        "force": bool(request.force),
+        "status": "pending" if question_ids else "completed",
+        "current": 0,
+        "total": len(question_ids),
+        "question_ids": question_ids,
+        "processed_ids": [],
+        "result": {},
+        "error": None,
+        "lease_token": None,
+        "lease_expires_at": None,
+        "lease_version": 0,
+        "created_at": now,
+        "updated_at": now,
+        "completed_at": now if not question_ids else None,
+    }
+    await db.ai_jobs.insert_one(job)
+    return job
+
+
+async def _claim_ai_job(job_id: str) -> tuple[Optional[Dict], Optional[str]]:
+    job = await db.ai_jobs.find_one({"id": job_id}, {"_id": 0})
+    if not job:
+        raise HTTPException(status_code=404, detail="Trabajo IA no encontrado")
+    if job.get("status") == "completed":
+        return job, None
+
+    now = datetime.now(timezone.utc)
+    lease_expires_at = job.get("lease_expires_at")
+    if job.get("status") == "running" and lease_expires_at:
+        try:
+            if datetime.fromisoformat(lease_expires_at) > now:
+                return job, None
+        except (TypeError, ValueError):
+            pass
+
+    token = str(uuid.uuid4())
+    version = job.get("lease_version", 0)
+    claimed = await db.ai_jobs.update_one(
+        {"id": job_id, "lease_version": version},
+        {"$set": {
+            "status": "running",
+            "error": None,
+            "lease_token": token,
+            "lease_expires_at": (now + timedelta(seconds=AI_JOB_LEASE_SECONDS)).isoformat(),
+            "lease_version": version + 1,
+            "updated_at": now.isoformat(),
+        }},
+    )
+    if claimed.matched_count == 0:
+        current = await db.ai_jobs.find_one({"id": job_id}, {"_id": 0})
+        return current, None
+    return await db.ai_jobs.find_one({"id": job_id}, {"_id": 0}), token
+
+
+async def _save_ai_job_progress(job_id: str, token: str, processed_ids: List[str], result: Dict) -> Dict:
+    job = await db.ai_jobs.find_one({"id": job_id, "lease_token": token}, {"_id": 0})
+    if not job:
+        raise RuntimeError("El trabajo IA perdió su bloqueo de ejecución")
+    processed = list(dict.fromkeys([*job.get("processed_ids", []), *processed_ids]))
+    now = datetime.now(timezone.utc)
+    update = await db.ai_jobs.update_one(
+        {"id": job_id, "lease_token": token},
+        {"$set": {
+            "processed_ids": processed,
+            "current": len(processed),
+            "result": result,
+            "updated_at": now.isoformat(),
+            "lease_expires_at": (now + timedelta(seconds=AI_JOB_LEASE_SECONDS)).isoformat(),
+        }},
+    )
+    if update.matched_count == 0:
+        raise RuntimeError("El trabajo IA perdió su bloqueo de ejecución")
+    return await db.ai_jobs.find_one({"id": job_id}, {"_id": 0})
+
+
+async def _process_correction_job(job: Dict, token: str) -> Dict:
+    if not os.environ.get("OPENAI_API_KEY"):
+        raise RuntimeError("OPENAI_API_KEY no está configurada")
+
+    pending_ids = [qid for qid in job["question_ids"] if qid not in set(job.get("processed_ids", []))]
+    result = {"corrected_count": 0, "skipped_count": 0, **job.get("result", {})}
+
+    async def correct_one(question_id: str):
+        question = await db.questions.find_one({"id": question_id}, {"_id": 0})
+        if question and question.get("ai_correction_job_id") == job["id"]:
+            return question_id, "already_applied", None
+        if not question or (not job.get("force") and question.get("is_corrected")):
+            return question_id, "skipped", None
+        stored_name = await get_real_name(question.get("youtube_username", ""))
+        if stored_name and stored_name != question.get("real_name"):
+            await db.questions.update_one({"id": question_id}, {"$set": {"real_name": stored_name}})
+        text = question.get("corrected_text") or question.get("original_text", "")
+        corrected_text = await correct_text_with_ai(text, job["model"])
+        await db.questions.update_one(
+            {"id": question_id},
+            {"$set": {
+                "corrected_text": corrected_text,
+                "is_corrected": True,
+                "ai_correction_job_id": job["id"],
+            }},
+        )
+        return question_id, "corrected", corrected_text
+
+    for offset in range(0, len(pending_ids), 5):
+        chunk = pending_ids[offset:offset + 5]
+        outcomes = await asyncio.gather(*(correct_one(question_id) for question_id in chunk), return_exceptions=True)
+        completed_ids = []
+        failures = []
+        for outcome in outcomes:
+            if isinstance(outcome, Exception):
+                failures.append(str(outcome))
+                continue
+            question_id, state, _ = outcome
+            completed_ids.append(question_id)
+            if state != "already_applied":
+                key = "corrected_count" if state == "corrected" else "skipped_count"
+                result[key] = result.get(key, 0) + 1
+        job = await _save_ai_job_progress(job["id"], token, completed_ids, result)
+        if failures:
+            raise RuntimeError(f"{len(failures)} pregunta(s) no se pudieron corregir: {failures[0]}")
+    return job
+
+
+async def _process_classification_job(job: Dict, token: str) -> Dict:
+    if not os.environ.get("OPENAI_API_KEY"):
+        raise RuntimeError("OPENAI_API_KEY no está configurada")
+    pending_ids = [qid for qid in job["question_ids"] if qid not in set(job.get("processed_ids", []))]
+    result = {
+        "classified_count": 0,
+        "blocked_removed": 0,
+        "counts": {"pregunta": 0, "dudoso": 0, "saludo": 0},
+        **job.get("result", {}),
+    }
+    result["counts"] = {"pregunta": 0, "dudoso": 0, "saludo": 0, **result.get("counts", {})}
+
+    for offset in range(0, len(pending_ids), 20):
+        chunk_ids = pending_ids[offset:offset + 20]
+        comentarios = []
+        completed_ids = []
+        for question_id in chunk_ids:
+            question = await db.questions.find_one({"id": question_id}, {"_id": 0})
+            if not question:
+                completed_ids.append(question_id)
+                continue
+            if question.get("ai_classification_job_id") == job["id"]:
+                completed_ids.append(question_id)
+                continue
+            text = (question.get("corrected_text") or question.get("original_text") or "").strip()
+            if not text:
+                completed_ids.append(question_id)
+                continue
+            if await is_blocked_comment(question.get("youtube_username", ""), text):
+                await db.questions.delete_one({"id": question_id})
+                completed_ids.append(question_id)
+                result["blocked_removed"] = result.get("blocked_removed", 0) + 1
+                continue
+            comentarios.append({"id": question_id, "text": text})
+
+        classifications = await clasificar_comentarios_con_ia(comentarios, model=job["model"])
+        by_id = {item["id"]: item for item in classifications}
+        for comentario in comentarios:
+            item = by_id.get(comentario["id"])
+            if not item:
+                continue
+            label = item["clasificacion"]
+            await db.questions.update_one(
+                {"id": item["id"]},
+                {"$set": {
+                    "clasificacion": label,
+                    "motivo_clasificacion": item["motivo"],
+                    "is_greeting": label == "saludo",
+                    "ai_classification_job_id": job["id"],
+                }},
+            )
+            completed_ids.append(item["id"])
+            result["classified_count"] = result.get("classified_count", 0) + 1
+            result["counts"][label] = result["counts"].get(label, 0) + 1
+
+        job = await _save_ai_job_progress(job["id"], token, completed_ids, result)
+        missing = [item["id"] for item in comentarios if item["id"] not in by_id]
+        if missing:
+            raise RuntimeError(f"La IA no devolvió clasificación para {len(missing)} comentario(s)")
+    return job
+
+
+async def _process_duplicate_job(job: Dict, token: str) -> Dict:
+    if not os.environ.get("OPENAI_API_KEY"):
+        raise RuntimeError("OPENAI_API_KEY no está configurada")
+    pending_ids = [qid for qid in job["question_ids"] if qid not in set(job.get("processed_ids", []))]
+    result = {"duplicates_found": 0, "processed_pairs": [], **job.get("result", {})}
+
+    for question_id in pending_ids:
+        question = await db.questions.find_one({"id": question_id}, {"_id": 0})
+        if question and question.get("ai_duplicate_job_id") != job["id"]:
+            all_questions = await db.questions.find(
+                {"is_greeting": {"$ne": True}},
+                {"_id": 0},
+            ).to_list(length=None)
+            found = await check_duplicates_with_ai_progress(
+                [question],
+                all_questions,
+                job["batch_id"],
+                job["model"],
+                None,
+                True,
+                result.get("processed_pairs", []),
+                job["id"],
+            )
+            result["duplicates_found"] = result.get("duplicates_found", 0) + len(found)
+            for duplicate in found:
+                pair = sorted([
+                    duplicate["new_question"]["id"],
+                    duplicate["original_question"]["id"],
+                ])
+                if pair not in result["processed_pairs"]:
+                    result["processed_pairs"].append(pair)
+            await db.questions.update_one(
+                {"id": question_id},
+                {"$set": {"ai_duplicate_job_id": job["id"]}},
+            )
+        job = await _save_ai_job_progress(job["id"], token, [question_id], result)
+    return job
+
+
+async def _final_ai_job_result(job: Dict) -> Dict:
+    questions = await db.questions.find(
+        {"id": {"$in": job.get("question_ids", [])}},
+        {"_id": 0},
+    ).to_list(length=None)
+    result = dict(job.get("result", {}))
+    if job["type"] == "classification":
+        counts = {"pregunta": 0, "dudoso": 0, "saludo": 0}
+        for question in questions:
+            label = question.get("clasificacion")
+            if label in counts:
+                counts[label] += 1
+        result["counts"] = counts
+        result["classified_count"] = sum(counts.values())
+    elif job["type"] == "correction":
+        result["corrected_count"] = sum(1 for question in questions if question.get("is_corrected"))
+    else:
+        result["duplicates_found"] = sum(1 for question in questions if question.get("is_duplicate"))
+    return result
+
+
+async def _run_ai_job(job_id: str) -> Dict:
+    job, token = await _claim_ai_job(job_id)
+    if not token:
+        return job
+    try:
+        if job["type"] == "correction":
+            job = await _process_correction_job(job, token)
+        elif job["type"] == "classification":
+            job = await _process_classification_job(job, token)
+        else:
+            job = await _process_duplicate_job(job, token)
+
+        now = _utcnow_iso()
+        final_result = await _final_ai_job_result(job)
+        await db.ai_jobs.update_one(
+            {"id": job_id, "lease_token": token},
+            {"$set": {
+                "status": "completed",
+                "current": job.get("total", 0),
+                "result": final_result,
+                "lease_token": None,
+                "lease_expires_at": None,
+                "updated_at": now,
+                "completed_at": now,
+            }},
+        )
+    except Exception as exc:
+        logger.exception("AI job %s failed", job_id)
+        await db.ai_jobs.update_one(
+            {"id": job_id, "lease_token": token},
+            {"$set": {
+                "status": "error",
+                "error": str(exc),
+                "lease_token": None,
+                "lease_expires_at": None,
+                "updated_at": _utcnow_iso(),
+            }},
+        )
+    return await db.ai_jobs.find_one({"id": job_id}, {"_id": 0})
+
 # ==================== API ROUTES ====================
 
 @api_router.get("/")
 async def root():
     return {"message": "Gestor de Preguntas YouTube API", "status": "ok"}
+
+
+@api_router.post("/ai-jobs/create/{job_type}/{batch_id}")
+async def create_ai_job(job_type: str, batch_id: str, request: AIJobRequest = AIJobRequest()):
+    return _ai_job_public(await _create_or_resume_ai_job(job_type, batch_id, request))
+
+
+@api_router.post("/ai-jobs/{job_id}/run")
+async def run_ai_job(job_id: str):
+    return _ai_job_public(await _run_ai_job(job_id))
+
+
+@api_router.get("/ai-jobs/{job_id}")
+async def get_ai_job(job_id: str):
+    job = await db.ai_jobs.find_one({"id": job_id}, {"_id": 0})
+    if not job:
+        raise HTTPException(status_code=404, detail="Trabajo IA no encontrado")
+    return _ai_job_public(job)
+
+
+@api_router.get("/ai-jobs-active/{batch_id}")
+async def get_active_ai_jobs(batch_id: str):
+    jobs = await db.ai_jobs.find(
+        {"batch_id": batch_id, "status": {"$in": ["pending", "running"]}},
+        {"_id": 0},
+    ).to_list(length=None)
+    return [_ai_job_public(job) for job in jobs]
 
 # ----- SETTINGS -----
 
@@ -4672,6 +5111,12 @@ async def seed_default_blocked_comments():
             ("clasificacion", 1),
             ("is_duplicate", 1),
             ("is_greeting", 1),
+        ])
+        await db.ai_jobs.create_index("id", unique=True)
+        await db.ai_jobs.create_index([
+            ("batch_id", 1),
+            ("type", 1),
+            ("status", 1),
         ])
         seed_emails = [
             _normalize_email(email)
