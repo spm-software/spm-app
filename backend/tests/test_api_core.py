@@ -71,16 +71,82 @@ def test_settings_default_and_update(client, auth_headers):
     response = auth_get(client, "/api/settings", auth_headers)
     assert response.status_code == 200
     assert response.json()["num_programs"] == 4
+    assert response.json()["classification_model"] == "gpt-5.4-mini"
+    assert response.json()["correction_model"] == "gpt-5.6-luna"
+    assert response.json()["duplicate_model"] == "gpt-5.6-terra"
 
     response = auth_put(
         client,
         "/api/settings",
         auth_headers,
-        json={"num_programs": 3, "max_questions_per_user_per_program": 1, "llm_provider": "gpt-4o-mini"},
+        json={
+            "num_programs": 3,
+            "max_questions_per_user_per_program": 1,
+            "classification_model": "gpt-5.6-luna",
+            "correction_model": "gpt-5.6-terra",
+            "duplicate_model": "gpt-5.6-sol",
+        },
     )
     assert response.status_code == 200
     assert response.json()["num_programs"] == 3
     assert response.json()["max_questions_per_user_per_program"] == 1
+    assert response.json()["classification_model"] == "gpt-5.6-luna"
+    assert response.json()["correction_model"] == "gpt-5.6-terra"
+    assert response.json()["duplicate_model"] == "gpt-5.6-sol"
+    assert response.json()["llm_provider"] == "gpt-5.6-luna"
+
+
+def test_correction_uses_configured_task_model(client, auth_headers, fake_db, monkeypatch):
+    fake_db.questions.docs.append({
+        "id": "question-model-test",
+        "youtube_username": "@ana",
+        "original_text": "Que dice la biblia?",
+        "is_corrected": False,
+    })
+    captured = {}
+
+    async def fake_correct(text, model):
+        captured["text"] = text
+        captured["model"] = model
+        return "¿Qué dice la Biblia?"
+
+    monkeypatch.setattr(server, "correct_text_with_ai", fake_correct)
+
+    response = auth_post(
+        client,
+        "/api/questions/correct",
+        auth_headers,
+        json={"question_ids": ["question-model-test"]},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["model_used"] == "gpt-5.6-luna"
+    assert captured == {"text": "Que dice la biblia?", "model": "gpt-5.6-luna"}
+
+
+def test_classification_accepts_explicit_task_model(client, auth_headers, fake_db, monkeypatch):
+    fake_db.questions.docs.append({
+        "id": "question-classification-model",
+        "import_batch_id": "batch-model-test",
+        "original_text": "¿Qué significa este pasaje?",
+    })
+
+    def capture_task(coroutine):
+        coroutine.close()
+
+    monkeypatch.setattr(server.asyncio, "create_task", capture_task)
+
+    response = auth_post(
+        client,
+        "/api/questions/clasificar/batch-model-test",
+        auth_headers,
+        json={"model": "gpt-5.6-terra"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["model_used"] == "gpt-5.6-terra"
+    assert server.background_tasks_status[payload["task_id"]]["model_used"] == "gpt-5.6-terra"
 
 
 def test_stats_and_reserve_endpoint_count_valid_reserve_questions(client, auth_headers, fake_db):

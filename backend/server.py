@@ -38,6 +38,9 @@ mongo_url = os.environ['MONGO_URL']
 client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ['DB_NAME']]
 DEFAULT_AI_MODEL = os.environ.get("AI_MODEL", "gpt-5.4-mini")
+DEFAULT_CLASSIFICATION_MODEL = os.environ.get("AI_CLASSIFICATION_MODEL", "gpt-5.4-mini")
+DEFAULT_CORRECTION_MODEL = os.environ.get("AI_CORRECTION_MODEL", "gpt-5.6-luna")
+DEFAULT_DUPLICATE_MODEL = os.environ.get("AI_DUPLICATE_MODEL", "gpt-5.6-terra")
 
 # Create the main app
 app = FastAPI(title="Gestor de Preguntas YouTube")
@@ -152,6 +155,9 @@ class Settings(BaseModel):
     num_programs: int = 4
     max_questions_per_user_per_program: int = 2
     llm_provider: str = DEFAULT_AI_MODEL
+    classification_model: str = DEFAULT_CLASSIFICATION_MODEL
+    correction_model: str = DEFAULT_CORRECTION_MODEL
+    duplicate_model: str = DEFAULT_DUPLICATE_MODEL
     youtube_client_id: Optional[str] = None
     youtube_client_secret: Optional[str] = None
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
@@ -160,6 +166,9 @@ class SettingsUpdate(BaseModel):
     num_programs: Optional[int] = None
     max_questions_per_user_per_program: Optional[int] = None
     llm_provider: Optional[str] = None
+    classification_model: Optional[str] = None
+    correction_model: Optional[str] = None
+    duplicate_model: Optional[str] = None
     youtube_client_id: Optional[str] = None
     youtube_client_secret: Optional[str] = None
 
@@ -172,6 +181,11 @@ class DistributeRequest(BaseModel):
 
 class CorrectionRequest(BaseModel):
     question_ids: List[str]
+    model: Optional[str] = None
+
+
+class AIModelRequest(BaseModel):
+    model: Optional[str] = None
 
 class YouTubeAuthCallback(BaseModel):
     code: str
@@ -788,6 +802,9 @@ OPENAI_MODEL_ALIASES = {
     "openai": DEFAULT_AI_MODEL,
     "gpt-5.4-mini": "gpt-5.4-mini",
     "gpt-5.4": "gpt-5.4",
+    "gpt-5.6-luna": "gpt-5.6-luna",
+    "gpt-5.6-terra": "gpt-5.6-terra",
+    "gpt-5.6-sol": "gpt-5.6-sol",
     "gpt-5.2": "gpt-5.2",
     "gpt-4o": "gpt-4o",
     "gpt-4o-mini": "gpt-4o-mini",
@@ -1430,6 +1447,10 @@ async def get_settings():
         doc['updated_at'] = serialize_datetime(doc['updated_at'])
         await db.settings.insert_one(doc)
         return default
+    legacy_model = resolve_openai_model(settings.get("llm_provider"))
+    settings.setdefault("classification_model", legacy_model or DEFAULT_CLASSIFICATION_MODEL)
+    settings.setdefault("correction_model", DEFAULT_CORRECTION_MODEL)
+    settings.setdefault("duplicate_model", DEFAULT_DUPLICATE_MODEL)
     if isinstance(settings.get('updated_at'), str):
         settings['updated_at'] = deserialize_datetime(settings['updated_at'])
     return Settings(**settings)
@@ -1437,6 +1458,10 @@ async def get_settings():
 @api_router.put("/settings", response_model=Settings)
 async def update_settings(update: SettingsUpdate):
     update_data = {k: v for k, v in update.model_dump().items() if v is not None}
+    if "llm_provider" in update_data and "classification_model" not in update_data:
+        update_data["classification_model"] = resolve_openai_model(update_data["llm_provider"])
+    if "classification_model" in update_data:
+        update_data["llm_provider"] = update_data["classification_model"]
     update_data['updated_at'] = datetime.now(timezone.utc).isoformat()
 
     await db.settings.update_one(
@@ -1965,6 +1990,7 @@ async def import_comments(data: CommentImport):
 async def correct_questions(data: CorrectionRequest):
     """Correct selected questions using AI"""
     settings = await get_settings()
+    model_name = resolve_openai_model(data.model or settings.correction_model)
     corrected = []
 
     for qid in data.question_ids:
@@ -1979,7 +2005,7 @@ async def correct_questions(data: CorrectionRequest):
                 )
 
             text_to_correct = question.get("corrected_text") or question.get("original_text", "")
-            corrected_text = await correct_text_with_ai(text_to_correct, settings.llm_provider)
+            corrected_text = await correct_text_with_ai(text_to_correct, model_name)
 
             await db.questions.update_one(
                 {"id": qid},
@@ -1987,7 +2013,7 @@ async def correct_questions(data: CorrectionRequest):
             )
             corrected.append({"id": qid, "corrected_text": corrected_text, "real_name": stored_name})
 
-    return {"corrected": corrected}
+    return {"corrected": corrected, "model_used": model_name}
 
 @api_router.post("/questions/correct-all/{batch_id}")
 async def correct_all_questions(batch_id: str, force: bool = False):
@@ -2030,6 +2056,7 @@ async def correct_all_questions(batch_id: str, force: bool = False):
 async def correct_batch_questions(data: CorrectionRequest, force: bool = False):
     """Correct a small batch of questions (for progress tracking)"""
     settings = await get_settings()
+    model_name = resolve_openai_model(data.model or settings.correction_model)
     corrected = []
     errors = []
 
@@ -2046,7 +2073,7 @@ async def correct_batch_questions(data: CorrectionRequest, force: bool = False):
                     )
 
                 text_to_correct = question.get("corrected_text") or question.get("original_text", "")
-                corrected_text = await correct_text_with_ai(text_to_correct, settings.llm_provider)
+                corrected_text = await correct_text_with_ai(text_to_correct, model_name)
 
                 await db.questions.update_one(
                     {"id": qid},
@@ -2056,12 +2083,12 @@ async def correct_batch_questions(data: CorrectionRequest, force: bool = False):
         except Exception as e:
             errors.append({"id": qid, "error": str(e)})
 
-    return {"corrected": corrected, "errors": errors}
+    return {"corrected": corrected, "errors": errors, "model_used": model_name}
 
 
 # ----- CLASIFICACIÓN -----
 
-async def run_clasificacion_background(task_id: str, batch_id: str):
+async def run_clasificacion_background(task_id: str, batch_id: str, model: str):
     """Background runner for AI classification with progress tracking."""
     try:
         background_tasks_status[task_id]["status"] = "running"
@@ -2096,8 +2123,9 @@ async def run_clasificacion_background(task_id: str, batch_id: str):
             "total": len(comentarios)
         })
 
-        settings = await get_settings()
-        results = await clasificar_comentarios_con_ia(comentarios, task_id=task_id, model=settings.llm_provider)
+        model_name = resolve_openai_model(model)
+        background_tasks_status[task_id]["model_used"] = model_name
+        results = await clasificar_comentarios_con_ia(comentarios, task_id=task_id, model=model_name)
 
         # Apply classifications to DB
         counts = {"pregunta": 0, "dudoso": 0, "saludo": 0}
@@ -2134,7 +2162,7 @@ async def run_clasificacion_background(task_id: str, batch_id: str):
 
 
 @api_router.post("/questions/clasificar/{batch_id}")
-async def clasificar_batch(batch_id: str):
+async def clasificar_batch(batch_id: str, request: AIModelRequest = AIModelRequest()):
     """Inicia una tarea en background para clasificar todas las preguntas del lote.
 
     Devuelve un task_id. Usa GET /api/questions/clasificar/status/{task_id} para el progreso.
@@ -2144,6 +2172,8 @@ async def clasificar_batch(batch_id: str):
     if total == 0:
         return {"classified_count": 0, "total": 0, "message": "No hay preguntas en este lote"}
 
+    settings = await get_settings()
+    model_name = resolve_openai_model(request.model or settings.classification_model)
     task_id = str(uuid.uuid4())
     background_tasks_status[task_id] = {
         "task_id": task_id,
@@ -2151,15 +2181,17 @@ async def clasificar_batch(batch_id: str):
         "status": "starting",
         "current": 0,
         "total": total,
+        "model_used": model_name,
         "started_at": datetime.now(timezone.utc).isoformat()
     }
 
-    asyncio.create_task(run_clasificacion_background(task_id, batch_id))
+    asyncio.create_task(run_clasificacion_background(task_id, batch_id, model_name))
 
     return {
         "task_id": task_id,
         "status": "started",
         "total": total,
+        "model_used": model_name,
         "message": "Clasificación iniciada. Usa /api/questions/clasificar/status/{task_id} para ver el progreso."
     }
 
@@ -2185,6 +2217,7 @@ async def get_clasificacion_status(task_id: str):
         "classified_so_far": task.get("classified_so_far", 0),
         "classified_count": task.get("classified_count"),
         "counts": task.get("counts"),
+        "model_used": task.get("model_used"),
         "started_at": task.get("started_at"),
         "completed_at": task.get("completed_at"),
         "error": task.get("error")
@@ -2329,7 +2362,7 @@ async def check_duplicates(batch_id: str):
 
 
 class DuplicateCheckRequest(BaseModel):
-    model: Optional[str] = DEFAULT_AI_MODEL
+    model: Optional[str] = None
 
 
 @api_router.post("/questions/check-duplicates-ai-start/{batch_id}")
@@ -2339,6 +2372,9 @@ async def start_ai_duplicate_check(batch_id: str, request: DuplicateCheckRequest
     Returns a task_id that can be used to poll for progress and results.
     This avoids timeouts for large batches.
     """
+    settings = await get_settings()
+    model_name = resolve_openai_model(request.model or settings.duplicate_model)
+
     # Create task ID
     task_id = str(uuid.uuid4())
 
@@ -2346,7 +2382,7 @@ async def start_ai_duplicate_check(batch_id: str, request: DuplicateCheckRequest
     background_tasks_status[task_id] = {
         "task_id": task_id,
         "batch_id": batch_id,
-        "model": request.model,
+        "model": model_name,
         "status": "starting",
         "current": 0,
         "total": 0,
@@ -2355,11 +2391,12 @@ async def start_ai_duplicate_check(batch_id: str, request: DuplicateCheckRequest
     }
 
     # Start the background task
-    asyncio.create_task(run_ai_duplicate_check_background(task_id, batch_id, request.model))
+    asyncio.create_task(run_ai_duplicate_check_background(task_id, batch_id, model_name))
 
     return {
         "task_id": task_id,
         "status": "started",
+        "model_used": model_name,
         "message": "Búsqueda de duplicados iniciada. Usa /api/duplicates/status/{task_id} para ver el progreso."
     }
 
@@ -2516,6 +2553,9 @@ async def check_duplicates_ai(batch_id: str, request: DuplicateCheckRequest = Du
     Different users asking similar questions is NOT considered a duplicate.
     """
 
+    settings = await get_settings()
+    model_name = resolve_openai_model(request.model or settings.duplicate_model)
+
     # Get questions from current batch
     questions = await db.questions.find(
         {"import_batch_id": batch_id, "is_greeting": {"$ne": True}},
@@ -2532,14 +2572,14 @@ async def check_duplicates_ai(batch_id: str, request: DuplicateCheckRequest = Du
     ).to_list(10000)
 
     # Use AI to find duplicates (same user only)
-    duplicates = await check_duplicates_with_ai(questions, all_questions, batch_id, request.model)
+    duplicates = await check_duplicates_with_ai(questions, all_questions, batch_id, model_name)
 
     return {
         "duplicates_count": len(duplicates),
         "duplicates": duplicates,
         "questions_checked": len(questions),
         "total_questions": len(all_questions),
-        "model_used": request.model
+        "model_used": model_name
     }
 
 @api_router.put("/questions/{question_id}/clear-duplicate")

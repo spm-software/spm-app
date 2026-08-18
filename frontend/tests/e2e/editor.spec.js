@@ -9,6 +9,7 @@ test.beforeEach(async ({ page }) => {
 test("loads questions and classification controls", async ({ page }) => {
   await page.goto("/editor");
 
+  await expect(page.getByTestId("classification-model-select")).toContainText("GPT-5.4 Mini");
   await expect(page.getByTestId("question-card-q2")).toContainText("@pedro");
   await expect(page.getByTestId("ready-counter")).toContainText("1");
   await expect(page.getByTestId("filter-pill-pregunta")).toBeVisible();

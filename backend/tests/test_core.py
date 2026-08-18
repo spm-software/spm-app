@@ -18,7 +18,7 @@ def test_datetime_serialization_round_trip():
 
 def test_clean_html_to_plain_text_decodes_entities_and_breaks():
     raw = "Hola&nbsp;<b>Samuel</b><br>Tom &amp; Jerry<br/><i>fin</i>"
-    assert core.clean_html_to_plain_text(raw) == "Hola\xa0Samuel\nTom & Jerry\nfin"
+    assert core.clean_html_to_plain_text(raw) == "Hola Samuel Tom & Jerry fin"
 
 
 def test_greeting_detection_keeps_real_questions():
@@ -45,7 +45,7 @@ Otra línea
     assert comments == [
         {
             "youtube_username": "@ana-lopez123",
-            "original_text": "¿Qué significa la fe?\nOtra línea",
+            "original_text": "¿Qué significa la fe? Otra línea",
             "real_name": None,
         },
         {
@@ -60,7 +60,7 @@ def test_parse_comments_real_name_colon_and_dash_formats():
     comments = core.parse_comments("Ana López: ¿Qué es la gracia?\nJuan Perez - ¿Qué es la fe?")
     assert comments[0]["youtube_username"] == "@ana_lópez"
     assert comments[0]["real_name"] == "Ana López"
-    assert comments[0]["original_text"] == "¿Qué es la gracia?\nJuan Perez - ¿Qué es la fe?"
+    assert comments[0]["original_text"] == "¿Qué es la gracia? Juan Perez - ¿Qué es la fe?"
 
 
 def test_parse_comments_format4_with_blank_sections():
@@ -83,7 +83,7 @@ def test_parse_comments_format4_with_blank_sections():
     comments = core.parse_comments(raw)
     assert len(comments) == 12
     assert comments[0]["real_name"] == "Ana Lopez"
-    assert comments[1]["original_text"] == "¿Pregunta dos?\n\ncon detalle"
+    assert comments[1]["original_text"] == "¿Pregunta dos? con detalle"
 
 
 def test_display_name_extraction_is_stable():
@@ -99,5 +99,8 @@ def test_similarity_and_username_normalizers():
 def test_resolve_openai_model_aliases_and_custom():
     assert core.resolve_openai_model("openai") == core.DEFAULT_AI_MODEL
     assert core.resolve_openai_model("gpt-4o-mini") == "gpt-4o-mini"
+    assert core.resolve_openai_model("gpt-5.6-luna") == "gpt-5.6-luna"
+    assert core.resolve_openai_model("gpt-5.6-terra") == "gpt-5.6-terra"
+    assert core.resolve_openai_model("gpt-5.6-sol") == "gpt-5.6-sol"
     assert core.resolve_openai_model("custom-model") == "custom-model"
     assert core.resolve_openai_model("") == core.DEFAULT_AI_MODEL

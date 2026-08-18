@@ -41,12 +41,35 @@ import {
   Ban
 } from "lucide-react";
 import { API_BASE_URL as API } from "@/lib/api";
+import { AI_MODELS, DEFAULT_AI_SETTINGS } from "@/lib/aiModels";
+
+const AI_TASK_SETTINGS = [
+  {
+    key: "classification_model",
+    label: "Clasificación",
+    description: "Separa preguntas, dudosas y saludos.",
+    testId: "classification-model-select",
+  },
+  {
+    key: "correction_model",
+    label: "Corrección ortográfica",
+    description: "Corrige el texto sin cambiar su significado.",
+    testId: "correction-model-select",
+  },
+  {
+    key: "duplicate_model",
+    label: "Duplicados IA",
+    description: "Compara preguntas del mismo usuario.",
+    testId: "duplicate-model-select",
+  },
+];
 
 export default function Configuracion() {
   const [settings, setSettings] = useState({
     num_programs: 4,
     max_questions_per_user_per_program: 2,
     llm_provider: "gpt-5.4-mini",
+    ...DEFAULT_AI_SETTINGS,
     youtube_client_id: "",
     youtube_client_secret: ""
   });
@@ -172,7 +195,9 @@ export default function Configuracion() {
       const response = await axios.get(`${API}/settings`);
       setSettings({
         ...response.data,
-        llm_provider: response.data.llm_provider === "openai" ? "gpt-5.4-mini" : response.data.llm_provider
+        classification_model: response.data.classification_model || DEFAULT_AI_SETTINGS.classification_model,
+        correction_model: response.data.correction_model || DEFAULT_AI_SETTINGS.correction_model,
+        duplicate_model: response.data.duplicate_model || DEFAULT_AI_SETTINGS.duplicate_model,
       });
     } catch (error) {
       console.error("Error fetching settings:", error);
@@ -389,32 +414,34 @@ export default function Configuracion() {
           <CardHeader>
             <CardTitle className="font-heading text-lg uppercase tracking-tight flex items-center gap-2">
               <Cpu className="w-5 h-5 text-primary" />
-              CORRECCIÓN IA
+              INTELIGENCIA ARTIFICIAL
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-6">
-            <div>
-              <Label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                Modelo de IA
-              </Label>
-              <Select 
-                value={settings.llm_provider} 
-                onValueChange={(v) => setSettings({...settings, llm_provider: v})}
-              >
-                <SelectTrigger className="mt-2 rounded-sm" data-testid="llm-provider-select">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="gpt-5.4-mini">GPT-5.4 Mini</SelectItem>
-                  <SelectItem value="gpt-5.4">GPT-5.4</SelectItem>
-                  <SelectItem value="gpt-5.2">GPT-5.2</SelectItem>
-                  <SelectItem value="gpt-4o-mini">GPT-4o Mini</SelectItem>
-                </SelectContent>
-              </Select>
-              <p className="text-xs text-muted-foreground mt-2">
-                Usando OpenAI API Key
-              </p>
-            </div>
+            {AI_TASK_SETTINGS.map((task) => (
+              <div key={task.key}>
+                <Label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  {task.label}
+                </Label>
+                <Select
+                  value={settings[task.key]}
+                  onValueChange={(value) => setSettings({ ...settings, [task.key]: value })}
+                >
+                  <SelectTrigger className="mt-2 rounded-sm" data-testid={task.testId}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {AI_MODELS.map((model) => (
+                      <SelectItem key={model.value} value={model.value}>
+                        {model.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground mt-2">{task.description}</p>
+              </div>
+            ))}
+            <p className="text-xs text-muted-foreground">Usando OpenAI API Key</p>
           </CardContent>
         </Card>
 

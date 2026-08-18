@@ -218,6 +218,9 @@ export async function mockCoreApi(page, options = {}) {
         num_programs: 4,
         max_questions_per_user_per_program: 2,
         llm_provider: "gpt-5.4-mini",
+        classification_model: "gpt-5.4-mini",
+        correction_model: "gpt-5.6-luna",
+        duplicate_model: "gpt-5.6-terra",
         youtube_client_id: "client-id",
         youtube_client_secret: "client-secret",
       });

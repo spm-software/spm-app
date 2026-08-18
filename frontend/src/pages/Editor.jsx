@@ -44,6 +44,7 @@ import {
   RefreshCw
 } from "lucide-react";
 import { API_BASE_URL as API } from "@/lib/api";
+import { AI_MODELS, DEFAULT_AI_SETTINGS, getAiModelLabel } from "@/lib/aiModels";
 import { useUndo } from "@/contexts/UndoContext";
 
 /**
@@ -63,6 +64,24 @@ export const getNameState = (q) => {
 };
 
 const isGreetingQuestion = (q) => q?.is_greeting === true || q?.clasificacion === "saludo";
+
+const AiModelSelect = ({ value, onValueChange, disabled, testId }) => (
+  <div className="flex items-center gap-2">
+    <span className="text-xs font-medium uppercase text-muted-foreground">Modelo</span>
+    <Select value={value} onValueChange={onValueChange} disabled={disabled}>
+      <SelectTrigger className="w-[180px] h-10 rounded-sm text-xs" data-testid={testId}>
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        {AI_MODELS.map((model) => (
+          <SelectItem key={model.value} value={model.value} className="text-xs">
+            {model.label}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  </div>
+);
 
 const workflowModeConfig = {
   classify: {
@@ -752,16 +771,10 @@ export default function Editor({ workflowMode = null }) {
   const [clasifying, setClasifying] = useState(false);
   const [clasifyProgress, setClasifyProgress] = useState({ current: 0, total: 0, percentage: 0 });
   const clasifyPollRef = useRef(null);
-  const [aiModel, setAiModel] = useState("gpt-5.4-mini");
+  const [aiSettings, setAiSettings] = useState(DEFAULT_AI_SETTINGS);
+  const [savingAiSetting, setSavingAiSetting] = useState(null);
   const initialBatchLoaded = useRef(false);
   const pollingIntervalRef = useRef(null);
-
-  const AI_MODELS = [
-    { value: "gpt-5.4-mini", label: "GPT-5.4 Mini", provider: "openai" },
-    { value: "gpt-5.4", label: "GPT-5.4", provider: "openai" },
-    { value: "gpt-5.2", label: "GPT-5.2", provider: "openai" },
-    { value: "gpt-4o-mini", label: "GPT-4o Mini", provider: "openai" },
-  ];
 
   // Cleanup polling on unmount
   useEffect(() => {
@@ -804,6 +817,35 @@ export default function Editor({ workflowMode = null }) {
       console.error("Error fetching batches:", error);
     }
   }, [globalReserveMode]);
+
+  const fetchAiSettings = useCallback(async () => {
+    try {
+      const response = await axios.get(`${API}/settings`);
+      setAiSettings({
+        classification_model: response.data.classification_model || DEFAULT_AI_SETTINGS.classification_model,
+        correction_model: response.data.correction_model || DEFAULT_AI_SETTINGS.correction_model,
+        duplicate_model: response.data.duplicate_model || DEFAULT_AI_SETTINGS.duplicate_model,
+      });
+    } catch (error) {
+      console.error("Error fetching AI settings:", error);
+    }
+  }, []);
+
+  const handleAiModelChange = async (settingKey, model) => {
+    const previousModel = aiSettings[settingKey];
+    setAiSettings((current) => ({ ...current, [settingKey]: model }));
+    setSavingAiSetting(settingKey);
+    try {
+      await axios.put(`${API}/settings`, { [settingKey]: model });
+      toast.success(`Modelo actualizado: ${getAiModelLabel(model)}`);
+    } catch (error) {
+      console.error("Error updating AI model:", error);
+      setAiSettings((current) => ({ ...current, [settingKey]: previousModel }));
+      toast.error("No se pudo guardar el modelo");
+    } finally {
+      setSavingAiSetting(null);
+    }
+  };
 
   const fetchQuestions = useCallback(async () => {
     setLoading(true);
@@ -864,7 +906,8 @@ export default function Editor({ workflowMode = null }) {
 
   useEffect(() => {
     fetchBatches();
-  }, [fetchBatches]);
+    fetchAiSettings();
+  }, [fetchBatches, fetchAiSettings]);
 
   useEffect(() => {
     if (selectedBatch || globalReserveMode) {
@@ -1027,6 +1070,9 @@ export default function Editor({ workflowMode = null }) {
       }
 
       setCorrectingProgress({ current: 0, total });
+      const correctionModel = aiSettings.correction_model;
+      const correctionModelLabel = getAiModelLabel(correctionModel);
+      toast.info(`${force ? "Recorrigiendo" : "Corrigiendo"} con ${correctionModelLabel}...`, { duration: 2500 });
 
       // Process in batches of 5
       const batchSize = 5;
@@ -1038,7 +1084,8 @@ export default function Editor({ workflowMode = null }) {
 
         try {
           const response = await axios.post(`${API}/questions/correct-batch`, {
-            question_ids: batch
+            question_ids: batch,
+            model: correctionModel,
           }, {
             params: { force }
           });
@@ -1090,7 +1137,8 @@ export default function Editor({ workflowMode = null }) {
     setCorrectingId(questionId);
     try {
       await axios.post(`${API}/questions/correct`, {
-        question_ids: [questionId]
+        question_ids: [questionId],
+        model: aiSettings.correction_model,
       });
       pushQuestionUndo("Corregir pregunta", question ? createQuestionSnapshot(question) : null);
       toast.success("Pregunta corregida");
@@ -1133,12 +1181,13 @@ export default function Editor({ workflowMode = null }) {
   const handleCheckDuplicatesAI = async () => {
     setCheckingDuplicates(true);
     setDuplicateProgress({ current: 0, total: 0, percentage: 0, duplicatesFound: 0 });
-    const modelLabel = AI_MODELS.find(m => m.value === aiModel)?.label || aiModel;
+    const duplicateModel = aiSettings.duplicate_model;
+    const modelLabel = getAiModelLabel(duplicateModel);
 
     try {
       // Start the background task
       const startResponse = await axios.post(`${API}/questions/check-duplicates-ai-start/${selectedBatch}`, {
-        model: aiModel
+        model: duplicateModel
       });
 
       const taskId = startResponse.data.task_id;
@@ -1373,7 +1422,11 @@ export default function Editor({ workflowMode = null }) {
     setClasifyProgress({ current: 0, total: 0, percentage: 0 });
 
     try {
-      const startResponse = await axios.post(`${API}/questions/clasificar/${selectedBatch}`);
+      const classificationModel = aiSettings.classification_model;
+      const modelLabel = getAiModelLabel(classificationModel);
+      const startResponse = await axios.post(`${API}/questions/clasificar/${selectedBatch}`, {
+        model: classificationModel,
+      });
 
       // Sync response path: no questions to classify
       if (!startResponse.data.task_id) {
@@ -1385,7 +1438,7 @@ export default function Editor({ workflowMode = null }) {
       const taskId = startResponse.data.task_id;
       const total = startResponse.data.total || 0;
       setClasifyProgress({ current: 0, total, percentage: 0 });
-      toast.info(`Clasificando ${total} comentarios con IA...`, { duration: 2500 });
+      toast.info(`Clasificando ${total} comentarios con ${modelLabel}...`, { duration: 2500 });
 
       const pollStatus = async () => {
         try {
@@ -1408,7 +1461,7 @@ export default function Editor({ workflowMode = null }) {
 
             const counts = s.counts || {};
             toast.success(
-              `${s.classified_count || 0} clasificadas · ${counts.pregunta || 0} preguntas, ${counts.dudoso || 0} dudosas, ${counts.saludo || 0} saludos`
+              `${s.classified_count || 0} clasificadas con ${getAiModelLabel(s.model_used || classificationModel)} · ${counts.pregunta || 0} preguntas, ${counts.dudoso || 0} dudosas, ${counts.saludo || 0} saludos`
             );
 
             await fetchQuestions();
@@ -1772,6 +1825,13 @@ export default function Editor({ workflowMode = null }) {
 
         {/* 2. Clasificar con IA */}
         {showClassifyActions && (
+          <>
+          <AiModelSelect
+            value={aiSettings.classification_model}
+            onValueChange={(model) => handleAiModelChange("classification_model", model)}
+            disabled={clasifying || savingAiSetting === "classification_model"}
+            testId="classification-model-select"
+          />
           <Button
             variant="outline"
             onClick={handleClasificarIA}
@@ -1789,6 +1849,7 @@ export default function Editor({ workflowMode = null }) {
               ? `Clasificando ${clasifyProgress.percentage}%`
               : "Clasificar con IA"}
           </Button>
+          </>
         )}
 
         {/* AI Classification Progress */}
@@ -1828,19 +1889,13 @@ export default function Editor({ workflowMode = null }) {
 
         {/* 4. Buscar duplicados con IA (+ selector de modelo) */}
         {showAiDuplicateActions && (
-        <div className="flex items-center gap-2">
-          <Select value={aiModel} onValueChange={setAiModel} disabled={checkingDuplicates}>
-            <SelectTrigger className="w-[180px] h-10 rounded-sm text-xs">
-              <SelectValue placeholder="Modelo IA" />
-            </SelectTrigger>
-            <SelectContent>
-              {AI_MODELS.map(model => (
-                <SelectItem key={model.value} value={model.value} className="text-xs">
-                  {model.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+        <div className="flex flex-wrap items-center gap-2">
+          <AiModelSelect
+            value={aiSettings.duplicate_model}
+            onValueChange={(model) => handleAiModelChange("duplicate_model", model)}
+            disabled={checkingDuplicates || savingAiSetting === "duplicate_model"}
+            testId="duplicate-model-select"
+          />
 
           <Button
             variant="default"
@@ -1905,6 +1960,12 @@ export default function Editor({ workflowMode = null }) {
         {/* 5. Corregir todo con IA */}
         {showSpellingActions && (
           <>
+            <AiModelSelect
+              value={aiSettings.correction_model}
+              onValueChange={(model) => handleAiModelChange("correction_model", model)}
+              disabled={correcting || savingAiSetting === "correction_model"}
+              testId="correction-model-select"
+            />
             <Button
               onClick={() => handleCorrectAll(false)}
               disabled={correcting || questions.length === 0}
