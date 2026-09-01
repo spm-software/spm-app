@@ -8,6 +8,7 @@ import {
   Users, 
   Settings, 
   Download,
+  Database,
   LogOut,
   Loader2,
   ArrowRight,
@@ -28,6 +29,7 @@ const navItems = [
   { to: "/distribuir", icon: Layers, label: "Distribuir" },
   { to: "/exportar", icon: Download, label: "Exportar" },
   { to: "/usuarios", icon: Users, label: "Usuarios" },
+  { to: "/bases-de-datos", icon: Database, label: "Bases de datos SPM" },
   { to: "/configuracion", icon: Settings, label: "Configuración" },
 ];
 
@@ -162,6 +164,7 @@ export default function Layout() {
 
   const currentStep = workflowSteps[workflowIndex];
   const isLastWorkflowStep = workflowIndex >= workflowSteps.length - 1;
+  const isDatabaseSection = location.pathname.startsWith("/bases-de-datos");
   const undoTitle = activeAction
     ? `Deshacer: ${activeAction.type === "move"
         ? `${activeAction.questionLabel} a ${activeAction.fromProgramName}`
@@ -299,7 +302,7 @@ export default function Layout() {
       </div>
 
       <main className="app-main h-screen overflow-auto pt-16 pb-24 md:pt-0 md:pb-0">
-        <div className="sticky top-0 z-30 border-b border-border bg-background/95 px-4 py-3 backdrop-blur md:px-8">
+        {!isDatabaseSection && <div className="sticky top-0 z-30 border-b border-border bg-background/95 px-4 py-3 backdrop-blur md:px-8">
           <div className="flex items-center gap-2">
               <div className="workflow-step-strip flex min-w-0 flex-1 overflow-x-auto">
                 {workflowSteps.map((step, index) => {
@@ -389,7 +392,7 @@ export default function Layout() {
                 )}
               </button>
           </div>
-        </div>
+        </div>}
         <Outlet />
         <div className="px-4 pb-8 pt-2 md:px-8 md:pb-10">
           <button

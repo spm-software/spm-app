@@ -11,6 +11,8 @@ import Usuarios from "@/pages/Usuarios";
 import Configuracion from "@/pages/Configuracion";
 import Exportar from "@/pages/Exportar";
 import Login from "@/pages/Login";
+import BasesDatos from "@/pages/BasesDatos";
+import Cultos from "@/pages/Cultos";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import { UndoProvider } from "@/contexts/UndoContext";
 
@@ -58,6 +60,8 @@ function App() {
               <Route path="flujo/reserva" element={<Editor workflowMode="reserve" />} />
               <Route path="distribuir" element={<Distribuidor />} />
               <Route path="usuarios" element={<Usuarios />} />
+              <Route path="bases-de-datos" element={<BasesDatos />} />
+              <Route path="bases-de-datos/cultos" element={<Cultos />} />
               <Route path="configuracion" element={<Configuracion />} />
               <Route path="exportar" element={<Exportar />} />
             </Route>

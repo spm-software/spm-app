@@ -17,6 +17,7 @@ import re
 import json
 import html
 import io
+import csv
 import zipfile
 import base64
 from difflib import SequenceMatcher
@@ -233,6 +234,43 @@ class AllowedEmail(BaseModel):
 
 class AllowedEmailCreate(BaseModel):
     email: str
+
+
+# ==================== SPM DATABASES ====================
+
+class CultoRecordInput(BaseModel):
+    """Fields imported from the legacy Cultos Access database."""
+    source_row_number: Optional[int] = None
+    numero: int = 0
+    tipo: str = ""
+    pasaje: str = ""
+    tema: str = ""
+    ciudad: str = ""
+    iglesia: str = ""
+    pais: str = ""
+    fecha: Optional[str] = None
+    disco: str = ""
+
+
+class CultoRecordCreate(CultoRecordInput):
+    pass
+
+
+class CultoRecordUpdate(BaseModel):
+    numero: Optional[int] = None
+    tipo: Optional[str] = None
+    pasaje: Optional[str] = None
+    tema: Optional[str] = None
+    ciudad: Optional[str] = None
+    iglesia: Optional[str] = None
+    pais: Optional[str] = None
+    fecha: Optional[str] = None
+    disco: Optional[str] = None
+
+
+class CultosImportRequest(BaseModel):
+    source_filename: str = "cultos.mdb"
+    records: List[CultoRecordInput]
 
 
 # ==================== HELPER FUNCTIONS ====================
@@ -1919,6 +1957,341 @@ async def update_settings(update: SettingsUpdate):
         upsert=True
     )
     return await get_settings()
+
+# ----- SPM DATABASES: CULTOS -----
+
+CULTOS_COLLECTION = "spm_cultos"
+CULTOS_IMPORTS_COLLECTION = "spm_cultos_imports"
+
+
+def _culto_public(doc: Dict[str, Any]) -> Dict[str, Any]:
+    public = {key: value for key, value in doc.items() if key != "_id"}
+    required_fields = ("pasaje", "tema", "ciudad", "iglesia", "pais", "fecha")
+    public["missing_fields"] = [
+        field for field in required_fields if not str(doc.get(field) or "").strip()
+    ]
+    public["has_date_warning"] = _culto_has_date_warning(doc.get("fecha"))
+    return public
+
+
+def _culto_has_date_warning(value: Optional[str]) -> bool:
+    if not value:
+        return False
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return True
+    return parsed.year < 1900 or parsed.date() > (datetime.now(timezone.utc).date() + timedelta(days=365))
+
+
+def _culto_filters(
+    search: Optional[str],
+    tipo: Optional[str],
+    pais: Optional[str],
+    ciudad: Optional[str],
+    include_archived: bool,
+    numero: Optional[int] = None,
+    tema: Optional[str] = None,
+    pasaje: Optional[str] = None,
+    iglesia: Optional[str] = None,
+    ubicacion: Optional[str] = None,
+    fecha_desde: Optional[str] = None,
+    fecha_hasta: Optional[str] = None,
+) -> Dict[str, Any]:
+    filters: Dict[str, Any] = {}
+    if not include_archived:
+        filters["archived_at"] = None
+    for field, value in (("tipo", tipo), ("pais", pais), ("ciudad", ciudad)):
+        if value:
+            filters[field] = value
+    if numero is not None:
+        filters["numero"] = numero
+
+    conditions = []
+    for field, value in (("tema", tema), ("pasaje", pasaje), ("iglesia", iglesia)):
+        if value and value.strip():
+            conditions.append({field: {"$regex": re.escape(value.strip()), "$options": "i"}})
+    if ubicacion and ubicacion.strip():
+        pattern = {"$regex": re.escape(ubicacion.strip()), "$options": "i"}
+        conditions.append({"$or": [{"ciudad": pattern}, {"pais": pattern}]})
+    if fecha_desde or fecha_hasta:
+        date_filter = {}
+        if fecha_desde:
+            date_filter["$gte"] = fecha_desde
+        if fecha_hasta:
+            date_filter["$lte"] = f"{fecha_hasta}T23:59:59.9999999"
+        conditions.append({"fecha": date_filter})
+    if search:
+        pattern = {"$regex": re.escape(search.strip()), "$options": "i"}
+        conditions.append({"$or": [
+            {field: pattern}
+            for field in ("tema", "pasaje", "ciudad", "iglesia", "pais", "tipo", "disco")
+        ]})
+    if conditions:
+        filters["$and"] = conditions
+    return filters
+
+
+@api_router.get("/spm-databases")
+async def list_spm_databases():
+    record_count = await db[CULTOS_COLLECTION].count_documents({"archived_at": None})
+    last_import = await db[CULTOS_IMPORTS_COLLECTION].find_one(
+        {}, {"_id": 0}, sort=[("imported_at", -1)]
+    )
+    return [{
+        "id": "cultos",
+        "name": "Cultos",
+        "description": "Archivo histórico de cultos, predicaciones y actividades",
+        "record_count": record_count,
+        "source": "cultos.mdb",
+        "last_import": last_import.get("imported_at") if last_import else None,
+    }]
+
+
+@api_router.get("/spm-databases/cultos/summary")
+async def cultos_summary():
+    active_filter = {"archived_at": None}
+    record_count = await db[CULTOS_COLLECTION].count_documents(active_filter)
+    archived_count = await db[CULTOS_COLLECTION].count_documents({"archived_at": {"$ne": None}})
+    type_counts = await db[CULTOS_COLLECTION].aggregate([
+        {"$match": active_filter},
+        {"$group": {"_id": "$tipo", "count": {"$sum": 1}}},
+        {"$sort": {"count": -1, "_id": 1}},
+    ]).to_list(length=None)
+    values = await db[CULTOS_COLLECTION].aggregate([
+        {"$match": active_filter},
+        {"$group": {
+            "_id": None,
+            "countries": {"$addToSet": "$pais"},
+            "cities": {"$addToSet": "$ciudad"},
+        }},
+    ]).to_list(length=1)
+    quality_records = await db[CULTOS_COLLECTION].find(active_filter, {
+        "_id": 0,
+        "pasaje": 1,
+        "tema": 1,
+        "ciudad": 1,
+        "iglesia": 1,
+        "pais": 1,
+        "fecha": 1,
+    }).to_list(length=None)
+    required_fields = ("pasaje", "tema", "ciudad", "iglesia", "pais", "fecha")
+    incomplete_count = sum(
+        any(not str(record.get(field) or "").strip() for field in required_fields)
+        for record in quality_records
+    )
+    date_warning_count = sum(_culto_has_date_warning(record.get("fecha")) for record in quality_records)
+    last_import = await db[CULTOS_IMPORTS_COLLECTION].find_one(
+        {}, {"_id": 0}, sort=[("imported_at", -1)]
+    )
+    return {
+        "record_count": record_count,
+        "archived_count": archived_count,
+        "types": [{"value": item["_id"] or "", "count": item["count"]} for item in type_counts],
+        "countries": sorted(value for value in (values[0].get("countries", []) if values else []) if value),
+        "cities": sorted(value for value in (values[0].get("cities", []) if values else []) if value),
+        "incomplete_count": incomplete_count,
+        "date_warning_count": date_warning_count,
+        "last_import": last_import,
+    }
+
+
+@api_router.get("/spm-databases/cultos/records")
+async def list_cultos_records(
+    search: Optional[str] = None,
+    tipo: Optional[str] = None,
+    pais: Optional[str] = None,
+    ciudad: Optional[str] = None,
+    numero: Optional[int] = None,
+    tema: Optional[str] = None,
+    pasaje: Optional[str] = None,
+    iglesia: Optional[str] = None,
+    ubicacion: Optional[str] = None,
+    fecha_desde: Optional[str] = None,
+    fecha_hasta: Optional[str] = None,
+    include_archived: bool = False,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=200),
+):
+    filters = _culto_filters(
+        search, tipo, pais, ciudad, include_archived,
+        numero, tema, pasaje, iglesia, ubicacion, fecha_desde, fecha_hasta,
+    )
+    total = await db[CULTOS_COLLECTION].count_documents(filters)
+    records = await db[CULTOS_COLLECTION].find(filters, {"_id": 0}).sort([
+        ("fecha", -1), ("numero", -1), ("source_row_number", 1),
+    ]).skip((page - 1) * page_size).limit(page_size).to_list(length=page_size)
+    return {
+        "items": [_culto_public(record) for record in records],
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+    }
+
+
+@api_router.get("/spm-databases/cultos/export")
+async def export_cultos_records(
+    format: str = Query("csv", pattern="^(csv|json)$"),
+    search: Optional[str] = None,
+    tipo: Optional[str] = None,
+    pais: Optional[str] = None,
+    ciudad: Optional[str] = None,
+    numero: Optional[int] = None,
+    tema: Optional[str] = None,
+    pasaje: Optional[str] = None,
+    iglesia: Optional[str] = None,
+    ubicacion: Optional[str] = None,
+    fecha_desde: Optional[str] = None,
+    fecha_hasta: Optional[str] = None,
+    include_archived: bool = False,
+):
+    filters = _culto_filters(
+        search, tipo, pais, ciudad, include_archived,
+        numero, tema, pasaje, iglesia, ubicacion, fecha_desde, fecha_hasta,
+    )
+    records = await db[CULTOS_COLLECTION].find(filters, {"_id": 0}).sort([
+        ("fecha", -1), ("numero", -1), ("source_row_number", 1),
+    ]).to_list(length=None)
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+
+    if format == "json":
+        content = json.dumps({
+            "database": "cultos",
+            "exported_at": datetime.now(timezone.utc).isoformat(),
+            "record_count": len(records),
+            "records": [_culto_public(record) for record in records],
+        }, ensure_ascii=False, indent=2).encode("utf-8")
+        return Response(
+            content=content,
+            media_type="application/json",
+            headers={"Content-Disposition": f'attachment; filename="cultos-{timestamp}.json"'},
+        )
+
+    output = io.StringIO()
+    fieldnames = ["Número", "Tipo", "Pasaje", "Tema", "Ciudad", "Iglesia", "País", "Fecha", "Disco", "Origen", "Fila de origen"]
+    writer = csv.DictWriter(output, fieldnames=fieldnames, delimiter=";")
+    writer.writeheader()
+    for record in records:
+        writer.writerow({
+            "Número": record.get("numero", ""),
+            "Tipo": record.get("tipo", ""),
+            "Pasaje": record.get("pasaje", ""),
+            "Tema": record.get("tema", ""),
+            "Ciudad": record.get("ciudad", ""),
+            "Iglesia": record.get("iglesia", ""),
+            "País": record.get("pais", ""),
+            "Fecha": record.get("fecha", ""),
+            "Disco": record.get("disco", ""),
+            "Origen": record.get("source_database", ""),
+            "Fila de origen": record.get("source_row_number", ""),
+        })
+    return Response(
+        content=("\ufeff" + output.getvalue()).encode("utf-8"),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="cultos-{timestamp}.csv"'},
+    )
+
+
+@api_router.post("/spm-databases/cultos/import")
+async def import_cultos_records(payload: CultosImportRequest):
+    if not payload.records:
+        raise HTTPException(status_code=400, detail="El archivo no contiene registros de cultos")
+    if len(payload.records) > 10000:
+        raise HTTPException(status_code=400, detail="Máximo 10.000 registros por importación")
+    existing_count = await db[CULTOS_COLLECTION].count_documents({})
+    if existing_count:
+        raise HTTPException(
+            status_code=409,
+            detail="Cultos ya tiene datos importados. Esta primera versión no sobrescribe registros existentes.",
+        )
+
+    imported_at = datetime.now(timezone.utc).isoformat()
+    import_id = str(uuid.uuid4())
+    documents = []
+    for index, record in enumerate(payload.records, start=1):
+        raw = record.model_dump()
+        source_row_number = raw.pop("source_row_number") or index
+        documents.append({
+            "id": str(uuid.uuid4()),
+            "source_database": "cultos.mdb",
+            "source_filename": payload.source_filename or "cultos.mdb",
+            "source_import_id": import_id,
+            "source_row_number": source_row_number,
+            **raw,
+            "source_snapshot": raw.copy(),
+            "created_at": imported_at,
+            "updated_at": imported_at,
+            "archived_at": None,
+        })
+    await db[CULTOS_COLLECTION].insert_many(documents, ordered=True)
+    await db[CULTOS_IMPORTS_COLLECTION].insert_one({
+        "id": import_id,
+        "source_filename": payload.source_filename or "cultos.mdb",
+        "record_count": len(documents),
+        "imported_at": imported_at,
+    })
+    return {"import_id": import_id, "record_count": len(documents)}
+
+
+@api_router.post("/spm-databases/cultos/records")
+async def create_cultos_record(payload: CultoRecordCreate):
+    now = datetime.now(timezone.utc).isoformat()
+    raw = payload.model_dump()
+    source_row_number = raw.pop("source_row_number", None)
+    document = {
+        "id": str(uuid.uuid4()),
+        "source_database": "web",
+        "source_filename": None,
+        "source_import_id": None,
+        "source_row_number": source_row_number,
+        **raw,
+        "source_snapshot": None,
+        "created_at": now,
+        "updated_at": now,
+        "archived_at": None,
+    }
+    await db[CULTOS_COLLECTION].insert_one(document)
+    return _culto_public(document)
+
+
+@api_router.put("/spm-databases/cultos/records/{record_id}")
+async def update_cultos_record(record_id: str, payload: CultoRecordUpdate):
+    updates = payload.model_dump(exclude_unset=True)
+    if not updates:
+        raise HTTPException(status_code=400, detail="No se han enviado cambios")
+    updates["updated_at"] = datetime.now(timezone.utc).isoformat()
+    result = await db[CULTOS_COLLECTION].find_one_and_update(
+        {"id": record_id},
+        {"$set": updates},
+        return_document=True,
+        projection={"_id": 0},
+    )
+    if not result:
+        raise HTTPException(status_code=404, detail="Registro de culto no encontrado")
+    return _culto_public(result)
+
+
+@api_router.delete("/spm-databases/cultos/records/{record_id}")
+async def archive_cultos_record(record_id: str):
+    now = datetime.now(timezone.utc).isoformat()
+    result = await db[CULTOS_COLLECTION].update_one(
+        {"id": record_id, "archived_at": None},
+        {"$set": {"archived_at": now, "updated_at": now}},
+    )
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Registro de culto no encontrado o ya archivado")
+    return {"message": "Registro archivado"}
+
+
+@api_router.post("/spm-databases/cultos/records/{record_id}/restore")
+async def restore_cultos_record(record_id: str):
+    result = await db[CULTOS_COLLECTION].update_one(
+        {"id": record_id, "archived_at": {"$ne": None}},
+        {"$set": {"archived_at": None, "updated_at": datetime.now(timezone.utc).isoformat()}},
+    )
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Registro archivado no encontrado")
+    return {"message": "Registro restaurado"}
 
 # ----- ALLOWED EMAILS -----
 
@@ -5486,6 +5859,14 @@ async def seed_default_blocked_comments():
             ("type", 1),
             ("status", 1),
         ])
+        await db[CULTOS_COLLECTION].create_index("id", unique=True)
+        await db[CULTOS_COLLECTION].create_index([
+            ("archived_at", 1),
+            ("tipo", 1),
+            ("pais", 1),
+            ("fecha", -1),
+        ])
+        await db[CULTOS_IMPORTS_COLLECTION].create_index("imported_at")
         seed_emails = [
             _normalize_email(email)
             for email in os.environ.get("INITIAL_ALLOWED_EMAILS", "").split(",")
