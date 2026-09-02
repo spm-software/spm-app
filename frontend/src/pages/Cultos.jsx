@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import axios from "axios";
-import { Database, Eye, FileJson, FileSpreadsheet, FileUp, Loader2, Pencil, Plus, RefreshCw, Search, TriangleAlert, X } from "lucide-react";
+import { ArrowDownToLine, Database, Eye, FileJson, FileSpreadsheet, FileUp, Loader2, Pencil, Plus, RefreshCw, Search, TriangleAlert, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -50,6 +50,18 @@ export default function Cultos() {
   const updateFilter = (key, value) => setFilters((current) => ({ ...current, [key]: value }));
   const submitFilters = (event) => { if (event.key === "Enter") applyFilters(); };
   const totalPages = Math.max(1, Math.ceil(total / 50));
+  const goToLatestNumber = async () => {
+    try {
+      const response = await axios.get(`${API}/spm-databases/cultos/latest-number`);
+      const next = { ...EMPTY_FILTERS, numero: String(response.data.numero) };
+      setFilters(next);
+      setPage(1);
+      await reload(1, next);
+      toast.success(response.data.record_count > 1 ? `Número ${response.data.numero}: ${response.data.record_count} registros` : `Último número: ${response.data.numero}`);
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "No se pudo localizar el último número");
+    }
+  };
 
   const handleImport = async (event) => {
     const file = event.target.files?.[0]; event.target.value = "";
@@ -97,6 +109,9 @@ export default function Cultos() {
       <label className="grid gap-1 text-sm font-medium">Hasta
         <Input type="date" value={filters.fecha_hasta} onChange={(event) => applyFilters({ fecha_hasta: event.target.value })} className="w-full sm:w-44 rounded-sm" />
       </label>
+      <Button className="rounded-sm bg-primary text-primary-foreground hover:bg-primary/90" onClick={goToLatestNumber} title="Ir directamente al número más alto registrado">
+        <ArrowDownToLine className="w-4 h-4 mr-2" />IR AL ÚLTIMO NÚMERO
+      </Button>
     </div>
     <div className="flex flex-col xl:flex-row xl:items-end xl:justify-between gap-6 mb-7"><div><p className="text-xs font-semibold uppercase tracking-wide text-primary mb-2">Bases de datos SPM / Cultos</p><h1 className="font-heading text-4xl sm:text-5xl font-bold tracking-tight">CULTOS</h1><p className="text-muted-foreground mt-2">Archivo histórico importado desde Access. Cada modificación conserva la referencia del registro original.</p></div><div className="flex flex-wrap gap-2"><input ref={fileInput} type="file" accept=".json,application/json" className="hidden" onChange={handleImport} /><Button variant="outline" className="rounded-sm" onClick={() => fileInput.current?.click()} disabled={importing || summary.record_count > 0}>{importing ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <FileUp className="w-4 h-4 mr-2" />}Importar JSON</Button><Button variant="outline" className="rounded-sm" onClick={() => downloadExport("csv")} disabled={exporting === "csv" || !summary.record_count}>{exporting === "csv" ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <FileSpreadsheet className="w-4 h-4 mr-2" />}Exportar CSV</Button><Button variant="outline" size="icon" className="rounded-sm" title="Descargar copia JSON" onClick={() => downloadExport("json")} disabled={exporting === "json" || !summary.record_count}>{exporting === "json" ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileJson className="w-4 h-4" />}</Button><Button variant="outline" size="icon" className="rounded-sm" title="Actualizar datos" onClick={() => reload(page)}><RefreshCw className="w-4 h-4" /></Button><Button className="rounded-sm" onClick={openNew}><Plus className="w-4 h-4 mr-2" />Añadir registro</Button></div></div>
     <div className="grid grid-cols-1 lg:grid-cols-4 gap-4 mb-6"><Card className="rounded-sm lg:col-span-2"><CardContent className="p-5"><p className="text-xs uppercase tracking-wide text-muted-foreground">Última importación</p><p className="font-semibold mt-2">{summary.last_import?.source_filename || "Sin archivo de origen"}</p><p className="text-sm text-muted-foreground mt-1">{formatTimestamp(summary.last_import?.imported_at)} · {summary.last_import?.record_count || 0} registros</p></CardContent></Card><Card className="rounded-sm"><CardContent className="p-5"><p className="text-xs uppercase tracking-wide text-muted-foreground">Registros activos</p><p className="font-heading text-4xl font-bold mt-2">{summary.record_count}</p></CardContent></Card><Card className="rounded-sm"><CardContent className="p-5"><p className="text-xs uppercase tracking-wide text-muted-foreground">Avisos de datos</p><p className="font-heading text-4xl font-bold mt-2">{summary.incomplete_count + summary.date_warning_count}</p><p className="text-xs text-muted-foreground mt-2">{summary.incomplete_count} incompletos · {summary.date_warning_count} fechas</p></CardContent></Card></div>

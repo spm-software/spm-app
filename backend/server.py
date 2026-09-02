@@ -273,6 +273,20 @@ class CultosImportRequest(BaseModel):
     records: List[CultoRecordInput]
 
 
+class LegacyDatabaseRecordInput(BaseModel):
+    source_row_number: Optional[int] = None
+    data: Dict[str, Any] = Field(default_factory=dict)
+
+
+class LegacyDatabaseImportRequest(BaseModel):
+    source_filename: str
+    records: List[LegacyDatabaseRecordInput]
+
+
+class LegacyDatabaseRecordWrite(BaseModel):
+    data: Dict[str, Any] = Field(default_factory=dict)
+
+
 # ==================== HELPER FUNCTIONS ====================
 
 def serialize_datetime(obj):
@@ -2038,14 +2052,19 @@ async def list_spm_databases():
     last_import = await db[CULTOS_IMPORTS_COLLECTION].find_one(
         {}, {"_id": 0}, sort=[("imported_at", -1)]
     )
-    return [{
+    cultos = {
         "id": "cultos",
         "name": "Cultos",
         "description": "Archivo histórico de cultos, predicaciones y actividades",
         "record_count": record_count,
         "source": "cultos.mdb",
         "last_import": last_import.get("imported_at") if last_import else None,
-    }]
+    }
+    legacy_databases = await asyncio.gather(*[
+        _legacy_database_metadata(database_id)
+        for database_id in LEGACY_DATABASES
+    ])
+    return [cultos, *legacy_databases]
 
 
 @api_router.get("/spm-databases/cultos/summary")
@@ -2127,6 +2146,22 @@ async def list_cultos_records(
         "page": page,
         "page_size": page_size,
     }
+
+
+@api_router.get("/spm-databases/cultos/latest-number")
+async def get_latest_cultos_number():
+    record = await db[CULTOS_COLLECTION].find_one(
+        {"archived_at": None},
+        {"_id": 0, "numero": 1},
+        sort=[("numero", -1), ("fecha", -1), ("source_row_number", -1)],
+    )
+    if not record:
+        raise HTTPException(status_code=404, detail="No hay registros de cultos disponibles")
+    count = await db[CULTOS_COLLECTION].count_documents({
+        "archived_at": None,
+        "numero": record["numero"],
+    })
+    return {"numero": record["numero"], "record_count": count}
 
 
 @api_router.get("/spm-databases/cultos/export")
@@ -2292,6 +2327,184 @@ async def restore_cultos_record(record_id: str):
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Registro archivado no encontrado")
     return {"message": "Registro restaurado"}
+
+# ----- SPM DATABASES: LEGACY ACCESS CATALOG -----
+
+LEGACY_DATABASES_COLLECTION = "spm_legacy_database_records"
+LEGACY_DATABASE_IMPORTS_COLLECTION = "spm_legacy_database_imports"
+
+LEGACY_DATABASES: Dict[str, Dict[str, Any]] = {
+    "aliento-canal": {
+        "name": "Aliento Canal", "source": "Aliento canal.mdb",
+        "description": "Mensajes de Aliento preparados para el canal.", "sort_field": "numero",
+        "fields": [{"key": "numero", "label": "Número", "type": "number"}, {"key": "numero_general", "label": "Núm. general", "type": "number"}, {"key": "pasaje", "label": "Pasaje", "type": "text"}, {"key": "tema", "label": "Tema", "type": "text"}, {"key": "fecha", "label": "Fecha", "type": "date"}],
+    },
+    "aliento": {
+        "name": "Aliento", "source": "Aliento.mdb",
+        "description": "Archivo histórico de mensajes de Aliento.", "sort_field": "numero",
+        "fields": [{"key": "numero", "label": "Número", "type": "number"}, {"key": "pasaje", "label": "Pasaje", "type": "text"}, {"key": "tema", "label": "Tema", "type": "text"}, {"key": "fecha", "label": "Fecha", "type": "date"}],
+    },
+    "archivo": {
+        "name": "Archivo", "source": "Archivo.mdb",
+        "description": "Archivo temático de estudios y contenidos.", "sort_field": "numero",
+        "fields": [{"key": "numero", "label": "Número", "type": "number"}, {"key": "tema", "label": "Tema", "type": "text"}, {"key": "fecha", "label": "Fecha", "type": "date"}],
+    },
+    "bdb": {
+        "name": "BDB", "source": "BDB.mdb",
+        "description": "Relación editorial de contenidos y referencias.", "sort_field": "numero",
+        "fields": [{"key": "numero", "label": "Número", "type": "number"}, {"key": "fecha", "label": "Fecha", "type": "date"}, {"key": "pensando_en_alto", "label": "Pensando en Alto", "type": "text"}, {"key": "pensando_en_alto_pasaje", "label": "Pasaje Pensando en Alto", "type": "text"}, {"key": "ensenanza", "label": "Enseñanza", "type": "text"}, {"key": "pasaje_ensenanza", "label": "Pasaje enseñanza", "type": "text"}, {"key": "aliento_numero", "label": "Aliento n.º", "type": "number"}, {"key": "aliento", "label": "Aliento", "type": "text"}, {"key": "aliento_pasaje", "label": "Pasaje Aliento", "type": "text"}],
+    },
+    "boletin": {
+        "name": "Boletín", "source": "Boletín.mdb",
+        "description": "Archivo de boletines y temas asociados.", "sort_field": "numero",
+        "fields": [{"key": "numero", "label": "Número", "type": "number"}, {"key": "pasaje", "label": "Pasaje", "type": "text"}, {"key": "tema", "label": "Tema", "type": "text"}, {"key": "fecha", "label": "Fecha", "type": "date"}],
+    },
+    "comunicaciones": {
+        "name": "Comunicaciones", "source": "Comunicaciones.mdb",
+        "description": "Registro histórico de comunicaciones.", "sort_field": "numero",
+        "fields": [{"key": "numero", "label": "Número", "type": "number"}, {"key": "tipo", "label": "Tipo", "type": "text"}, {"key": "fecha", "label": "Fecha", "type": "date"}, {"key": "nombre", "label": "Nombre", "type": "text"}, {"key": "identificacion", "label": "Apellidos / identificación", "type": "text"}, {"key": "localidad", "label": "Localidad", "type": "text"}, {"key": "pais", "label": "País", "type": "text"}, {"key": "asunto", "label": "Asunto", "type": "text"}],
+    },
+    "directorio": {
+        "name": "Directorio", "source": "Directorio.mdb",
+        "description": "Directorio de contactos y datos de relación.", "sort_field": "fecha",
+        "fields": [{"key": "fecha", "label": "Fecha", "type": "date"}, {"key": "nombre", "label": "Nombre", "type": "text"}, {"key": "apellidos", "label": "Apellidos / identificación", "type": "text"}, {"key": "direccion", "label": "Dirección", "type": "text"}, {"key": "ciudad", "label": "Ciudad", "type": "text"}, {"key": "cp", "label": "CP", "type": "text"}, {"key": "pais", "label": "País", "type": "text"}, {"key": "telef1", "label": "Teléfono 1", "type": "text"}, {"key": "telef2", "label": "Teléfono 2", "type": "text"}, {"key": "telef3", "label": "Teléfono 3", "type": "text"}, {"key": "telef4", "label": "Teléfono 4", "type": "text"}, {"key": "movil1", "label": "Móvil 1", "type": "text"}, {"key": "movil2", "label": "Móvil 2", "type": "text"}, {"key": "email", "label": "Email", "type": "text"}, {"key": "nombre_esposa", "label": "Nombre esposa", "type": "text"}, {"key": "numero_hijos", "label": "Número hijos", "type": "number"}, {"key": "profesion", "label": "Profesión", "type": "text"}, {"key": "iglesia", "label": "Iglesia", "type": "text"}, {"key": "observaciones", "label": "Observaciones", "type": "text"}, {"key": "numero_carta", "label": "Número carta", "type": "number"}],
+    },
+    "libros": {
+        "name": "Libros", "source": "Libros.mdb",
+        "description": "Catálogo de la biblioteca y sus ubicaciones.", "sort_field": "numero",
+        "fields": [{"key": "numero", "label": "Número", "type": "number"}, {"key": "titulo", "label": "Título", "type": "text"}, {"key": "autor", "label": "Autor", "type": "text"}, {"key": "procedencia", "label": "Procedencia", "type": "text"}, {"key": "posicion", "label": "Posición", "type": "text"}, {"key": "denominacion", "label": "Denominación", "type": "text"}, {"key": "idioma", "label": "Idioma", "type": "text"}, {"key": "tema", "label": "Tema", "type": "text"}, {"key": "editorial", "label": "Editorial", "type": "text"}, {"key": "fecha", "label": "Fecha", "type": "date"}, {"key": "biblioteca", "label": "Biblioteca", "type": "number"}],
+    },
+    "temas-canal": {
+        "name": "Temas Canal", "source": "Temas Canal.mdb",
+        "description": "Temas y pasajes utilizados en el canal.", "sort_field": "numero",
+        "fields": [{"key": "numero", "label": "N.º", "type": "number"}, {"key": "tipo", "label": "Tipo", "type": "text"}, {"key": "numero_bosquejo_general", "label": "N.º bosquejo general", "type": "number"}, {"key": "pasaje", "label": "Pasaje", "type": "text"}, {"key": "tema", "label": "Tema", "type": "text"}, {"key": "fecha", "label": "Fecha", "type": "date"}],
+    },
+}
+
+
+def _legacy_database_or_404(database_id: str) -> Dict[str, Any]:
+    config = LEGACY_DATABASES.get(database_id)
+    if not config:
+        raise HTTPException(status_code=404, detail="Base de datos SPM no encontrada")
+    return config
+
+
+def _legacy_data(config: Dict[str, Any], raw_data: Dict[str, Any]) -> Dict[str, Any]:
+    return {field["key"]: raw_data.get(field["key"]) for field in config["fields"]}
+
+
+def _legacy_public(doc: Dict[str, Any]) -> Dict[str, Any]:
+    return {key: value for key, value in doc.items() if key != "_id"}
+
+
+async def _legacy_database_metadata(database_id: str) -> Dict[str, Any]:
+    config = _legacy_database_or_404(database_id)
+    record_count, last_import = await asyncio.gather(
+        db[LEGACY_DATABASES_COLLECTION].count_documents({"database_id": database_id}),
+        db[LEGACY_DATABASE_IMPORTS_COLLECTION].find_one(
+            {"database_id": database_id}, {"_id": 0}, sort=[("imported_at", -1)]
+        ),
+    )
+    return {
+        "id": database_id,
+        "name": config["name"],
+        "description": config["description"],
+        "source": config["source"],
+        "fields": config["fields"],
+        "record_count": record_count,
+        "last_import": last_import,
+    }
+
+
+@api_router.get("/spm-databases/legacy/{database_id}")
+async def get_legacy_database(database_id: str):
+    return await _legacy_database_metadata(database_id)
+
+
+@api_router.get("/spm-databases/legacy/{database_id}/records")
+async def list_legacy_database_records(
+    database_id: str,
+    search: Optional[str] = None,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=200),
+):
+    config = _legacy_database_or_404(database_id)
+    filters: Dict[str, Any] = {"database_id": database_id}
+    if search and search.strip():
+        pattern = {"$regex": re.escape(search.strip()), "$options": "i"}
+        filters["$or"] = [{f"data.{field['key']}": pattern} for field in config["fields"] if field["type"] == "text"]
+    sort_field = config.get("sort_field")
+    sort = [(f"data.{sort_field}", -1), ("source_row_number", -1)] if sort_field else [("source_row_number", -1)]
+    total = await db[LEGACY_DATABASES_COLLECTION].count_documents(filters)
+    records = await db[LEGACY_DATABASES_COLLECTION].find(filters, {"_id": 0}).sort(sort).skip((page - 1) * page_size).limit(page_size).to_list(length=page_size)
+    return {"items": [_legacy_public(record) for record in records], "total": total, "page": page, "page_size": page_size}
+
+
+@api_router.post("/spm-databases/legacy/{database_id}/import")
+async def import_legacy_database_records(database_id: str, payload: LegacyDatabaseImportRequest):
+    config = _legacy_database_or_404(database_id)
+    if not payload.records:
+        raise HTTPException(status_code=400, detail="El archivo no contiene registros")
+    if len(payload.records) > 10000:
+        raise HTTPException(status_code=400, detail="Máximo 10.000 registros por importación")
+    if await db[LEGACY_DATABASES_COLLECTION].count_documents({"database_id": database_id}):
+        raise HTTPException(status_code=409, detail="Esta base ya tiene datos importados. La importación inicial no sobrescribe registros existentes.")
+    imported_at = datetime.now(timezone.utc).isoformat()
+    import_id = str(uuid.uuid4())
+    documents = []
+    for index, record in enumerate(payload.records, start=1):
+        data = _legacy_data(config, record.data)
+        documents.append({
+            "id": str(uuid.uuid4()), "database_id": database_id,
+            "source_filename": payload.source_filename or config["source"],
+            "source_import_id": import_id, "source_row_number": record.source_row_number or index,
+            "data": data, "source_snapshot": data.copy(), "created_at": imported_at, "updated_at": imported_at,
+        })
+    await db[LEGACY_DATABASES_COLLECTION].insert_many(documents, ordered=True)
+    await db[LEGACY_DATABASE_IMPORTS_COLLECTION].insert_one({"id": import_id, "database_id": database_id, "source_filename": payload.source_filename or config["source"], "record_count": len(documents), "imported_at": imported_at})
+    return {"import_id": import_id, "record_count": len(documents)}
+
+
+@api_router.post("/spm-databases/legacy/{database_id}/records")
+async def create_legacy_database_record(database_id: str, payload: LegacyDatabaseRecordWrite):
+    config = _legacy_database_or_404(database_id)
+    now = datetime.now(timezone.utc).isoformat()
+    document = {"id": str(uuid.uuid4()), "database_id": database_id, "source_filename": None, "source_import_id": None, "source_row_number": None, "data": _legacy_data(config, payload.data), "source_snapshot": None, "created_at": now, "updated_at": now}
+    await db[LEGACY_DATABASES_COLLECTION].insert_one(document)
+    return _legacy_public(document)
+
+
+@api_router.put("/spm-databases/legacy/{database_id}/records/{record_id}")
+async def update_legacy_database_record(database_id: str, record_id: str, payload: LegacyDatabaseRecordWrite):
+    config = _legacy_database_or_404(database_id)
+    result = await db[LEGACY_DATABASES_COLLECTION].find_one_and_update(
+        {"database_id": database_id, "id": record_id},
+        {"$set": {"data": _legacy_data(config, payload.data), "updated_at": datetime.now(timezone.utc).isoformat()}},
+        return_document=True, projection={"_id": 0},
+    )
+    if not result:
+        raise HTTPException(status_code=404, detail="Registro no encontrado")
+    return _legacy_public(result)
+
+
+@api_router.get("/spm-databases/legacy/{database_id}/export")
+async def export_legacy_database_records(database_id: str, format: str = Query("csv", pattern="^(csv|json)$")):
+    config = _legacy_database_or_404(database_id)
+    sort_field = config.get("sort_field")
+    sort = [(f"data.{sort_field}", -1), ("source_row_number", -1)] if sort_field else [("source_row_number", -1)]
+    records = await db[LEGACY_DATABASES_COLLECTION].find({"database_id": database_id}, {"_id": 0}).sort(sort).to_list(length=None)
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    if format == "json":
+        content = json.dumps({"database": database_id, "exported_at": datetime.now(timezone.utc).isoformat(), "record_count": len(records), "records": [_legacy_public(record) for record in records]}, ensure_ascii=False, indent=2).encode("utf-8")
+        return Response(content=content, media_type="application/json", headers={"Content-Disposition": f'attachment; filename="{database_id}-{timestamp}.json"'})
+    output = io.StringIO()
+    fieldnames = [field["label"] for field in config["fields"]]
+    writer = csv.DictWriter(output, fieldnames=fieldnames, delimiter=";")
+    writer.writeheader()
+    for record in records:
+        writer.writerow({field["label"]: record["data"].get(field["key"], "") for field in config["fields"]})
+    return Response(content=("\ufeff" + output.getvalue()).encode("utf-8"), media_type="text/csv; charset=utf-8", headers={"Content-Disposition": f'attachment; filename="{database_id}-{timestamp}.csv"'})
+
 
 # ----- ALLOWED EMAILS -----
 
@@ -5867,6 +6080,15 @@ async def seed_default_blocked_comments():
             ("fecha", -1),
         ])
         await db[CULTOS_IMPORTS_COLLECTION].create_index("imported_at")
+        await db[LEGACY_DATABASES_COLLECTION].create_index("id", unique=True)
+        await db[LEGACY_DATABASES_COLLECTION].create_index([
+            ("database_id", 1),
+            ("source_row_number", 1),
+        ])
+        await db[LEGACY_DATABASE_IMPORTS_COLLECTION].create_index([
+            ("database_id", 1),
+            ("imported_at", -1),
+        ])
         seed_emails = [
             _normalize_email(email)
             for email in os.environ.get("INITIAL_ALLOWED_EMAILS", "").split(",")

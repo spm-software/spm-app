@@ -13,6 +13,7 @@ import Exportar from "@/pages/Exportar";
 import Login from "@/pages/Login";
 import BasesDatos from "@/pages/BasesDatos";
 import Cultos from "@/pages/Cultos";
+import LegacyDatabase from "@/pages/LegacyDatabase";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import { UndoProvider } from "@/contexts/UndoContext";
 
@@ -62,6 +63,7 @@ function App() {
               <Route path="usuarios" element={<Usuarios />} />
               <Route path="bases-de-datos" element={<BasesDatos />} />
               <Route path="bases-de-datos/cultos" element={<Cultos />} />
+              <Route path="bases-de-datos/:databaseId" element={<LegacyDatabase />} />
               <Route path="configuracion" element={<Configuracion />} />
               <Route path="exportar" element={<Exportar />} />
             </Route>
