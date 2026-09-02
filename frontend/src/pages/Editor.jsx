@@ -2259,7 +2259,7 @@ export default function Editor({ workflowMode = null }) {
           },
           {
             value: "unassigned",
-            label: "Pendientes",
+            label: "Sin asignar a programas",
             count: unassignedCount,
             dot: "bg-slate-400",
             title: "Preguntas válidas todavía no asignadas a programas ni a reserva"
