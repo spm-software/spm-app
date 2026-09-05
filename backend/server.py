@@ -287,6 +287,21 @@ class LegacyDatabaseRecordWrite(BaseModel):
     data: Dict[str, Any] = Field(default_factory=dict)
 
 
+class DatabaseFieldDefinition(BaseModel):
+    key: Optional[str] = None
+    label: str
+    type: str = "text"
+    options: List[str] = Field(default_factory=list)
+
+
+class CustomDatabaseDefinitionWrite(BaseModel):
+    name: str
+    description: str = ""
+    fields: List[DatabaseFieldDefinition]
+    latest_number_field: Optional[str] = None
+    sort_field: Optional[str] = None
+
+
 # ==================== HELPER FUNCTIONS ====================
 
 def serialize_datetime(obj):
@@ -2060,9 +2075,15 @@ async def list_spm_databases():
         "source": "cultos.mdb",
         "last_import": last_import.get("imported_at") if last_import else None,
     }
+    custom_database_ids = [
+        item["id"]
+        for item in await db[LEGACY_DATABASE_DEFINITIONS_COLLECTION].find(
+            {"archived_at": None}, {"_id": 0, "id": 1}
+        ).sort("name", 1).to_list(length=None)
+    ]
     legacy_databases = await asyncio.gather(*[
         _legacy_database_metadata(database_id)
-        for database_id in LEGACY_DATABASES
+        for database_id in [*LEGACY_DATABASES, *custom_database_ids]
     ])
     return [cultos, *legacy_databases]
 
@@ -2332,6 +2353,7 @@ async def restore_cultos_record(record_id: str):
 
 LEGACY_DATABASES_COLLECTION = "spm_legacy_database_records"
 LEGACY_DATABASE_IMPORTS_COLLECTION = "spm_legacy_database_imports"
+LEGACY_DATABASE_DEFINITIONS_COLLECTION = "spm_database_definitions"
 
 LEGACY_DATABASES: Dict[str, Dict[str, Any]] = {
     "aliento-canal": {
@@ -2382,11 +2404,54 @@ LEGACY_DATABASES: Dict[str, Dict[str, Any]] = {
 }
 
 
-def _legacy_database_or_404(database_id: str) -> Dict[str, Any]:
-    config = LEGACY_DATABASES.get(database_id)
-    if not config:
+LEGACY_FIELD_TYPES = {"text", "long_text", "number", "date", "email", "phone", "select"}
+
+
+def _legacy_slug(value: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", normalize_text(value)).strip("-")
+    return slug[:60] or "base-de-datos"
+
+
+def _prepare_legacy_fields(fields: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    if not fields:
+        raise HTTPException(status_code=400, detail="Añade al menos un campo")
+    if len(fields) > 40:
+        raise HTTPException(status_code=400, detail="Máximo 40 campos por base de datos")
+
+    prepared = []
+    used_keys = set()
+    for index, raw_field in enumerate(fields, start=1):
+        label = str(raw_field.get("label") or "").strip()
+        field_type = str(raw_field.get("type") or "text").strip()
+        if not label:
+            raise HTTPException(status_code=400, detail=f"El campo {index} no tiene nombre")
+        if field_type not in LEGACY_FIELD_TYPES:
+            raise HTTPException(status_code=400, detail=f"Tipo de campo no válido: {field_type}")
+        key = _legacy_slug(str(raw_field.get("key") or label)).replace("-", "_")
+        if key in used_keys:
+            raise HTTPException(status_code=400, detail=f"Hay campos repetidos: {label}")
+        used_keys.add(key)
+        options = []
+        if field_type == "select":
+            options = list(dict.fromkeys(
+                str(option).strip() for option in raw_field.get("options", []) if str(option).strip()
+            ))
+            if not options:
+                raise HTTPException(status_code=400, detail=f"Añade opciones al campo {label}")
+        prepared.append({"key": key, "label": label[:80], "type": field_type, "options": options})
+    return prepared
+
+
+async def _legacy_database_or_404(database_id: str) -> Dict[str, Any]:
+    built_in = LEGACY_DATABASES.get(database_id)
+    if built_in:
+        return {**built_in, "id": database_id, "is_custom": False}
+    custom = await db[LEGACY_DATABASE_DEFINITIONS_COLLECTION].find_one(
+        {"id": database_id, "archived_at": None}, {"_id": 0}
+    )
+    if not custom:
         raise HTTPException(status_code=404, detail="Base de datos SPM no encontrada")
-    return config
+    return custom
 
 
 def _legacy_latest_number_field(config: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -2400,7 +2465,20 @@ def _legacy_latest_number_field(config: Dict[str, Any]) -> Optional[Dict[str, An
 
 
 def _legacy_data(config: Dict[str, Any], raw_data: Dict[str, Any]) -> Dict[str, Any]:
-    return {field["key"]: raw_data.get(field["key"]) for field in config["fields"]}
+    normalized = {}
+    for field in config["fields"]:
+        value = raw_data.get(field["key"])
+        if value in (None, ""):
+            normalized[field["key"]] = None if field["type"] in {"number", "date"} else ""
+        elif field["type"] == "number":
+            try:
+                numeric = float(value)
+                normalized[field["key"]] = int(numeric) if numeric.is_integer() else numeric
+            except (TypeError, ValueError):
+                raise HTTPException(status_code=400, detail=f"{field['label']} debe ser un número")
+        else:
+            normalized[field["key"]] = str(value).strip()
+    return normalized
 
 
 def _legacy_public(doc: Dict[str, Any]) -> Dict[str, Any]:
@@ -2408,7 +2486,7 @@ def _legacy_public(doc: Dict[str, Any]) -> Dict[str, Any]:
 
 
 async def _legacy_database_metadata(database_id: str) -> Dict[str, Any]:
-    config = _legacy_database_or_404(database_id)
+    config = await _legacy_database_or_404(database_id)
     record_count, last_import = await asyncio.gather(
         db[LEGACY_DATABASES_COLLECTION].count_documents({"database_id": database_id}),
         db[LEGACY_DATABASE_IMPORTS_COLLECTION].find_one(
@@ -2421,9 +2499,104 @@ async def _legacy_database_metadata(database_id: str) -> Dict[str, Any]:
         "description": config["description"],
         "source": config["source"],
         "fields": config["fields"],
+        "is_custom": config.get("is_custom", False),
+        "sort_field": config.get("sort_field"),
+        "latest_number_field": (_legacy_latest_number_field(config) or {}).get("key"),
         "record_count": record_count,
         "last_import": last_import,
     }
+
+
+def _custom_database_settings(
+    payload: CustomDatabaseDefinitionWrite,
+    fields: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    field_by_key = {field["key"]: field for field in fields}
+    latest_number_field = payload.latest_number_field
+    if latest_number_field:
+        latest_field = field_by_key.get(latest_number_field)
+        if not latest_field or latest_field["type"] != "number":
+            raise HTTPException(status_code=400, detail="La numeración principal debe ser un campo numérico")
+    else:
+        latest_number_field = (_legacy_latest_number_field({"fields": fields}) or {}).get("key")
+
+    sort_field = payload.sort_field or latest_number_field or fields[0]["key"]
+    if sort_field not in field_by_key:
+        raise HTTPException(status_code=400, detail="El campo de orden no existe")
+    return {"latest_number_field": latest_number_field, "sort_field": sort_field}
+
+
+@api_router.post("/spm-databases/custom")
+async def create_custom_database(payload: CustomDatabaseDefinitionWrite):
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Indica el nombre de la base de datos")
+    fields = _prepare_legacy_fields([field.model_dump() for field in payload.fields])
+    settings = _custom_database_settings(payload, fields)
+
+    base_id = _legacy_slug(name)
+    database_id = base_id
+    suffix = 2
+    while database_id == "cultos" or database_id in LEGACY_DATABASES or await db[LEGACY_DATABASE_DEFINITIONS_COLLECTION].find_one({"id": database_id}, {"_id": 1}):
+        database_id = f"{base_id}-{suffix}"
+        suffix += 1
+
+    now = datetime.now(timezone.utc).isoformat()
+    document = {
+        "id": database_id,
+        "name": name[:100],
+        "description": payload.description.strip()[:300],
+        "source": "Creada en SPM",
+        "fields": fields,
+        **settings,
+        "is_custom": True,
+        "created_at": now,
+        "updated_at": now,
+        "archived_at": None,
+    }
+    await db[LEGACY_DATABASE_DEFINITIONS_COLLECTION].insert_one(document)
+    return await _legacy_database_metadata(database_id)
+
+
+@api_router.put("/spm-databases/custom/{database_id}")
+async def update_custom_database(database_id: str, payload: CustomDatabaseDefinitionWrite):
+    current = await db[LEGACY_DATABASE_DEFINITIONS_COLLECTION].find_one(
+        {"id": database_id, "archived_at": None}, {"_id": 0}
+    )
+    if not current:
+        raise HTTPException(status_code=404, detail="Base de datos personalizada no encontrada")
+
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Indica el nombre de la base de datos")
+    fields = _prepare_legacy_fields([field.model_dump() for field in payload.fields])
+    record_count = await db[LEGACY_DATABASES_COLLECTION].count_documents({"database_id": database_id})
+    if record_count:
+        current_by_key = {field["key"]: field for field in current["fields"]}
+        next_by_key = {field["key"]: field for field in fields}
+        removed = [field["label"] for key, field in current_by_key.items() if key not in next_by_key]
+        changed_types = [
+            field["label"]
+            for key, field in current_by_key.items()
+            if key in next_by_key and field["type"] != next_by_key[key]["type"]
+        ]
+        if removed:
+            raise HTTPException(status_code=409, detail="No se pueden eliminar campos con datos: " + ", ".join(removed))
+        if changed_types:
+            raise HTTPException(status_code=409, detail="No se puede cambiar el tipo de campos con datos: " + ", ".join(changed_types))
+
+    settings = _custom_database_settings(payload, fields)
+    await db[LEGACY_DATABASE_DEFINITIONS_COLLECTION].update_one(
+        {"id": database_id},
+        {"$set": {
+            "name": name[:100],
+            "description": payload.description.strip()[:300],
+            "fields": fields,
+            **settings,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }},
+    )
+    return await _legacy_database_metadata(database_id)
 
 
 @api_router.get("/spm-databases/legacy/{database_id}")
@@ -2431,28 +2604,82 @@ async def get_legacy_database(database_id: str):
     return await _legacy_database_metadata(database_id)
 
 
+def _apply_legacy_field_filters(
+    mongo_filter: Dict[str, Any],
+    config: Dict[str, Any],
+    raw_filters: Optional[str],
+) -> None:
+    if not raw_filters:
+        return
+    try:
+        requested = json.loads(raw_filters)
+    except (TypeError, json.JSONDecodeError):
+        raise HTTPException(status_code=400, detail="Los filtros no tienen un formato válido")
+    if not isinstance(requested, dict):
+        raise HTTPException(status_code=400, detail="Los filtros no tienen un formato válido")
+
+    conditions = mongo_filter.setdefault("$and", [])
+    for field in config["fields"]:
+        value = requested.get(field["key"])
+        if value in (None, "", {}):
+            continue
+        path = f"data.{field['key']}"
+        if field["type"] == "number":
+            try:
+                numeric_value = float(value)
+            except (TypeError, ValueError):
+                continue
+            conditions.append({"$expr": {"$eq": [
+                {"$convert": {"input": f"${path}", "to": "double", "onError": None, "onNull": None}},
+                numeric_value,
+            ]}})
+        elif field["type"] == "date" and isinstance(value, dict):
+            date_filter = {}
+            if value.get("from"):
+                date_filter["$gte"] = value["from"]
+            if value.get("to"):
+                date_filter["$lte"] = f"{value['to']}T23:59:59.9999999"
+            if date_filter:
+                conditions.append({path: date_filter})
+        elif field["type"] == "select":
+            conditions.append({path: value})
+        else:
+            conditions.append({path: {"$regex": re.escape(str(value).strip()), "$options": "i"}})
+    if not conditions:
+        mongo_filter.pop("$and", None)
+
+
 @api_router.get("/spm-databases/legacy/{database_id}/records")
 async def list_legacy_database_records(
     database_id: str,
     search: Optional[str] = None,
+    filters: Optional[str] = None,
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
 ):
-    config = _legacy_database_or_404(database_id)
-    filters: Dict[str, Any] = {"database_id": database_id}
+    config = await _legacy_database_or_404(database_id)
+    mongo_filter: Dict[str, Any] = {"database_id": database_id}
     if search and search.strip():
         pattern = {"$regex": re.escape(search.strip()), "$options": "i"}
-        filters["$or"] = [{f"data.{field['key']}": pattern} for field in config["fields"] if field["type"] == "text"]
+        searchable_types = {"text", "long_text", "email", "phone", "select"}
+        searchable_fields = [
+            {f"data.{field['key']}": pattern}
+            for field in config["fields"]
+            if field["type"] in searchable_types
+        ]
+        if searchable_fields:
+            mongo_filter["$or"] = searchable_fields
+    _apply_legacy_field_filters(mongo_filter, config, filters)
     sort_field = config.get("sort_field")
     sort = [(f"data.{sort_field}", -1), ("source_row_number", -1)] if sort_field else [("source_row_number", -1)]
-    total = await db[LEGACY_DATABASES_COLLECTION].count_documents(filters)
-    records = await db[LEGACY_DATABASES_COLLECTION].find(filters, {"_id": 0}).sort(sort).skip((page - 1) * page_size).limit(page_size).to_list(length=page_size)
+    total = await db[LEGACY_DATABASES_COLLECTION].count_documents(mongo_filter)
+    records = await db[LEGACY_DATABASES_COLLECTION].find(mongo_filter, {"_id": 0}).sort(sort).skip((page - 1) * page_size).limit(page_size).to_list(length=page_size)
     return {"items": [_legacy_public(record) for record in records], "total": total, "page": page, "page_size": page_size}
 
 
 @api_router.get("/spm-databases/legacy/{database_id}/latest-number")
 async def get_latest_legacy_database_number(database_id: str):
-    config = _legacy_database_or_404(database_id)
+    config = await _legacy_database_or_404(database_id)
     field = _legacy_latest_number_field(config)
     if not field:
         raise HTTPException(status_code=404, detail="Esta base no tiene un campo numérico")
@@ -2488,7 +2715,7 @@ async def get_latest_legacy_database_number(database_id: str):
 
 @api_router.post("/spm-databases/legacy/{database_id}/import")
 async def import_legacy_database_records(database_id: str, payload: LegacyDatabaseImportRequest):
-    config = _legacy_database_or_404(database_id)
+    config = await _legacy_database_or_404(database_id)
     if not payload.records:
         raise HTTPException(status_code=400, detail="El archivo no contiene registros")
     if len(payload.records) > 10000:
@@ -2513,7 +2740,7 @@ async def import_legacy_database_records(database_id: str, payload: LegacyDataba
 
 @api_router.post("/spm-databases/legacy/{database_id}/records")
 async def create_legacy_database_record(database_id: str, payload: LegacyDatabaseRecordWrite):
-    config = _legacy_database_or_404(database_id)
+    config = await _legacy_database_or_404(database_id)
     now = datetime.now(timezone.utc).isoformat()
     document = {"id": str(uuid.uuid4()), "database_id": database_id, "source_filename": None, "source_import_id": None, "source_row_number": None, "data": _legacy_data(config, payload.data), "source_snapshot": None, "created_at": now, "updated_at": now}
     await db[LEGACY_DATABASES_COLLECTION].insert_one(document)
@@ -2522,7 +2749,7 @@ async def create_legacy_database_record(database_id: str, payload: LegacyDatabas
 
 @api_router.put("/spm-databases/legacy/{database_id}/records/{record_id}")
 async def update_legacy_database_record(database_id: str, record_id: str, payload: LegacyDatabaseRecordWrite):
-    config = _legacy_database_or_404(database_id)
+    config = await _legacy_database_or_404(database_id)
     result = await db[LEGACY_DATABASES_COLLECTION].find_one_and_update(
         {"database_id": database_id, "id": record_id},
         {"$set": {"data": _legacy_data(config, payload.data), "updated_at": datetime.now(timezone.utc).isoformat()}},
@@ -2535,7 +2762,7 @@ async def update_legacy_database_record(database_id: str, record_id: str, payloa
 
 @api_router.get("/spm-databases/legacy/{database_id}/export")
 async def export_legacy_database_records(database_id: str, format: str = Query("csv", pattern="^(csv|json)$")):
-    config = _legacy_database_or_404(database_id)
+    config = await _legacy_database_or_404(database_id)
     sort_field = config.get("sort_field")
     sort = [(f"data.{sort_field}", -1), ("source_row_number", -1)] if sort_field else [("source_row_number", -1)]
     records = await db[LEGACY_DATABASES_COLLECTION].find({"database_id": database_id}, {"_id": 0}).sort(sort).to_list(length=None)
@@ -6134,6 +6361,11 @@ async def seed_default_blocked_comments():
         await db[LEGACY_DATABASE_IMPORTS_COLLECTION].create_index([
             ("database_id", 1),
             ("imported_at", -1),
+        ])
+        await db[LEGACY_DATABASE_DEFINITIONS_COLLECTION].create_index("id", unique=True)
+        await db[LEGACY_DATABASE_DEFINITIONS_COLLECTION].create_index([
+            ("archived_at", 1),
+            ("name", 1),
         ])
         seed_emails = [
             _normalize_email(email)
