@@ -2366,7 +2366,7 @@ LEGACY_DATABASES: Dict[str, Dict[str, Any]] = {
     },
     "directorio": {
         "name": "Directorio", "source": "Directorio.mdb",
-        "description": "Directorio de contactos y datos de relación.", "sort_field": "fecha",
+        "description": "Directorio de contactos y datos de relación.", "sort_field": "fecha", "latest_number_field": "numero_carta",
         "fields": [{"key": "fecha", "label": "Fecha", "type": "date"}, {"key": "nombre", "label": "Nombre", "type": "text"}, {"key": "apellidos", "label": "Apellidos / identificación", "type": "text"}, {"key": "direccion", "label": "Dirección", "type": "text"}, {"key": "ciudad", "label": "Ciudad", "type": "text"}, {"key": "cp", "label": "CP", "type": "text"}, {"key": "pais", "label": "País", "type": "text"}, {"key": "telef1", "label": "Teléfono 1", "type": "text"}, {"key": "telef2", "label": "Teléfono 2", "type": "text"}, {"key": "telef3", "label": "Teléfono 3", "type": "text"}, {"key": "telef4", "label": "Teléfono 4", "type": "text"}, {"key": "movil1", "label": "Móvil 1", "type": "text"}, {"key": "movil2", "label": "Móvil 2", "type": "text"}, {"key": "email", "label": "Email", "type": "text"}, {"key": "nombre_esposa", "label": "Nombre esposa", "type": "text"}, {"key": "numero_hijos", "label": "Número hijos", "type": "number"}, {"key": "profesion", "label": "Profesión", "type": "text"}, {"key": "iglesia", "label": "Iglesia", "type": "text"}, {"key": "observaciones", "label": "Observaciones", "type": "text"}, {"key": "numero_carta", "label": "Número carta", "type": "number"}],
     },
     "libros": {
@@ -2387,6 +2387,16 @@ def _legacy_database_or_404(database_id: str) -> Dict[str, Any]:
     if not config:
         raise HTTPException(status_code=404, detail="Base de datos SPM no encontrada")
     return config
+
+
+def _legacy_latest_number_field(config: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    configured_key = config.get("latest_number_field")
+    numeric_fields = [field for field in config["fields"] if field["type"] == "number"]
+    if configured_key:
+        return next((field for field in numeric_fields if field["key"] == configured_key), None)
+    return next((field for field in numeric_fields if field["key"] == "numero"), None) or (
+        numeric_fields[0] if numeric_fields else None
+    )
 
 
 def _legacy_data(config: Dict[str, Any], raw_data: Dict[str, Any]) -> Dict[str, Any]:
@@ -2438,6 +2448,42 @@ async def list_legacy_database_records(
     total = await db[LEGACY_DATABASES_COLLECTION].count_documents(filters)
     records = await db[LEGACY_DATABASES_COLLECTION].find(filters, {"_id": 0}).sort(sort).skip((page - 1) * page_size).limit(page_size).to_list(length=page_size)
     return {"items": [_legacy_public(record) for record in records], "total": total, "page": page, "page_size": page_size}
+
+
+@api_router.get("/spm-databases/legacy/{database_id}/latest-number")
+async def get_latest_legacy_database_number(database_id: str):
+    config = _legacy_database_or_404(database_id)
+    field = _legacy_latest_number_field(config)
+    if not field:
+        raise HTTPException(status_code=404, detail="Esta base no tiene un campo numérico")
+
+    records = await db[LEGACY_DATABASES_COLLECTION].aggregate([
+        {"$match": {"database_id": database_id}},
+        {"$set": {
+            "_latest_number": {
+                "$convert": {
+                    "input": f"$data.{field['key']}",
+                    "to": "double",
+                    "onError": None,
+                    "onNull": None,
+                }
+            }
+        }},
+        {"$match": {"_latest_number": {"$ne": None}}},
+        {"$sort": {"_latest_number": -1, "source_row_number": -1}},
+        {"$limit": 1},
+        {"$project": {"_id": 0, "_latest_number": 0}},
+    ]).to_list(length=1)
+    if not records:
+        raise HTTPException(status_code=404, detail="No hay registros numerados disponibles")
+
+    record = _legacy_public(records[0])
+    return {
+        "field": field["key"],
+        "label": field["label"],
+        "value": record.get("data", {}).get(field["key"]),
+        "record": record,
+    }
 
 
 @api_router.post("/spm-databases/legacy/{database_id}/import")

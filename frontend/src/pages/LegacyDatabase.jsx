@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import axios from "axios";
-import { ArrowLeft, Database, FileJson, FileSpreadsheet, FileUp, Loader2, Pencil, Plus, RefreshCw, Search, X } from "lucide-react";
+import { ArrowDownToLine, ArrowLeft, Database, FileJson, FileSpreadsheet, FileUp, Loader2, Pencil, Plus, RefreshCw, Search, X } from "lucide-react";
 import { useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -32,6 +32,7 @@ export default function LegacyDatabase() {
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
+  const [latestLoading, setLatestLoading] = useState(false);
   const [importing, setImporting] = useState(false);
   const [exporting, setExporting] = useState("");
   const [saving, setSaving] = useState(false);
@@ -60,6 +61,21 @@ export default function LegacyDatabase() {
   const applySearch = async () => { setPage(1); await reload(1, search); };
   const openNew = () => { setEditing(null); setDraft({}); setEditorOpen(true); };
   const openEdit = (record) => { setEditing(record); setDraft(record.data || {}); setEditorOpen(true); };
+  const goToLatestNumber = async () => {
+    setLatestLoading(true);
+    try {
+      const response = await axios.get(`${API}/spm-databases/legacy/${databaseId}/latest-number`);
+      setSearch("");
+      setPage(1);
+      setRecords([response.data.record]);
+      setTotal(1);
+      toast.success(`${response.data.label}: ${response.data.value}`);
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "No se pudo localizar el último número");
+    } finally {
+      setLatestLoading(false);
+    }
+  };
   const handleImport = async (event) => {
     const file = event.target.files?.[0];
     event.target.value = "";
@@ -109,6 +125,17 @@ export default function LegacyDatabase() {
 
   return <div className="p-6 md:p-12 animate-fade-in">
     <Button variant="ghost" className="rounded-sm mb-5" onClick={() => navigate("/bases-de-datos")}><ArrowLeft className="w-4 h-4 mr-2" />Bases de datos SPM</Button>
+    <div className="mb-6 border-y border-border py-4">
+      <Button
+        className="rounded-sm bg-primary text-primary-foreground hover:bg-primary/90"
+        disabled={latestLoading || !database.record_count}
+        onClick={goToLatestNumber}
+        title="Mostrar directamente el número más alto registrado"
+      >
+        {latestLoading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <ArrowDownToLine className="w-4 h-4 mr-2" />}
+        IR AL ÚLTIMO NÚMERO
+      </Button>
+    </div>
     <div className="flex flex-col xl:flex-row xl:items-end xl:justify-between gap-6 mb-7"><div><p className="text-xs font-semibold uppercase tracking-wide text-primary mb-2">{database.source}</p><h1 className="font-heading text-4xl sm:text-5xl font-bold tracking-tight">{database.name}</h1><p className="text-muted-foreground mt-2">{database.description}</p></div><div className="flex flex-wrap gap-2"><input ref={fileInput} type="file" accept=".json,application/json" className="hidden" onChange={handleImport} /><Button variant="outline" className="hidden" disabled={importing || database.record_count > 0} onClick={() => fileInput.current?.click()}>{importing ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <FileUp className="w-4 h-4 mr-2" />}Importar JSON</Button><Button variant="outline" className="rounded-sm" disabled={exporting === "csv" || !database.record_count} onClick={() => download("csv")}>{exporting === "csv" ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <FileSpreadsheet className="w-4 h-4 mr-2" />}Exportar CSV</Button><Button variant="outline" size="icon" className="rounded-sm" title="Descargar copia JSON" disabled={exporting === "json" || !database.record_count} onClick={() => download("json")}>{exporting === "json" ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileJson className="w-4 h-4" />}</Button><Button variant="outline" size="icon" className="rounded-sm" title="Actualizar datos" onClick={() => reload(page)}><RefreshCw className="w-4 h-4" /></Button><Button className="rounded-sm" onClick={openNew}><Plus className="w-4 h-4 mr-2" />Añadir registro</Button></div></div>
     <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6"><Card className="rounded-sm"><CardContent className="p-5"><p className="text-xs uppercase tracking-wide text-muted-foreground">Registros</p><p className="font-heading text-4xl font-bold mt-2">{database.record_count}</p></CardContent></Card><Card className="rounded-sm"><CardContent className="p-5"><p className="text-xs uppercase tracking-wide text-muted-foreground">Última importación</p><p className="font-medium mt-2">{database.last_import?.source_filename || "Sin importar"}</p><p className="text-xs text-muted-foreground mt-1">{database.last_import?.record_count || 0} registros</p></CardContent></Card></div>
     <Card className="rounded-sm border-border"><CardHeader><div className="flex flex-col sm:flex-row gap-3 sm:items-center sm:justify-between"><CardTitle className="font-heading text-xl uppercase flex items-center gap-2"><Database className="w-5 h-5 text-primary" /> Registros</CardTitle><span className="text-sm text-muted-foreground">{total} resultados</span></div><div className="relative max-w-xl mt-4"><Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" /><Input className="pl-9 rounded-sm" value={search} onChange={(event) => setSearch(event.target.value)} onKeyDown={(event) => event.key === "Enter" && applySearch()} placeholder="Buscar en todos los campos de texto..." /></div></CardHeader><CardContent>{loading ? <div className="h-64 flex items-center justify-center"><Loader2 className="w-6 h-6 animate-spin text-primary" /></div> : records.length === 0 ? <div className="h-64 flex flex-col items-center justify-center text-center border border-dashed border-border"><Database className="w-8 h-8 text-muted-foreground mb-3" /><h2 className="font-heading text-xl font-bold">Aún no hay registros</h2><p className="text-sm text-muted-foreground mt-1">Importa el JSON exportado desde Access para comenzar.</p></div> : <><div className="overflow-x-auto border border-border"><table className="w-full min-w-[900px] text-sm"><thead className="bg-secondary/70 text-xs uppercase tracking-wide text-muted-foreground"><tr>{database.fields.map((field) => <th key={field.key} className="text-left p-3">{field.label}</th>)}<th className="text-right p-3">Acciones</th></tr></thead><tbody>{records.map((record) => <tr key={record.id} className="border-t border-border odd:bg-background even:bg-muted/35 hover:bg-primary/5"><>{database.fields.map((field) => <td key={field.key} className="p-3 max-w-[250px]">{formatValue(field, record.data?.[field.key])}</td>)}</><td className="p-3 text-right"><Button variant="ghost" size="icon" className="rounded-sm" title="Editar registro" onClick={() => openEdit(record)}><Pencil className="w-4 h-4" /></Button></td></tr>)}</tbody></table></div><div className="flex items-center justify-between gap-4 mt-5"><span className="text-sm text-muted-foreground">Página {page} de {totalPages}</span><div className="flex gap-2"><Button variant="outline" className="rounded-sm" disabled={page <= 1} onClick={() => { setPage(page - 1); reload(page - 1); }}>Anterior</Button><Button variant="outline" className="rounded-sm" disabled={page >= totalPages} onClick={() => { setPage(page + 1); reload(page + 1); }}>Siguiente</Button></div></div></>}</CardContent></Card>
