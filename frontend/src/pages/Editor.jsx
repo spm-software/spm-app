@@ -1518,6 +1518,13 @@ export default function Editor({ workflowMode = null }) {
   const showReviewDuplicateActions = showAllActions || workflowMode === "review_duplicates";
   const showSpellingActions = showAllActions || workflowMode === "spelling";
   const showReserveActions = showAllActions || workflowMode === "reserve";
+  const isSpellingWorkflow = workflowMode === "spelling";
+  const acceptedPendingCorrectionCount = questions.filter(q =>
+    q.clasificacion === "pregunta"
+    && !q.is_duplicate
+    && !isGreetingQuestion(q)
+    && !q.is_corrected
+  ).length;
 
   return (
     <div className="p-6 md:p-10 animate-fade-in">
@@ -1746,7 +1753,7 @@ export default function Editor({ workflowMode = null }) {
             />
             <Button
               onClick={handleCorrectAll}
-              disabled={correcting || questions.length === 0}
+              disabled={correcting || acceptedPendingCorrectionCount === 0}
               size="lg"
               className="rounded-sm uppercase tracking-wide text-xs min-w-[200px]"
               data-testid="correct-all-button"
@@ -1762,7 +1769,7 @@ export default function Editor({ workflowMode = null }) {
               ) : (
                 <>
                   <Wand2 className="w-4 h-4 mr-2" />
-                  Corregir todo con IA
+                  Corregir pendientes con IA
                 </>
               )}
             </Button>
@@ -1814,6 +1821,19 @@ export default function Editor({ workflowMode = null }) {
 
         <div className="flex-1" />
 
+        {isSpellingWorkflow ? (
+          <div className="flex items-center gap-5 text-sm" data-testid="spelling-summary">
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 rounded-full bg-green-500" />
+              <span><strong>{visibleConfirmedCount}</strong> preguntas aceptadas</span>
+            </div>
+            <span className="text-muted-foreground">
+              {acceptedPendingCorrectionCount > 0
+                ? `${acceptedPendingCorrectionCount} pendientes de corregir`
+                : "Corrección completada"}
+            </span>
+          </div>
+        ) : (
         <div className="flex items-center gap-6 text-sm">
           <div className="flex items-center gap-2">
             <div className="w-3 h-3 rounded-full bg-green-500" />
@@ -1914,6 +1934,7 @@ export default function Editor({ workflowMode = null }) {
             </button>
           )}
         </div>
+        )}
       </div>
 
       {showNameActions && nameUpdateResult?.name_resolution && (
@@ -1957,7 +1978,7 @@ export default function Editor({ workflowMode = null }) {
         </div>
       )}
 
-      {!duplicateReviewActive && (
+      {!duplicateReviewActive && !isSpellingWorkflow && (
         <>
       {/* Assignment Filter */}
       <div className="flex items-center gap-2 mb-6 flex-wrap" data-testid="assignment-filters">

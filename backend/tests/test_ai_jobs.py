@@ -75,6 +75,7 @@ def test_correction_job_does_not_repeat_persisted_progress(client, auth_headers,
             "import_batch_id": "batch-1",
             "youtube_username": "@ana",
             "original_text": "Pregunta uno",
+            "clasificacion": "pregunta",
             "corrected_text": "Pregunta uno.",
             "is_corrected": True,
         },
@@ -83,6 +84,14 @@ def test_correction_job_does_not_repeat_persisted_progress(client, auth_headers,
             "import_batch_id": "batch-1",
             "youtube_username": "@bea",
             "original_text": "Pregunta dos",
+            "clasificacion": "pregunta",
+            "is_corrected": False,
+        },
+        {
+            "id": "q3",
+            "import_batch_id": "batch-1",
+            "youtube_username": "@carla",
+            "original_text": "Comentario sin clasificar",
             "is_corrected": False,
         },
     ])
@@ -94,8 +103,8 @@ def test_correction_job_does_not_repeat_persisted_progress(client, auth_headers,
         "force": True,
         "status": "error",
         "current": 1,
-        "total": 2,
-        "question_ids": ["q1", "q2"],
+        "total": 3,
+        "question_ids": ["q1", "q2", "q3"],
         "processed_ids": ["q1"],
         "result": {"corrected_count": 1, "skipped_count": 0},
         "error": "interrupted",
@@ -118,6 +127,7 @@ def test_correction_job_does_not_repeat_persisted_progress(client, auth_headers,
     assert response.json()["result"]["corrected_count"] == 2
     assert corrected_texts == [("Pregunta dos", "gpt-5.6-luna")]
     assert fake_db.questions.docs[1]["corrected_text"] == "Pregunta dos."
+    assert "corrected_text" not in fake_db.questions.docs[2]
 
 
 def test_correction_job_only_includes_accepted_questions(client, auth_headers, fake_db):

@@ -1719,7 +1719,13 @@ async def _process_correction_job(job: Dict, token: str) -> Dict:
         question = await db.questions.find_one({"id": question_id}, {"_id": 0})
         if question and question.get("ai_correction_job_id") == job["id"]:
             return question_id, "already_applied", None
-        if not question or (not job.get("force") and question.get("is_corrected")):
+        if (
+            not question
+            or question.get("clasificacion") != "pregunta"
+            or question.get("is_greeting") is True
+            or question.get("is_duplicate") is True
+            or (not job.get("force") and question.get("is_corrected"))
+        ):
             return question_id, "skipped", None
         stored_name = await get_real_name(question.get("youtube_username", ""))
         if stored_name and stored_name != question.get("real_name"):
