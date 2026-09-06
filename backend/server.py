@@ -1581,10 +1581,9 @@ async def _question_ids_for_ai_job(job_type: str, batch_id: str, force: bool) ->
             "import_batch_id": batch_id,
             "is_greeting": {"$ne": True},
             "is_duplicate": {"$ne": True},
-            "clasificacion": {"$ne": "saludo"},
+            "clasificacion": "pregunta",
         }
         if not force:
-            query.update(await build_clasificacion_filter(batch_id))
             query["is_corrected"] = {"$ne": True}
         questions = await db.questions.find(query, {"_id": 0, "id": 1}).to_list(length=None)
         return [question["id"] for question in questions]
@@ -3385,18 +3384,15 @@ async def correct_questions(data: CorrectionRequest):
 async def correct_all_questions(batch_id: str, force: bool = False):
     """Get list of questions to correct (does not correct them, just returns IDs).
 
-    Only operates on questions classified as 'pregunta' (or all, if none in the
-    batch has been classified yet).
+    Only operates on questions explicitly accepted as 'pregunta'.
     """
     query = {
         "import_batch_id": batch_id,
         "is_greeting": {"$ne": True},
         "is_duplicate": {"$ne": True},
-        "clasificacion": {"$ne": "saludo"}
+        "clasificacion": "pregunta"
     }
     if not force:
-        clasif_filter = await build_clasificacion_filter(batch_id)
-        query.update(clasif_filter)
         query["is_corrected"] = {"$ne": True}
 
     questions = await db.questions.find(

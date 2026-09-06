@@ -120,6 +120,60 @@ def test_correction_job_does_not_repeat_persisted_progress(client, auth_headers,
     assert fake_db.questions.docs[1]["corrected_text"] == "Pregunta dos."
 
 
+def test_correction_job_only_includes_accepted_questions(client, auth_headers, fake_db):
+    fake_db.questions.docs.extend([
+        {
+            "id": "accepted-pending",
+            "import_batch_id": "batch-1",
+            "clasificacion": "pregunta",
+            "is_corrected": False,
+        },
+        {
+            "id": "accepted-corrected",
+            "import_batch_id": "batch-1",
+            "clasificacion": "pregunta",
+            "is_corrected": True,
+        },
+        {
+            "id": "unclassified",
+            "import_batch_id": "batch-1",
+            "clasificacion": None,
+            "is_corrected": False,
+        },
+        {
+            "id": "doubtful",
+            "import_batch_id": "batch-1",
+            "clasificacion": "dudoso",
+            "is_corrected": False,
+        },
+        {
+            "id": "greeting",
+            "import_batch_id": "batch-1",
+            "clasificacion": "pregunta",
+            "is_greeting": True,
+            "is_corrected": False,
+        },
+        {
+            "id": "duplicate",
+            "import_batch_id": "batch-1",
+            "clasificacion": "pregunta",
+            "is_duplicate": True,
+            "is_corrected": False,
+        },
+    ])
+
+    response = auth_post(
+        client,
+        "/api/ai-jobs/create/correction/batch-1",
+        auth_headers,
+        json={"model": "gpt-5.6-luna", "force": False},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["total"] == 1
+    assert fake_db.ai_jobs.docs[-1]["question_ids"] == ["accepted-pending"]
+
+
 def test_running_job_is_returned_without_starting_a_second_worker(client, auth_headers, fake_db):
     future = "2999-01-01T00:00:00+00:00"
     fake_db.ai_jobs.docs.append({

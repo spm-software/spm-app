@@ -492,7 +492,6 @@ export default function Editor({ workflowMode = null }) {
   ));
   const [loading, setLoading] = useState(false);
   const [correcting, setCorrecting] = useState(false);
-  const [correctingMode, setCorrectingMode] = useState(null);
   const [correctingProgress, setCorrectingProgress] = useState({ current: 0, total: 0 });
   const [correctingId, setCorrectingId] = useState(null);
   const [movingQuestionId, setMovingQuestionId] = useState(null);
@@ -661,7 +660,6 @@ export default function Editor({ workflowMode = null }) {
       });
     } else if (job.type === "correction") {
       setCorrecting(active);
-      setCorrectingMode(job.force ? "recorrect" : "correct");
       setCorrectingProgress({ current: job.current || 0, total: job.total || 0 });
     } else if (job.type === "duplicates") {
       setCheckingDuplicates(active);
@@ -704,7 +702,6 @@ export default function Editor({ workflowMode = null }) {
         }
       } else if (job.type === "correction") {
         setCorrecting(false);
-        setCorrectingMode(null);
         if (job.status === "completed") {
           toast.success(`${job.result?.corrected_count || 0} preguntas ${job.force ? "recorregidas" : "corregidas"}`);
         }
@@ -863,6 +860,14 @@ export default function Editor({ workflowMode = null }) {
         setShowOnlyUnconfirmedNames(false);
         setShowOnlyDuplicates(true);
       }
+
+      if (detail.key === "spelling") {
+        setAssignmentFilter("all");
+        setClasificationFilter("pregunta");
+        setShowOnlyDuplicates(false);
+        setShowOnlyNoName(false);
+        setShowOnlyUnconfirmedNames(false);
+      }
     };
 
     window.addEventListener("spm-workflow-step", handleWorkflowStep);
@@ -915,6 +920,15 @@ export default function Editor({ workflowMode = null }) {
       return;
     }
 
+    if (workflowMode === "spelling") {
+      setAssignmentFilter("all");
+      setClasificationFilter("pregunta");
+      setShowOnlyDuplicates(false);
+      setShowOnlyNoName(false);
+      setShowOnlyUnconfirmedNames(false);
+      return;
+    }
+
     setAssignmentFilter("all");
     setClasificationFilter("all");
     setShowOnlyDuplicates(false);
@@ -932,23 +946,18 @@ export default function Editor({ workflowMode = null }) {
     }
   }, [duplicateReviewActive, selectedBatch, globalReserveMode, fetchDuplicatePairs]);
 
-  const handleCorrectAll = async (force = false) => {
-    if (force && !window.confirm("¿Recorregir todas las preguntas válidas de este lote? Esto volverá a consumir créditos IA.")) {
-      return;
-    }
-
+  const handleCorrectAll = async () => {
     setCorrecting(true);
-    setCorrectingMode(force ? "recorrect" : "correct");
     setCorrectingProgress({ current: 0, total: 0 });
 
     try {
       const correctionModel = aiSettings.correction_model;
       const response = await axios.post(`${API}/ai-jobs/create/correction/${selectedBatch}`, {
         model: correctionModel,
-        force,
+        force: false,
       });
       if (response.data.total === 0) {
-        toast.info(force ? "No hay preguntas válidas para recorregir" : "No hay preguntas pendientes de corregir");
+        toast.info("No hay preguntas aceptadas pendientes de corregir");
         setCorrecting(false);
         await fetchQuestions();
         return;
@@ -958,7 +967,6 @@ export default function Editor({ workflowMode = null }) {
       console.error("Error correcting:", error);
       toast.error("Error al iniciar corrección");
       setCorrecting(false);
-      setCorrectingMode(null);
       setCorrectingProgress({ current: 0, total: 0 });
     }
   };
@@ -1737,13 +1745,13 @@ export default function Editor({ workflowMode = null }) {
               testId="correction-model-select"
             />
             <Button
-              onClick={() => handleCorrectAll(false)}
+              onClick={handleCorrectAll}
               disabled={correcting || questions.length === 0}
               size="lg"
               className="rounded-sm uppercase tracking-wide text-xs min-w-[200px]"
               data-testid="correct-all-button"
             >
-              {correcting && correctingMode === "correct" ? (
+              {correcting ? (
                 <>
                   <Loader2 className="w-4 h-4 mr-2 animate-spin" />
                   {correctingProgress.total > 0
@@ -1755,30 +1763,6 @@ export default function Editor({ workflowMode = null }) {
                 <>
                   <Wand2 className="w-4 h-4 mr-2" />
                   Corregir todo con IA
-                </>
-              )}
-            </Button>
-
-            <Button
-              onClick={() => handleCorrectAll(true)}
-              disabled={correcting || questions.length === 0}
-              size="lg"
-              variant="outline"
-              className="rounded-sm uppercase tracking-wide text-xs min-w-[210px]"
-              data-testid="recorrect-all-button"
-            >
-              {correcting && correctingMode === "recorrect" ? (
-                <>
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                  {correctingProgress.total > 0
-                    ? `Procesando ${correctingProgress.current}/${correctingProgress.total}...`
-                    : "Iniciando..."
-                  }
-                </>
-              ) : (
-                <>
-                  <Wand2 className="w-4 h-4 mr-2" />
-                  Recorregir todo con IA
                 </>
               )}
             </Button>
