@@ -478,14 +478,13 @@ export default function Dashboard() {
               { step: 2, title: "Clasificar", desc: "Separar saludos", path: "/flujo/clasificar", icon: Filter },
               { step: 3, title: "Dudosas", desc: "Revisar casos dudosos", path: "/flujo/dudosas", icon: ClipboardCheck },
               { step: 4, title: "Nombres", desc: "Resolver autores", path: "/flujo/nombres", icon: Users },
-              { step: 5, title: "Confirmar nombres", desc: "Validar derivados", path: "/flujo/confirmar-nombres", icon: Check },
-              { step: 6, title: "Duplicados rápido", desc: "Coincidencias directas", path: "/flujo/duplicados-rapido", icon: Copy },
-              { step: 7, title: "Duplicados IA", desc: "Coincidencias semánticas", path: "/flujo/duplicados-ia", icon: Wand2 },
-              { step: 8, title: "Revisar duplicados", desc: "Aceptar o mantener", path: "/flujo/revisar-duplicados", icon: ClipboardCheck },
-              { step: 9, title: "Ortografía", desc: "Corregir preguntas", path: "/flujo/ortografia", icon: Wand2 },
-              { step: 10, title: "Reserva", desc: "Revisar pendientes", action: handleGoToReserve, icon: Inbox },
-              { step: 11, title: "Distribuir", desc: "Crear programas", path: "/distribuir", icon: Layers },
-              { step: 12, title: "Exportar", desc: "TXT y PNG", path: "/exportar", icon: Download },
+              { step: 5, title: "Duplicados rápido", desc: "Coincidencias directas", path: "/flujo/duplicados-rapido", icon: Copy },
+              { step: 6, title: "Duplicados IA", desc: "Coincidencias semánticas", path: "/flujo/duplicados-ia", icon: Wand2 },
+              { step: 7, title: "Revisar duplicados", desc: "Aceptar o mantener", path: "/flujo/revisar-duplicados", icon: ClipboardCheck },
+              { step: 8, title: "Ortografía", desc: "Corregir preguntas", path: "/flujo/ortografia", icon: Wand2 },
+              { step: 9, title: "Reserva", desc: "Revisar pendientes", action: handleGoToReserve, icon: Inbox },
+              { step: 10, title: "Distribuir", desc: "Crear programas", path: "/distribuir", icon: Layers },
+              { step: 11, title: "Exportar", desc: "TXT y PNG", path: "/exportar", icon: Download },
             ].map((item) => (
               <button
                 key={item.step}

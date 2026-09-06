@@ -149,10 +149,6 @@ export async function mockCoreApi(page, options = {}) {
       return json(route, { updated_count: 1 });
     }
 
-    if (method === "POST" && path === "/api/questions/confirm-derived-names/batch-1") {
-      return json(route, { confirmed_count: 1 });
-    }
-
     if (method === "POST" && path === "/api/questions/check-duplicates/batch-1") {
       return json(route, { duplicates: [], duplicates_count: 0 });
     }

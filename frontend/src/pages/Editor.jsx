@@ -95,10 +95,6 @@ const workflowModeConfig = {
     title: "NOMBRES",
     subtitle: "Actualiza y revisa solo nombres no confirmados",
   },
-  confirm_names: {
-    title: "CONFIRMAR NOMBRES",
-    subtitle: "Valida nombres derivados antes de continuar",
-  },
   duplicates_fast: {
     title: "DUPLICADOS RÁPIDO",
     subtitle: "Busca coincidencias exactas o muy directas",
@@ -842,7 +838,7 @@ export default function Editor({ workflowMode = null }) {
         }
       }
 
-      if (detail.key === "names" || detail.key === "confirm_names") {
+      if (detail.key === "names") {
         setAssignmentFilter("all");
         setClasificationFilter("all");
         setShowOnlyDuplicates(false);
@@ -913,7 +909,7 @@ export default function Editor({ workflowMode = null }) {
       return;
     }
 
-    if (workflowMode === "names" || workflowMode === "confirm_names") {
+    if (workflowMode === "names") {
       setAssignmentFilter("all");
       setClasificationFilter("all");
       setShowOnlyDuplicates(false);
@@ -957,7 +953,7 @@ export default function Editor({ workflowMode = null }) {
   }, [workflowMode, batches, globalReserveMode, selectedBatch]);
 
   const duplicateReviewActive = workflowMode === "review_duplicates" || showOnlyDuplicates;
-  const nameReviewActive = workflowMode === "names" || workflowMode === "confirm_names";
+  const nameReviewActive = workflowMode === "names";
   const filterUnconfirmedNames = showOnlyUnconfirmedNames || nameReviewActive;
 
   useEffect(() => {
@@ -1340,23 +1336,6 @@ export default function Editor({ workflowMode = null }) {
     }
   };
 
-  const handleConfirmDerivedNames = async () => {
-    if (!selectedBatch) return;
-    try {
-      const res = await axios.post(`${API}/questions/confirm-derived-names/${selectedBatch}`);
-      const n = res.data.confirmed_count || 0;
-      if (n > 0) {
-        toast.success(`${n} nombres derivados confirmados`);
-        await fetchQuestions();
-      } else {
-        toast.info("Ningún nombre coincidía con el @username");
-      }
-    } catch (error) {
-      console.error("Error confirming derived names:", error);
-      toast.error("Error al confirmar nombres derivados");
-    }
-  };
-
   const reserveProgramIds = new Set(programs.filter(p => p.is_reserve).map(p => p.id));
   const programById = new Map(programs.map(p => [p.id, p]));
   const normalPrograms = programs
@@ -1529,7 +1508,6 @@ export default function Editor({ workflowMode = null }) {
 
   const showAllActions = !isFocusedWorkflow;
   const showNameActions = showAllActions || workflowMode === "names";
-  const showConfirmNameActions = showAllActions || workflowMode === "confirm_names";
   const showClassifyActions = showAllActions || workflowMode === "classify";
   const showFastDuplicateActions = showAllActions || workflowMode === "duplicates_fast";
   const showAiDuplicateActions = showAllActions || workflowMode === "duplicates_ai";
@@ -1606,20 +1584,6 @@ export default function Editor({ workflowMode = null }) {
               <Users className="w-4 h-4 mr-2" />
             )}
             {updatingNames ? "Consultando YouTube..." : "Actualizar nombres"}
-          </Button>
-        )}
-
-        {showConfirmNameActions && (
-          <Button
-            variant="outline"
-            onClick={handleConfirmDerivedNames}
-            disabled={questions.length === 0}
-            size="lg"
-            className="rounded-sm uppercase tracking-wide text-xs"
-            data-testid="confirm-derived-names-button"
-          >
-            <Check className="w-4 h-4 mr-2" />
-            Confirmar nombres derivados
           </Button>
         )}
 

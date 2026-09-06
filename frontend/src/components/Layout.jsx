@@ -37,7 +37,6 @@ const workflowSteps = [
   { key: "classify", label: "Clasificar", path: "/flujo/clasificar", description: "Separar saludos y preguntas" },
   { key: "review_doubtful", label: "Revisar dudosas", path: "/flujo/dudosas", description: "Confirmar las que son pregunta" },
   { key: "names", label: "Nombres", path: "/flujo/nombres", description: "Actualizar autores" },
-  { key: "confirm_names", label: "Confirmar nombres", path: "/flujo/confirmar-nombres", description: "Validar nombres derivados" },
   { key: "duplicates_fast", label: "Duplicados rápido", path: "/flujo/duplicados-rapido", description: "Buscar coincidencias exactas" },
   { key: "duplicates_ai", label: "Duplicados IA", path: "/flujo/duplicados-ia", description: "Buscar coincidencias semánticas" },
   { key: "review_duplicates", label: "Revisar duplicados", path: "/flujo/revisar-duplicados", description: "Aceptar o mantener" },

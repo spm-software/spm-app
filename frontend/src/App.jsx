@@ -53,7 +53,7 @@ function App() {
               <Route path="flujo/clasificar" element={<Editor workflowMode="classify" />} />
               <Route path="flujo/dudosas" element={<Editor workflowMode="review_doubtful" />} />
               <Route path="flujo/nombres" element={<Editor workflowMode="names" />} />
-              <Route path="flujo/confirmar-nombres" element={<Editor workflowMode="confirm_names" />} />
+              <Route path="flujo/confirmar-nombres" element={<Navigate to="/flujo/nombres" replace />} />
               <Route path="flujo/duplicados-rapido" element={<Editor workflowMode="duplicates_fast" />} />
               <Route path="flujo/duplicados-ia" element={<Editor workflowMode="duplicates_ai" />} />
               <Route path="flujo/revisar-duplicados" element={<Editor workflowMode="review_duplicates" />} />
