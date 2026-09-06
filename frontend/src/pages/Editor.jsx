@@ -1357,6 +1357,8 @@ export default function Editor({ workflowMode = null }) {
   const ownBatchQuestions = globalReserveMode
     ? questions
     : questions.filter(q => q.import_batch_id === selectedBatch);
+  const selectedBatchRecordCount = batches.find(batch => batch.id === selectedBatch)?.question_count
+    ?? ownBatchQuestions.length;
   const visibleConfirmedCount = questions.filter(q =>
     q.clasificacion === "pregunta" && !q.is_duplicate && !isGreetingQuestion(q)
   ).length;
@@ -1822,7 +1824,11 @@ export default function Editor({ workflowMode = null }) {
         <div className="flex-1" />
 
         {isSpellingWorkflow ? (
-          <div className="flex items-center gap-5 text-sm" data-testid="spelling-summary">
+          <div className="flex flex-wrap items-center gap-5 text-sm" data-testid="spelling-summary">
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 rounded-full bg-slate-400" />
+              <span><strong>{selectedBatchRecordCount}</strong> comentarios del lote</span>
+            </div>
             <div className="flex items-center gap-2">
               <div className="w-3 h-3 rounded-full bg-green-500" />
               <span><strong>{visibleConfirmedCount}</strong> preguntas aceptadas</span>
