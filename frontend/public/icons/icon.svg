@@ -1,7 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 640" role="img" aria-labelledby="title desc">
   <title id="title">Samuel Pérez Millos Asociación Teológica</title>
   <desc id="desc">Logotipo circular negro con libro abierto blanco y texto Samuel Pérez Millos Asociación Teológica.</desc>
-  <rect width="640" height="640" fill="#ffffff"/>
+  <rect width="640" height="640" fill="#171713"/>
   <circle cx="320" cy="320" r="319" fill="#171713"/>
 
   <g fill="none" stroke-linecap="butt" stroke-linejoin="round">

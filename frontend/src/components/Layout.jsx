@@ -180,7 +180,7 @@ export default function Layout() {
         <div className="p-6 border-b border-border">
           <div className="flex items-center gap-3">
             <img
-              src="/icons/icon.svg"
+              src="/icons/icon.svg?v=2"
               alt="Samuel Pérez Millos Asociación Teológica"
               className="w-12 h-12 rounded-full object-cover"
             />
@@ -263,7 +263,7 @@ export default function Layout() {
         <div className="h-16 px-4 flex items-center justify-between">
           <div className="flex items-center gap-3 min-w-0">
             <img
-              src="/icons/icon.svg"
+              src="/icons/icon.svg?v=2"
               alt="Samuel Pérez Millos Asociación Teológica"
               className="w-10 h-10 rounded-full object-cover flex-shrink-0"
             />
