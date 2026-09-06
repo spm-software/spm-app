@@ -11,7 +11,6 @@ import {
   Database,
   LogOut,
   Loader2,
-  ArrowRight,
   ArrowUp,
   Moon,
   Sun,
@@ -20,7 +19,6 @@ import {
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
 import { useUndo } from "@/contexts/UndoContext";
-import { toast } from "sonner";
 import InstallAppButton from "@/components/InstallAppButton";
 
 const navItems = [
@@ -35,18 +33,18 @@ const navItems = [
 ];
 
 const workflowSteps = [
-  { key: "import", label: "Importar", path: "/importar", description: "Cargar comentarios", actionTestId: "import-button", actionLabel: "Importar" },
-  { key: "classify", label: "Clasificar", path: "/flujo/clasificar", description: "Separar saludos y preguntas", actionTestId: "clasificar-ia-button", actionLabel: "Clasificar" },
-  { key: "review_doubtful", label: "Revisar dudosas", path: "/flujo/dudosas", description: "Confirmar las que son pregunta", actionTestId: "filter-pill-dudoso", actionLabel: "Ver dudosas" },
-  { key: "names", label: "Nombres", path: "/flujo/nombres", description: "Actualizar autores", actionTestId: "update-names-button", actionLabel: "Actualizar nombres" },
-  { key: "confirm_names", label: "Confirmar nombres", path: "/flujo/confirmar-nombres", description: "Validar nombres derivados", actionTestId: "confirm-derived-names-button", actionLabel: "Confirmar nombres" },
-  { key: "duplicates_fast", label: "Duplicados rápido", path: "/flujo/duplicados-rapido", description: "Buscar coincidencias exactas", actionTestId: "check-duplicates-button", actionLabel: "Duplicados rápido" },
-  { key: "duplicates_ai", label: "Duplicados IA", path: "/flujo/duplicados-ia", description: "Buscar coincidencias semánticas", actionTestId: "check-duplicates-ai-button", actionLabel: "Buscar con IA", inlineActionOnly: true },
-  { key: "review_duplicates", label: "Revisar duplicados", path: "/flujo/revisar-duplicados", description: "Aceptar o mantener", viewOnly: true, actionLabel: "Ver duplicados" },
-  { key: "spelling", label: "Ortografía", path: "/flujo/ortografia", description: "Corregir preguntas finales", actionTestId: "correct-all-button", actionLabel: "Corregir" },
-  { key: "reserve", label: "Reserva", path: "/flujo/reserva", description: "Incluir pendientes a mano", reserve: true, actionTestId: "open-reserve-button", actionLabel: "Ver reserva" },
-  { key: "distribute", label: "Distribuir", path: "/distribuir", description: "Crear programas", actionTestId: "distribute-button", actionLabel: "Distribuir" },
-  { key: "export", label: "Exportar", path: "/exportar", description: "Descargar TXT y PNG", actionTestId: "export-all-button", actionLabel: "Exportar" },
+  { key: "import", label: "Importar", path: "/importar", description: "Cargar comentarios" },
+  { key: "classify", label: "Clasificar", path: "/flujo/clasificar", description: "Separar saludos y preguntas" },
+  { key: "review_doubtful", label: "Revisar dudosas", path: "/flujo/dudosas", description: "Confirmar las que son pregunta" },
+  { key: "names", label: "Nombres", path: "/flujo/nombres", description: "Actualizar autores" },
+  { key: "confirm_names", label: "Confirmar nombres", path: "/flujo/confirmar-nombres", description: "Validar nombres derivados" },
+  { key: "duplicates_fast", label: "Duplicados rápido", path: "/flujo/duplicados-rapido", description: "Buscar coincidencias exactas" },
+  { key: "duplicates_ai", label: "Duplicados IA", path: "/flujo/duplicados-ia", description: "Buscar coincidencias semánticas" },
+  { key: "review_duplicates", label: "Revisar duplicados", path: "/flujo/revisar-duplicados", description: "Aceptar o mantener" },
+  { key: "spelling", label: "Ortografía", path: "/flujo/ortografia", description: "Corregir preguntas finales" },
+  { key: "reserve", label: "Reserva", path: "/flujo/reserva", description: "Incluir pendientes a mano", reserve: true },
+  { key: "distribute", label: "Distribuir", path: "/distribuir", description: "Crear programas" },
+  { key: "export", label: "Exportar", path: "/exportar", description: "Descargar TXT y PNG" },
 ];
 
 const WORKFLOW_STEP_KEY = "workflowStepIndex";
@@ -118,38 +116,6 @@ export default function Layout() {
     navigate(step.path);
   };
 
-  const runCurrentWorkflowStep = () => {
-    if (location.pathname !== currentStep.path) {
-      goToWorkflowStep(workflowIndex);
-      return;
-    }
-
-    if (currentStep.viewOnly) {
-      window.dispatchEvent(new CustomEvent("spm-workflow-step", {
-        detail: { index: workflowIndex, key: currentStep.key, path: currentStep.path, reserve: currentStep.reserve === true }
-      }));
-      return;
-    }
-
-    if (!currentStep.actionTestId) {
-      goToWorkflowStep(workflowIndex + 1);
-      return;
-    }
-
-    const action = document.querySelector(`[data-testid="${currentStep.actionTestId}"]`);
-    if (!action) {
-      toast.error(`No se encontró la acción de ${currentStep.label}`);
-      return;
-    }
-
-    if (action.disabled || action.getAttribute("aria-disabled") === "true") {
-      toast.info(`No se puede ejecutar "${currentStep.label}" todavía`);
-      return;
-    }
-
-    action.click();
-  };
-
   const handleScrollToTop = () => {
     const main = document.querySelector(".app-main");
     if (main) {
@@ -163,7 +129,6 @@ export default function Layout() {
     setIsDarkMode((current) => !current);
   };
 
-  const currentStep = workflowSteps[workflowIndex];
   const isLastWorkflowStep = workflowIndex >= workflowSteps.length - 1;
   const isDatabaseSection = location.pathname.startsWith("/bases-de-datos");
   const undoTitle = activeAction
@@ -340,20 +305,6 @@ export default function Layout() {
                   );
                 })}
               </div>
-              {!currentStep.inlineActionOnly && <button
-                type="button"
-                onClick={runCurrentWorkflowStep}
-                className={cn(
-                  "flex h-8 shrink-0 items-center gap-1 rounded-sm px-3 text-xs font-semibold uppercase tracking-wide transition-colors",
-                  isLastWorkflowStep
-                    ? "bg-primary text-primary-foreground hover:bg-primary/90"
-                    : "bg-primary text-primary-foreground hover:bg-primary/90"
-                )}
-                data-testid="workflow-next-button"
-              >
-                {currentStep.actionLabel || "Siguiente"}
-                <ArrowRight className="h-3.5 w-3.5" />
-              </button>}
               <button
                 type="button"
                 onClick={() => goToWorkflowStep(workflowIndex + 1)}
