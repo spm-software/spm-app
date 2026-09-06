@@ -21,6 +21,7 @@ import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
 import { useUndo } from "@/contexts/UndoContext";
 import { toast } from "sonner";
+import InstallAppButton from "@/components/InstallAppButton";
 
 const navItems = [
   { to: "/", icon: LayoutDashboard, label: "Dashboard" },
@@ -245,6 +246,7 @@ export default function Layout() {
             )}
             {isDarkMode ? "Modo claro" : "Modo oscuro"}
           </button>
+          <InstallAppButton />
           <button
             onClick={logout}
             className="w-full flex items-center gap-3 px-4 py-2.5 rounded-sm text-xs uppercase tracking-wide font-medium text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors"
@@ -275,6 +277,7 @@ export default function Layout() {
             </div>
           </div>
           <div className="flex items-center gap-1">
+            <InstallAppButton compact />
             <button
               type="button"
               onClick={handleToggleTheme}
