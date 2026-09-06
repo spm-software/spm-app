@@ -114,15 +114,21 @@ export default function DuplicateReview({ duplicates, loading, onDelete, onKeep,
               <Question question={pair.new_question} label="Posible duplicada" />
             </div>
             <div className="mt-5 flex flex-wrap gap-2">
-              <Button disabled={!isPending || Boolean(busy) || loading} variant="outline" className="h-auto min-h-10 whitespace-normal rounded-sm" onClick={() => decide(pair, "duplicate")}>
+              <Button disabled={!isPending || Boolean(busy) || loading} variant="destructive" className="h-auto min-h-10 whitespace-normal rounded-sm" onClick={() => decide(pair, "duplicate")}>
                 {isBusy ? <Loader2 className="mr-2 h-4 w-4 shrink-0 animate-spin" /> : <Trash2 className="mr-2 h-4 w-4 shrink-0" />}Eliminar duplicada
+              </Button>
+              <Button variant="destructive" disabled={!isPending || Boolean(busy) || loading} className="h-auto min-h-10 whitespace-normal rounded-sm" onClick={() => decide(pair, "original")}>
+                <Trash2 className="mr-2 h-4 w-4 shrink-0" />Eliminar original
               </Button>
               <Button disabled={!isPending || Boolean(busy) || loading} className="h-auto min-h-10 whitespace-normal rounded-sm bg-green-700 text-white hover:bg-green-800" onClick={() => decide(pair, "keep")}>
                 <Check className="mr-2 h-4 w-4 shrink-0" />Conservar las dos
               </Button>
+              <Button variant="destructive" disabled={!isPending || Boolean(busy) || loading} className="h-auto min-h-10 whitespace-normal rounded-sm" onClick={() => decide(pair, "both")}>
+                <Trash2 className="mr-2 h-4 w-4 shrink-0" />Eliminar las dos
+              </Button>
             </div>
             <details className="mt-3 text-sm">
-              <summary className="w-fit cursor-pointer py-2 text-muted-foreground">Detalles y otras acciones</summary>
+              <summary className="w-fit cursor-pointer py-2 text-muted-foreground">Detalles</summary>
               <div className="grid gap-4 py-3 md:grid-cols-2">
                 {[pair.original_question, pair.new_question].map((question, side) => (
                   <div key={side} className="min-w-0 break-words">
@@ -131,10 +137,6 @@ export default function DuplicateReview({ duplicates, loading, onDelete, onKeep,
                     {question.video_id && <a href={`https://www.youtube.com/watch?v=${encodeURIComponent(question.video_id)}`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 py-2 text-primary">Ver vídeo <ExternalLink className="h-4 w-4" /></a>}
                   </div>
                 ))}
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <Button variant="outline" disabled={!isPending || Boolean(busy) || loading} onClick={() => decide(pair, "original")}><Trash2 className="mr-2 h-4 w-4" />Eliminar original</Button>
-                <Button variant="destructive" disabled={!isPending || Boolean(busy) || loading} onClick={() => decide(pair, "both")}><Trash2 className="mr-2 h-4 w-4" />Eliminar las dos</Button>
               </div>
             </details>
           </article>
