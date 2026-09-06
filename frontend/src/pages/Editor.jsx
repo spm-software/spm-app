@@ -1386,6 +1386,7 @@ export default function Editor({ workflowMode = null }) {
     ? 0
     : questions.filter(q => q.import_batch_id && q.import_batch_id !== selectedBatch).length;
   const unclassifiedVisibleCount = questions.filter(q => !q.clasificacion).length;
+  const doubtfulVisibleCount = questions.filter(q => q.clasificacion === "dudoso").length;
   const distributableQuestions = acceptedQuestions;
 
   const createQuestionSnapshot = (question) => ({
@@ -1536,6 +1537,7 @@ export default function Editor({ workflowMode = null }) {
   const showSpellingActions = showAllActions || workflowMode === "spelling";
   const showReserveActions = showAllActions || workflowMode === "reserve";
   const isClassifyWorkflow = workflowMode === "classify";
+  const isDoubtfulWorkflow = workflowMode === "review_doubtful";
   const isSpellingWorkflow = workflowMode === "spelling";
   const acceptedPendingCorrectionCount = acceptedQuestions.filter(q => !q.is_corrected).length;
 
@@ -1846,6 +1848,11 @@ export default function Editor({ workflowMode = null }) {
                 : "Corrección completada"}
             </span>
           </div>
+        ) : isDoubtfulWorkflow ? (
+          <div className="flex items-center gap-2 text-lg font-semibold" data-testid="doubtful-count">
+            <div className="w-4 h-4 rounded-full bg-amber-500" />
+            <span><strong>{doubtfulVisibleCount}</strong> dudosas</span>
+          </div>
         ) : (
         <div className="flex items-center gap-6 text-sm">
           <div className="flex items-center gap-2" data-testid="accepted-count">
@@ -1994,7 +2001,7 @@ export default function Editor({ workflowMode = null }) {
         </div>
       )}
 
-      {!duplicateReviewActive && !isSpellingWorkflow && !isClassifyWorkflow && (
+      {!duplicateReviewActive && !isSpellingWorkflow && !isClassifyWorkflow && !isDoubtfulWorkflow && (
         <>
       {/* Assignment Filter */}
       <div className="flex items-center gap-2 mb-6 flex-wrap" data-testid="assignment-filters">
