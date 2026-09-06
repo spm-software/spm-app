@@ -1535,6 +1535,7 @@ export default function Editor({ workflowMode = null }) {
   const showReviewDuplicateActions = showAllActions || workflowMode === "review_duplicates";
   const showSpellingActions = showAllActions || workflowMode === "spelling";
   const showReserveActions = showAllActions || workflowMode === "reserve";
+  const isClassifyWorkflow = workflowMode === "classify";
   const isSpellingWorkflow = workflowMode === "spelling";
   const acceptedPendingCorrectionCount = acceptedQuestions.filter(q => !q.is_corrected).length;
 
@@ -1869,8 +1870,11 @@ export default function Editor({ workflowMode = null }) {
               <span><strong>{unclassifiedVisibleCount}</strong> sin clasificar</span>
             </div>
           )}
-          <div className="flex items-center gap-2" data-testid="total-count">
-            <div className="w-3 h-3 rounded-full bg-foreground" />
+          <div
+            className={`flex items-center gap-2 ${isClassifyWorkflow ? "text-lg font-semibold" : ""}`}
+            data-testid="total-count"
+          >
+            <div className={`${isClassifyWorkflow ? "w-4 h-4" : "w-3 h-3"} rounded-full bg-foreground`} />
             <span><strong>{questions.length}</strong> total</span>
           </div>
           {(() => {
@@ -1990,7 +1994,7 @@ export default function Editor({ workflowMode = null }) {
         </div>
       )}
 
-      {!duplicateReviewActive && !isSpellingWorkflow && (
+      {!duplicateReviewActive && !isSpellingWorkflow && !isClassifyWorkflow && (
         <>
       {/* Assignment Filter */}
       <div className="flex items-center gap-2 mb-6 flex-wrap" data-testid="assignment-filters">
