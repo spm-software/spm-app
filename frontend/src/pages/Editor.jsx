@@ -30,22 +30,18 @@ import {
   MessageSquare,
   Pencil,
   CheckCircle,
-  Copy,
   Users,
   Sparkles,
   Filter,
   Ban,
   Video,
   Inbox,
-  CalendarDays,
-  ChevronLeft,
-  ChevronRight,
-  ExternalLink,
   RefreshCw
 } from "lucide-react";
 import { API_BASE_URL as API } from "@/lib/api";
 import { AI_MODELS, DEFAULT_AI_SETTINGS, getAiModelLabel } from "@/lib/aiModels";
 import { useUndo } from "@/contexts/UndoContext";
+import DuplicateReview from "@/components/DuplicateReview";
 
 /**
  * Returns one of three states for a question's real_name:
@@ -345,259 +341,6 @@ const EditableText = ({ question, onSave }) => {
   );
 };
 
-const formatDuplicateDate = (value) => {
-  if (!value) return "Fecha no disponible";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "Fecha no disponible";
-  return date.toLocaleString("es-ES", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-};
-
-const DuplicateQuestionPanel = ({ question, label, tone, onDelete, deleting, busy }) => {
-  const videoUrl = getYoutubeVideoUrl(question.video_id);
-  const toneClasses = tone === "original"
-    ? "border-sky-300 bg-sky-50/40 dark:bg-sky-950/20"
-    : "border-amber-300 bg-amber-50/40 dark:bg-amber-950/20";
-  const badgeClasses = tone === "original"
-    ? "border-sky-300 bg-sky-50 text-sky-800 dark:bg-sky-950 dark:text-sky-200"
-    : "border-amber-300 bg-amber-50 text-amber-800 dark:bg-amber-950 dark:text-amber-200";
-
-  return (
-    <section className={`flex min-h-[390px] min-w-0 flex-col border-2 p-5 ${toneClasses}`}>
-      <div className="mb-5 flex flex-wrap items-center justify-between gap-2 border-b border-current/10 pb-4">
-        <Badge variant="outline" className={`rounded-sm text-xs font-bold ${badgeClasses}`}>
-          {label}
-        </Badge>
-        <span className="text-xs text-muted-foreground">{question.batch_name || "Lote desconocido"}</span>
-      </div>
-
-      <div className="mb-5 space-y-3 text-sm">
-        <div>
-          <p className="font-semibold text-base">{question.real_name || question.username || "Usuario desconocido"}</p>
-          {question.username && (
-            <p className="font-mono text-xs text-muted-foreground">{question.username}</p>
-          )}
-        </div>
-        <div className="flex items-start gap-2 text-muted-foreground">
-          <CalendarDays className="mt-0.5 h-4 w-4 flex-shrink-0" />
-          <div>
-            <p className="text-xs font-semibold uppercase">Importada el</p>
-            <p>{formatDuplicateDate(question.created_at)}</p>
-          </div>
-        </div>
-        {question.video_title && (
-          <div className="flex items-start gap-2 text-muted-foreground">
-            <Video className="mt-0.5 h-4 w-4 flex-shrink-0" />
-            <div className="min-w-0">
-              <p className="break-words">{question.video_title}</p>
-              {videoUrl && (
-                <a
-                  href={videoUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="mt-1 inline-flex items-center gap-1 text-xs text-primary underline-offset-4 hover:underline"
-                >
-                  Ver vídeo <ExternalLink className="h-3 w-3" />
-                </a>
-              )}
-            </div>
-          </div>
-        )}
-      </div>
-
-      <div className="flex-1 border-y border-border bg-background/70 p-4">
-        <p className="whitespace-pre-wrap text-base leading-relaxed">{question.text}</p>
-      </div>
-
-      <Button
-        variant="outline"
-        size="lg"
-        onClick={onDelete}
-        disabled={busy}
-        className="mt-5 rounded-sm border-destructive/50 text-xs uppercase text-destructive hover:bg-destructive hover:text-destructive-foreground"
-      >
-        {deleting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Trash2 className="mr-2 h-4 w-4" />}
-        Eliminar {tone === "original" ? "original" : "duplicada"}
-      </Button>
-    </section>
-  );
-};
-
-const DuplicateReview = ({ duplicates, loading, onDelete, onKeep, onRefresh, focusQuestionId }) => {
-  const [activeIndex, setActiveIndex] = useState(0);
-  const [decision, setDecision] = useState(null);
-
-  useEffect(() => {
-    if (!focusQuestionId) return;
-    const focusIndex = duplicates.findIndex((pair) => (
-      pair.new_question.id === focusQuestionId || pair.original_question.id === focusQuestionId
-    ));
-    if (focusIndex >= 0) setActiveIndex(focusIndex);
-  }, [duplicates, focusQuestionId]);
-
-  useEffect(() => {
-    if (!duplicates || duplicates.length === 0) {
-      setActiveIndex(0);
-      return;
-    }
-    setActiveIndex((current) => Math.min(current, duplicates.length - 1));
-  }, [duplicates]);
-
-  if (loading) {
-    return (
-      <div className="border border-border bg-card py-20 text-center">
-        <Loader2 className="mx-auto mb-4 h-8 w-8 animate-spin" />
-        <p className="text-muted-foreground">Cargando comparaciones pendientes...</p>
-      </div>
-    );
-  }
-
-  if (!duplicates || duplicates.length === 0) {
-    return (
-      <div className="border border-green-300 bg-green-50 px-6 py-16 text-center dark:bg-green-950/20">
-        <CheckCircle className="mx-auto mb-4 h-10 w-10 text-green-600" />
-        <h2 className="font-heading text-2xl">REVISIÓN COMPLETADA</h2>
-        <p className="mt-2 text-sm text-muted-foreground">No quedan parejas de duplicados pendientes en este lote.</p>
-        <Button variant="outline" onClick={onRefresh} className="mt-5 rounded-sm">
-          <RefreshCw className="mr-2 h-4 w-4" />
-          Comprobar de nuevo
-        </Button>
-      </div>
-    );
-  }
-
-  const activeDuplicate = duplicates[activeIndex] || duplicates[0];
-  const isFirstDuplicate = activeIndex === 0;
-  const isLastDuplicate = activeIndex >= duplicates.length - 1;
-
-  const runDecision = async (key, action) => {
-    setDecision(key);
-    try {
-      await action();
-    } finally {
-      setDecision(null);
-    }
-  };
-
-  const handleDiscardDuplicate = () => runDecision("duplicate", async () => {
-    await onDelete(activeDuplicate.new_question.id);
-  });
-
-  const handleDiscardOriginal = () => runDecision("original", async () => {
-    if (!window.confirm("¿Seguro que quieres eliminar la pregunta anterior y conservar la nueva?")) {
-      return;
-    }
-    await onDelete(activeDuplicate.original_question.id);
-  });
-
-  const handleKeepBoth = () => runDecision("both", async () => {
-    await onKeep(activeDuplicate.new_question.id);
-  });
-
-  const handleDeleteBoth = () => runDecision("delete-both", async () => {
-    if (!window.confirm("¿Seguro que quieres eliminar ambas preguntas? Esta acción puede quitar una pregunta antigua.")) {
-      return;
-    }
-    await onDelete(activeDuplicate.new_question.id);
-    await onDelete(activeDuplicate.original_question.id);
-  });
-
-  return (
-    <div className="border border-border bg-card p-4 sm:p-6" data-testid="duplicate-review">
-      <div className="mb-6 flex flex-col gap-4 border-b border-border pb-5 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <div className="flex items-center gap-3">
-            <Copy className="h-6 w-6 text-destructive" />
-            <h2 className="font-heading text-2xl">COMPARAR DUPLICADOS</h2>
-            <Badge variant="destructive" className="rounded-sm">{duplicates.length}</Badge>
-          </div>
-          <p className="mt-2 text-sm text-muted-foreground">
-            Compara una pareja cada vez y decide qué preguntas deben continuar.
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="icon"
-            onClick={() => setActiveIndex((current) => Math.max(0, current - 1))}
-            disabled={isFirstDuplicate || Boolean(decision)}
-            title="Comparación anterior"
-          >
-            <ChevronLeft className="h-4 w-4" />
-          </Button>
-          <span className="min-w-[110px] text-center text-sm font-semibold">
-            {activeIndex + 1} de {duplicates.length}
-          </span>
-          <Button
-            variant="outline"
-            size="icon"
-            onClick={() => setActiveIndex((current) => Math.min(duplicates.length - 1, current + 1))}
-            disabled={isLastDuplicate || Boolean(decision)}
-            title="Comparación siguiente"
-          >
-            <ChevronRight className="h-4 w-4" />
-          </Button>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 items-stretch gap-4 lg:grid-cols-[minmax(0,1fr)_48px_minmax(0,1fr)]">
-        <DuplicateQuestionPanel
-          question={activeDuplicate.original_question}
-          label="ORIGINAL"
-          tone="original"
-          onDelete={handleDiscardOriginal}
-          deleting={decision === "original"}
-          busy={Boolean(decision)}
-        />
-
-        <div className="relative flex items-center justify-center" aria-hidden="true">
-          <div className="hidden h-full w-px bg-border lg:block" />
-          <span className="absolute bg-card px-2 text-xs font-bold text-muted-foreground">VS</span>
-        </div>
-
-        <DuplicateQuestionPanel
-          question={activeDuplicate.new_question}
-          label="POSIBLE DUPLICADA"
-          tone="duplicate"
-          onDelete={handleDiscardDuplicate}
-          deleting={decision === "duplicate"}
-          busy={Boolean(decision)}
-        />
-      </div>
-
-      <div className="mt-6 grid grid-cols-1 gap-3 border-t border-dashed border-border pt-5 sm:grid-cols-2">
-        <Button
-          size="lg"
-          onClick={handleKeepBoth}
-          disabled={Boolean(decision)}
-          className="rounded-sm bg-green-600 text-xs uppercase hover:bg-green-700"
-        >
-          {decision === "both" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Check className="mr-2 h-4 w-4" />}
-          No son duplicadas: conservar las dos
-        </Button>
-        <Button
-          variant="destructive"
-          size="lg"
-          onClick={handleDeleteBoth}
-          disabled={Boolean(decision)}
-          className="rounded-sm text-xs uppercase"
-        >
-          {decision === "delete-both" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Trash2 className="mr-2 h-4 w-4" />}
-          Eliminar las dos
-        </Button>
-      </div>
-
-      <p className="mt-4 text-center text-xs text-muted-foreground">
-        Al decidir, esta pareja desaparece y se muestra automáticamente la siguiente.
-      </p>
-    </div>
-  );
-};
 
 // Modal de búsqueda global
 const SearchModal = ({ open, onClose }) => {
@@ -1433,9 +1176,11 @@ export default function Editor({ workflowMode = null }) {
       requestAnimationFrame(() => {
         window.scrollTo(0, scrollY);
       });
+      return true;
     } catch (error) {
       console.error("Error deleting question:", error);
       toast.error("Error al eliminar pregunta");
+      return false;
     }
   };
 
@@ -1449,8 +1194,11 @@ export default function Editor({ workflowMode = null }) {
       ));
       setDuplicates(prev => prev.filter(d => d.new_question.id !== questionId));
       toast.success("Pregunta mantenida");
+      return true;
     } catch (error) {
       console.error("Error clearing duplicate:", error);
+      toast.error("No se pudo guardar la decisión");
+      return false;
     }
   };
 
@@ -2353,6 +2101,7 @@ export default function Editor({ workflowMode = null }) {
       {/* Questions List */}
       {duplicateReviewActive ? (
         <DuplicateReview
+          key={selectedBatch}
           duplicates={duplicates}
           loading={loadingDuplicatePairs}
           onDelete={handleDeleteQuestion}
