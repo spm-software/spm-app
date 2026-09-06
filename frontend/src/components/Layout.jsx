@@ -41,7 +41,7 @@ const workflowSteps = [
   { key: "names", label: "Nombres", path: "/flujo/nombres", description: "Actualizar autores", actionTestId: "update-names-button", actionLabel: "Actualizar nombres" },
   { key: "confirm_names", label: "Confirmar nombres", path: "/flujo/confirmar-nombres", description: "Validar nombres derivados", actionTestId: "confirm-derived-names-button", actionLabel: "Confirmar nombres" },
   { key: "duplicates_fast", label: "Duplicados rápido", path: "/flujo/duplicados-rapido", description: "Buscar coincidencias exactas", actionTestId: "check-duplicates-button", actionLabel: "Duplicados rápido" },
-  { key: "duplicates_ai", label: "Duplicados IA", path: "/flujo/duplicados-ia", description: "Buscar coincidencias semánticas", actionTestId: "check-duplicates-ai-button", actionLabel: "Buscar con IA" },
+  { key: "duplicates_ai", label: "Duplicados IA", path: "/flujo/duplicados-ia", description: "Buscar coincidencias semánticas", actionTestId: "check-duplicates-ai-button", actionLabel: "Buscar con IA", inlineActionOnly: true },
   { key: "review_duplicates", label: "Revisar duplicados", path: "/flujo/revisar-duplicados", description: "Aceptar o mantener", viewOnly: true, actionLabel: "Ver duplicados" },
   { key: "spelling", label: "Ortografía", path: "/flujo/ortografia", description: "Corregir preguntas finales", actionTestId: "correct-all-button", actionLabel: "Corregir" },
   { key: "reserve", label: "Reserva", path: "/flujo/reserva", description: "Incluir pendientes a mano", reserve: true, actionTestId: "open-reserve-button", actionLabel: "Ver reserva" },
@@ -340,7 +340,7 @@ export default function Layout() {
                   );
                 })}
               </div>
-              <button
+              {!currentStep.inlineActionOnly && <button
                 type="button"
                 onClick={runCurrentWorkflowStep}
                 className={cn(
@@ -353,7 +353,7 @@ export default function Layout() {
               >
                 {currentStep.actionLabel || "Siguiente"}
                 <ArrowRight className="h-3.5 w-3.5" />
-              </button>
+              </button>}
               <button
                 type="button"
                 onClick={() => goToWorkflowStep(workflowIndex + 1)}
