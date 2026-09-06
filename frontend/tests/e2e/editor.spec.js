@@ -11,7 +11,7 @@ test("loads questions and classification controls", async ({ page }) => {
 
   await expect(page.getByTestId("classification-model-select")).toContainText("GPT-5.4 Mini");
   await expect(page.getByTestId("question-card-q2")).toContainText("@pedro");
-  await expect(page.getByTestId("ready-counter")).toContainText("1");
+  await expect(page.getByTestId("accepted-count")).toContainText("1");
   await expect(page.getByTestId("filter-pill-pregunta")).toBeVisible();
 
   await page.getByTestId("filter-pill-all").click();

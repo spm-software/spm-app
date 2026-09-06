@@ -60,6 +60,9 @@ export const getNameState = (q) => {
 };
 
 const isGreetingQuestion = (q) => q?.is_greeting === true || q?.clasificacion === "saludo";
+const isAcceptedQuestion = (q) => (
+  q?.clasificacion === "pregunta" && !q?.is_duplicate && !isGreetingQuestion(q)
+);
 
 const AiModelSelect = ({ value, onValueChange, disabled, testId }) => (
   <div className="flex items-center gap-2">
@@ -510,7 +513,7 @@ export default function Editor({ workflowMode = null }) {
     typeof window !== "undefined"
       ? sessionStorage.getItem('editorAssignmentFilter') || "all"
       : "all"
-  )); // "all" | "included" | "reserve" | "unassigned"
+  )); // "all" | "accepted" | "included" | "reserve" | "unassigned"
   const [clasificationFilter, setClasificationFilter] = useState("dudoso"); // "all" | "pregunta" | "dudoso" | "saludo"
   const [clasifying, setClasifying] = useState(false);
   const [clasifyProgress, setClasifyProgress] = useState({ current: 0, total: 0, percentage: 0 });
@@ -861,6 +864,14 @@ export default function Editor({ workflowMode = null }) {
         setShowOnlyDuplicates(true);
       }
 
+      if (detail.key === "duplicates_fast" || detail.key === "duplicates_ai") {
+        setAssignmentFilter("accepted");
+        setClasificationFilter("all");
+        setShowOnlyDuplicates(false);
+        setShowOnlyNoName(false);
+        setShowOnlyUnconfirmedNames(false);
+      }
+
       if (detail.key === "spelling") {
         setAssignmentFilter("all");
         setClasificationFilter("pregunta");
@@ -917,6 +928,15 @@ export default function Editor({ workflowMode = null }) {
       setShowOnlyNoName(false);
       setShowOnlyUnconfirmedNames(false);
       setShowOnlyDuplicates(true);
+      return;
+    }
+
+    if (workflowMode === "duplicates_fast" || workflowMode === "duplicates_ai") {
+      setAssignmentFilter("accepted");
+      setClasificationFilter("all");
+      setShowOnlyDuplicates(false);
+      setShowOnlyNoName(false);
+      setShowOnlyUnconfirmedNames(false);
       return;
     }
 
@@ -1351,27 +1371,22 @@ export default function Editor({ workflowMode = null }) {
     if (!question.program_id) return "unassigned";
     return reserveProgramIds.has(question.program_id) ? "reserve" : "included";
   };
-  const includedCount = questions.filter(q => getAssignmentState(q) === "included").length;
-  const reserveCount = questions.filter(q => getAssignmentState(q) === "reserve").length;
-  const unassignedCount = questions.filter(q => getAssignmentState(q) === "unassigned").length;
+  const acceptedQuestions = questions.filter(isAcceptedQuestion);
+  const usesAcceptedProgramFilters = workflowMode === "duplicates_fast" || workflowMode === "duplicates_ai";
+  const programFilterQuestions = usesAcceptedProgramFilters ? acceptedQuestions : questions;
+  const includedCount = programFilterQuestions.filter(q => getAssignmentState(q) === "included").length;
+  const reserveCount = programFilterQuestions.filter(q => getAssignmentState(q) === "reserve").length;
+  const unassignedCount = programFilterQuestions.filter(q => getAssignmentState(q) === "unassigned").length;
   const ownBatchQuestions = globalReserveMode
     ? questions
     : questions.filter(q => q.import_batch_id === selectedBatch);
-  const selectedBatchRecordCount = batches.find(batch => batch.id === selectedBatch)?.question_count
-    ?? ownBatchQuestions.length;
-  const visibleConfirmedCount = questions.filter(q =>
-    q.clasificacion === "pregunta" && !q.is_duplicate && !isGreetingQuestion(q)
-  ).length;
-  const ownConfirmedCount = ownBatchQuestions.filter(q =>
-    q.clasificacion === "pregunta" && !q.is_duplicate && !isGreetingQuestion(q)
-  ).length;
+  const visibleConfirmedCount = acceptedQuestions.length;
+  const ownConfirmedCount = ownBatchQuestions.filter(isAcceptedQuestion).length;
   const externalVisibleCount = globalReserveMode
     ? 0
     : questions.filter(q => q.import_batch_id && q.import_batch_id !== selectedBatch).length;
   const unclassifiedVisibleCount = questions.filter(q => !q.clasificacion).length;
-  const distributableQuestions = questions.filter(q =>
-    q.clasificacion === "pregunta" && !q.is_duplicate && !isGreetingQuestion(q)
-  );
+  const distributableQuestions = acceptedQuestions;
 
   const createQuestionSnapshot = (question) => ({
     id: question.id,
@@ -1521,12 +1536,7 @@ export default function Editor({ workflowMode = null }) {
   const showSpellingActions = showAllActions || workflowMode === "spelling";
   const showReserveActions = showAllActions || workflowMode === "reserve";
   const isSpellingWorkflow = workflowMode === "spelling";
-  const acceptedPendingCorrectionCount = questions.filter(q =>
-    q.clasificacion === "pregunta"
-    && !q.is_duplicate
-    && !isGreetingQuestion(q)
-    && !q.is_corrected
-  ).length;
+  const acceptedPendingCorrectionCount = acceptedQuestions.filter(q => !q.is_corrected).length;
 
   return (
     <div className="p-6 md:p-10 animate-fade-in">
@@ -1825,11 +1835,7 @@ export default function Editor({ workflowMode = null }) {
 
         {isSpellingWorkflow ? (
           <div className="flex flex-wrap items-center gap-5 text-sm" data-testid="spelling-summary">
-            <div className="flex items-center gap-2">
-              <div className="w-3 h-3 rounded-full bg-slate-400" />
-              <span><strong>{selectedBatchRecordCount}</strong> comentarios del lote</span>
-            </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2" data-testid="accepted-count">
               <div className="w-3 h-3 rounded-full bg-green-500" />
               <span><strong>{visibleConfirmedCount}</strong> preguntas aceptadas</span>
             </div>
@@ -1841,14 +1847,14 @@ export default function Editor({ workflowMode = null }) {
           </div>
         ) : (
         <div className="flex items-center gap-6 text-sm">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2" data-testid="accepted-count">
             <div className="w-3 h-3 rounded-full bg-green-500" />
-            <span><strong>{visibleConfirmedCount}</strong> confirmadas visibles</span>
+            <span><strong>{visibleConfirmedCount}</strong> preguntas aceptadas</span>
           </div>
-          {!globalReserveMode && (
+          {externalVisibleCount > 0 && (
             <div className="flex items-center gap-2">
               <div className="w-3 h-3 rounded-full bg-blue-500" />
-              <span><strong>{ownConfirmedCount}</strong> confirmadas del lote</span>
+              <span><strong>{ownConfirmedCount}</strong> aceptadas del lote</span>
             </div>
           )}
           {externalVisibleCount > 0 && (
@@ -1863,9 +1869,9 @@ export default function Editor({ workflowMode = null }) {
               <span><strong>{unclassifiedVisibleCount}</strong> sin clasificar</span>
             </div>
           )}
-          <div className="flex items-center gap-2">
-            <div className="w-3 h-3 rounded-full bg-emerald-500" />
-            <span><strong>{distributableQuestions.length}</strong> distribuibles visibles</span>
+          <div className="flex items-center gap-2" data-testid="total-count">
+            <div className="w-3 h-3 rounded-full bg-foreground" />
+            <span><strong>{questions.length}</strong> total</span>
           </div>
           {(() => {
             const unconfirmedNameCount = questions.filter(q => getNameState(q) !== "confirmed").length;
@@ -1996,11 +2002,13 @@ export default function Editor({ workflowMode = null }) {
         </span>
         {[
           {
-            value: "all",
-            label: "Todas visibles",
-            count: questions.length,
+            value: usesAcceptedProgramFilters ? "accepted" : "all",
+            label: usesAcceptedProgramFilters ? "Aceptadas para programas" : "Todas visibles",
+            count: usesAcceptedProgramFilters ? distributableQuestions.length : questions.length,
             dot: "bg-foreground",
-            title: "Muestra todas las preguntas cargadas en esta vista"
+            title: usesAcceptedProgramFilters
+              ? "Preguntas aceptadas que pueden incluirse en programas"
+              : "Muestra todas las preguntas cargadas en esta vista"
           },
           {
             value: "included",
@@ -2046,25 +2054,6 @@ export default function Editor({ workflowMode = null }) {
           </button>
         ))}
       </div>
-
-      {/* Ready-to-process counter */}
-      {questions.some(q => q.clasificacion) && (
-        <div
-          className="mb-4 p-3 bg-green-50 border border-green-200 rounded-sm flex items-center gap-3"
-          data-testid="ready-counter"
-        >
-          <CheckCircle className="w-4 h-4 text-green-600 flex-shrink-0" />
-          <p className="text-sm text-green-800">
-            <span className="font-semibold">
-              {visibleConfirmedCount}
-            </span>{" "}
-            comentarios listos para procesar{" "}
-            <span className="text-green-600">
-              ({ownConfirmedCount} del lote{externalVisibleCount > 0 ? ` + ${externalVisibleCount} de otros lotes visibles` : ""})
-            </span>
-          </p>
-        </div>
-      )}
 
       {/* Classification Filter Pills */}
       {questions.some(q => q.clasificacion) && (
@@ -2141,8 +2130,13 @@ export default function Editor({ workflowMode = null }) {
           (() => {
             // Apply filters (uses centralized getNameState for consistency)
             let filteredQuestions = questions;
-            if (assignmentFilter !== "all") {
+            if (assignmentFilter === "accepted") {
+              filteredQuestions = filteredQuestions.filter(isAcceptedQuestion);
+            } else if (assignmentFilter !== "all") {
               filteredQuestions = filteredQuestions.filter(q => getAssignmentState(q) === assignmentFilter);
+              if (usesAcceptedProgramFilters) {
+                filteredQuestions = filteredQuestions.filter(isAcceptedQuestion);
+              }
             }
             if (showOnlyDuplicates) {
               filteredQuestions = filteredQuestions.filter(q => q.is_duplicate);
