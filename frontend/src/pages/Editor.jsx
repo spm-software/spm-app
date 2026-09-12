@@ -957,10 +957,10 @@ export default function Editor({ workflowMode = null }) {
   const filterUnconfirmedNames = showOnlyUnconfirmedNames || nameReviewActive;
 
   useEffect(() => {
-    if (duplicateReviewActive && selectedBatch && !globalReserveMode) {
+    if ((duplicateReviewActive || workflowMode === "duplicates_fast") && selectedBatch && !globalReserveMode) {
       fetchDuplicatePairs();
     }
-  }, [duplicateReviewActive, selectedBatch, globalReserveMode, fetchDuplicatePairs]);
+  }, [duplicateReviewActive, workflowMode, selectedBatch, globalReserveMode, fetchDuplicatePairs]);
 
   const handleCorrectAll = async () => {
     setCorrecting(true);
@@ -1044,19 +1044,16 @@ export default function Editor({ workflowMode = null }) {
   const handleCheckDuplicates = async () => {
     setCheckingDuplicates(true);
     try {
-      const response = await axios.post(`${API}/questions/check-duplicates/${selectedBatch}`);
-      if (response.data.duplicates.length > 0) {
-        if (duplicateReviewActive) {
-          await fetchDuplicatePairs();
-        } else {
-          setShowOnlyDuplicates(true);
-        }
-        toast.info(`${response.data.duplicates_count} duplicados encontrados`);
+      await axios.post(`${API}/questions/check-duplicates/${selectedBatch}`);
+      await fetchQuestions();
+      const pendingPairs = await fetchDuplicatePairs();
+      if (pendingPairs.length > 0) {
+        setShowOnlyDuplicates(true);
+        toast.info(`${pendingPairs.length} posibles duplicados para revisar`);
       } else {
         setDuplicates([]);
         toast.success("No se encontraron duplicados");
       }
-      await fetchQuestions();
     } catch (error) {
       console.error("Error checking duplicates:", error);
       toast.error("Error al buscar duplicados");
@@ -1359,6 +1356,9 @@ export default function Editor({ workflowMode = null }) {
   const ownBatchQuestions = globalReserveMode
     ? questions
     : questions.filter(q => q.import_batch_id === selectedBatch);
+  const selectedBatchData = batches.find(batch => batch.id === selectedBatch);
+  const importedQuestionCount = selectedBatchData?.question_count ?? ownBatchQuestions.length;
+  const possibleDuplicateCount = duplicates.length;
   const visibleConfirmedCount = acceptedQuestions.length;
   const ownConfirmedCount = ownBatchQuestions.filter(isAcceptedQuestion).length;
   const externalVisibleCount = globalReserveMode
@@ -1517,6 +1517,7 @@ export default function Editor({ workflowMode = null }) {
   const isClassifyWorkflow = workflowMode === "classify";
   const isDoubtfulWorkflow = workflowMode === "review_doubtful";
   const isSpellingWorkflow = workflowMode === "spelling";
+  const isFastDuplicateWorkflow = workflowMode === "duplicates_fast";
   const acceptedPendingCorrectionCount = acceptedQuestions.filter(q => !q.is_corrected).length;
 
   return (
@@ -1817,6 +1818,17 @@ export default function Editor({ workflowMode = null }) {
             <div className="w-4 h-4 rounded-full bg-amber-500" />
             <span><strong>{doubtfulVisibleCount}</strong> dudosas</span>
           </div>
+        ) : isFastDuplicateWorkflow ? (
+          <div className="flex flex-wrap items-center gap-6 text-sm" data-testid="fast-duplicate-summary">
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 rounded-full bg-foreground" />
+              <span><strong>{importedQuestionCount}</strong> preguntas importadas</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className={`w-3 h-3 rounded-full ${possibleDuplicateCount > 0 ? "bg-amber-500" : "bg-slate-300"}`} />
+              <span><strong>{possibleDuplicateCount}</strong> posibles duplicados</span>
+            </div>
+          </div>
         ) : (
         <div className="flex items-center gap-6 text-sm">
           <div className="flex items-center gap-2" data-testid="accepted-count">
@@ -1965,7 +1977,7 @@ export default function Editor({ workflowMode = null }) {
         </div>
       )}
 
-      {!duplicateReviewActive && !isSpellingWorkflow && !isClassifyWorkflow && !isDoubtfulWorkflow && (
+      {!duplicateReviewActive && !isSpellingWorkflow && !isClassifyWorkflow && !isDoubtfulWorkflow && !isFastDuplicateWorkflow && (
         <>
       {/* Assignment Filter */}
       <div className="flex items-center gap-2 mb-6 flex-wrap" data-testid="assignment-filters">

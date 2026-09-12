@@ -3568,13 +3568,32 @@ async def cleanup_clasificacion_task(task_id: str):
 
 # ----- DUPLICATES -----
 
+async def get_batch_duplicate_scope(batch_id: str) -> Dict:
+    """Questions imported in the batch plus reserve questions moved into its programs."""
+    programs = await db.programs.find(
+        {"batch_id": batch_id},
+        {"id": 1, "_id": 0},
+    ).to_list(100)
+    program_ids = [program["id"] for program in programs if program.get("id")]
+    scope = [{"import_batch_id": batch_id}]
+    if program_ids:
+        scope.append({"program_id": {"$in": program_ids}})
+    return {"$or": scope}
+
+
 @api_router.post("/questions/check-duplicates/{batch_id}")
 async def check_duplicates(batch_id: str):
     """Check for duplicate questions in batch and ALL history, accent and case insensitive"""
+    duplicate_scope = await get_batch_duplicate_scope(batch_id)
     questions = await db.questions.find(
-        {"import_batch_id": batch_id, "is_greeting": {"$ne": True}},
+        {
+            **duplicate_scope,
+            "is_greeting": {"$ne": True},
+            "clasificacion": {"$ne": "saludo"},
+        },
         {"_id": 0}
-    ).to_list(500)
+    ).to_list(2000)
+    candidate_ids = [question["id"] for question in questions]
 
     # Get current batch info for the "new" questions
     current_batch = await db.import_batches.find_one(
@@ -3639,8 +3658,8 @@ async def check_duplicates(batch_id: str):
             history_questions = await db.questions.find(
                 {
                     "is_greeting": {"$ne": True},
-                    "import_batch_id": {"$ne": batch_id},
-                    "id": {"$ne": q["id"]}
+                    "clasificacion": {"$ne": "saludo"},
+                    "id": {"$nin": candidate_ids},
                 },
                 {"_id": 0}
             ).to_list(5000)
@@ -3792,9 +3811,10 @@ def _duplicate_question_payload(question: Dict, batches_by_id: Dict[str, Dict]) 
 @api_router.get("/questions/duplicate-pairs/{batch_id}")
 async def get_duplicate_pairs(batch_id: str):
     """Return persisted duplicate pairs for a batch, including comparison metadata."""
+    duplicate_scope = await get_batch_duplicate_scope(batch_id)
     duplicate_questions = await db.questions.find(
         {
-            "import_batch_id": batch_id,
+            **duplicate_scope,
             "is_duplicate": True,
             "duplicate_of": {"$ne": None},
         },
