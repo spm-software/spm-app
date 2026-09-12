@@ -3001,7 +3001,8 @@ async def get_questions(
     batch_id: Optional[str] = None,
     program_id: Optional[str] = None,
     include_greetings: bool = False,
-    include_program_assignments: bool = False
+    include_program_assignments: bool = False,
+    include_assigned_duplicates: bool = False,
 ):
     query = {}
     if program_id:
@@ -3014,12 +3015,14 @@ async def get_questions(
         program_ids = [p["id"] for p in programs if p.get("id")]
         query["$or"] = [{"import_batch_id": batch_id}]
         if program_ids:
-            query["$or"].append({
+            assigned_query = {
                 "program_id": {"$in": program_ids},
                 "import_batch_id": {"$ne": batch_id},
                 "clasificacion": "pregunta",
-                "is_duplicate": {"$ne": True},
-            })
+            }
+            if not include_assigned_duplicates:
+                assigned_query["is_duplicate"] = {"$ne": True}
+            query["$or"].append(assigned_query)
     elif batch_id:
         query["import_batch_id"] = batch_id
     if not include_greetings:
@@ -3589,7 +3592,7 @@ async def check_duplicates(batch_id: str):
         {
             **duplicate_scope,
             "is_greeting": {"$ne": True},
-            "clasificacion": {"$ne": "saludo"},
+            "clasificacion": "pregunta",
         },
         {"_id": 0}
     ).to_list(2000)
@@ -3815,6 +3818,7 @@ async def get_duplicate_pairs(batch_id: str):
     duplicate_questions = await db.questions.find(
         {
             **duplicate_scope,
+            "clasificacion": "pregunta",
             "is_duplicate": True,
             "duplicate_of": {"$ne": None},
         },

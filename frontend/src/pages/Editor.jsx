@@ -597,7 +597,11 @@ export default function Editor({ workflowMode = null }) {
       const response = globalReserveMode
         ? await axios.get(`${API}/questions/reserve`)
         : await axios.get(`${API}/questions`, {
-            params: { batch_id: selectedBatch, include_program_assignments: true }
+            params: {
+              batch_id: selectedBatch,
+              include_program_assignments: true,
+              include_assigned_duplicates: workflowMode === "duplicates_fast",
+            }
           });
       setQuestions(response.data);
     } catch (error) {
@@ -605,7 +609,7 @@ export default function Editor({ workflowMode = null }) {
     } finally {
       setLoading(false);
     }
-  }, [selectedBatch, globalReserveMode]);
+  }, [selectedBatch, globalReserveMode, workflowMode]);
 
   const fetchDuplicatePairs = useCallback(async () => {
     if (!selectedBatch || globalReserveMode) {
@@ -1356,8 +1360,9 @@ export default function Editor({ workflowMode = null }) {
   const ownBatchQuestions = globalReserveMode
     ? questions
     : questions.filter(q => q.import_batch_id === selectedBatch);
-  const selectedBatchData = batches.find(batch => batch.id === selectedBatch);
-  const importedQuestionCount = selectedBatchData?.question_count ?? ownBatchQuestions.length;
+  const classifiedAndReserveCount = questions.filter(q => (
+    q.clasificacion === "pregunta" && !isGreetingQuestion(q)
+  )).length;
   const possibleDuplicateCount = duplicates.length;
   const visibleConfirmedCount = acceptedQuestions.length;
   const ownConfirmedCount = ownBatchQuestions.filter(isAcceptedQuestion).length;
@@ -1822,7 +1827,7 @@ export default function Editor({ workflowMode = null }) {
           <div className="flex flex-wrap items-center gap-6 text-sm" data-testid="fast-duplicate-summary">
             <div className="flex items-center gap-2">
               <div className="w-3 h-3 rounded-full bg-foreground" />
-              <span><strong>{importedQuestionCount}</strong> preguntas importadas</span>
+              <span><strong>{classifiedAndReserveCount}</strong> preguntas tras clasificación y Reserva</span>
             </div>
             <div className="flex items-center gap-2">
               <div className={`w-3 h-3 rounded-full ${possibleDuplicateCount > 0 ? "bg-amber-500" : "bg-slate-300"}`} />
