@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -22,7 +22,8 @@ import {
   Filter,
   Copy,
   Wand2,
-  ClipboardCheck
+  ClipboardCheck,
+  RefreshCw
 } from "lucide-react";
 import {
   AlertDialog,
@@ -54,6 +55,9 @@ export default function Dashboard() {
   const [editingNameId, setEditingNameId] = useState(null);
   const [editingNameValue, setEditingNameValue] = useState("");
 
+  const pullStartY = useRef(null);
+  const [pullDistance, setPullDistance] = useState(0);
+  const [refreshing, setRefreshing] = useState(false);
   useEffect(() => {
     fetchData();
   }, []);
@@ -66,11 +70,40 @@ export default function Dashboard() {
       ]);
       setStats(statsRes.data);
       setBatches(batchesRes.data);
+      return true;
     } catch (error) {
       console.error("Error fetching dashboard data:", error);
+      return false;
     } finally {
       setLoading(false);
     }
+  };
+
+  const handlePullStart = (event) => {
+    const main = document.querySelector(".app-main");
+    if (!refreshing && main?.scrollTop === 0) {
+      pullStartY.current = event.touches[0].clientY;
+    }
+  };
+
+  const handlePullMove = (event) => {
+    if (pullStartY.current === null || refreshing) return;
+
+    const distance = event.touches[0].clientY - pullStartY.current;
+    setPullDistance(distance > 0 ? Math.min(distance * 0.45, 88) : 0);
+  };
+
+  const handlePullEnd = async () => {
+    const shouldRefresh = pullDistance >= 56;
+    pullStartY.current = null;
+    setPullDistance(0);
+
+    if (!shouldRefresh || refreshing) return;
+
+    setRefreshing(true);
+    const updated = await fetchData();
+    setRefreshing(false);
+    if (updated) toast.success("Dashboard actualizado");
   };
 
   const handleDeleteBatch = async (batchId) => {
@@ -207,7 +240,21 @@ export default function Dashboard() {
   }
 
   return (
-    <div className="p-8 md:p-12 animate-fade-in">
+    <div
+      className="relative p-8 md:p-12 animate-fade-in"
+      onTouchStart={handlePullStart}
+      onTouchMove={handlePullMove}
+      onTouchEnd={handlePullEnd}
+      onTouchCancel={handlePullEnd}
+    >
+      <div
+        className={`pointer-events-none absolute left-1/2 top-1 z-10 flex -translate-x-1/2 items-center gap-2 rounded-full border border-border bg-card px-3 py-1.5 text-xs font-medium text-muted-foreground shadow-sm transition-all md:hidden ${pullDistance > 0 || refreshing ? "opacity-100" : "opacity-0"}`}
+        style={{ transform: `translate(-50%, ${pullDistance}px)` }}
+        aria-live="polite"
+      >
+        <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? "animate-spin" : ""}`} />
+        <span>{refreshing ? "Actualizando..." : "Suelta para actualizar"}</span>
+      </div>
       {/* Header */}
       <div className="mb-12">
         <h1 className="font-heading text-4xl sm:text-5xl font-bold tracking-tight mb-2">
