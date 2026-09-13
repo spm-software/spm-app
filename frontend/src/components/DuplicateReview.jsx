@@ -78,8 +78,8 @@ export default function DuplicateReview({ duplicates, loading, onDelete, onKeep,
   const processed = rows.filter((row) => row.result?.ok && !pending.has(pairKey(row.pair))).length;
 
   return (
-    <section data-testid="duplicate-review" className="border-y border-border">
-      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-border py-4">
+    <section data-testid="duplicate-review" className="max-h-[calc(100vh-15rem)] overflow-y-auto border-y border-border">
+      <header className="sticky top-0 z-10 flex flex-wrap items-center justify-between gap-3 border-b border-border bg-background px-3 py-4 sm:px-5">
         <div className="flex flex-wrap items-center gap-3">
           <Copy className="h-5 w-5 text-primary" />
           <h2 className="font-heading text-2xl">COMPARAR DUPLICADOS</h2>
@@ -101,7 +101,7 @@ export default function DuplicateReview({ duplicates, loading, onDelete, onKeep,
             key={key}
             ref={(node) => { if (node) elements.current.set(key, node); else elements.current.delete(key); }}
             data-testid={`duplicate-pair-${pair.new_question.id}`}
-            className={`border-b border-border px-3 py-5 sm:px-5 ${status?.ok ? "bg-green-50 dark:bg-green-950/30" : "odd:bg-muted/20"}`}
+            className={`border-b border-border px-3 py-5 transition-opacity sm:px-5 ${status?.ok ? "bg-green-50 opacity-60 dark:bg-green-950/30" : "odd:bg-muted/20"}`}
           >
             <div className="mb-4 flex min-h-8 flex-wrap items-center gap-2 text-sm">
               <span className="font-semibold">Pareja {index + 1}</span>
@@ -113,18 +113,15 @@ export default function DuplicateReview({ duplicates, loading, onDelete, onKeep,
               <Question question={pair.original_question} label="Original" />
               <Question question={pair.new_question} label="Posible duplicada" />
             </div>
-            <div className="mt-5 flex flex-wrap gap-2">
-              <Button disabled={!isPending || Boolean(busy) || loading} variant="destructive" className="h-auto min-h-10 whitespace-normal rounded-sm" onClick={() => decide(pair, "duplicate")}>
-                {isBusy ? <Loader2 className="mr-2 h-4 w-4 shrink-0 animate-spin" /> : <Trash2 className="mr-2 h-4 w-4 shrink-0" />}Eliminar duplicada
-              </Button>
-              <Button variant="destructive" disabled={!isPending || Boolean(busy) || loading} className="h-auto min-h-10 whitespace-normal rounded-sm" onClick={() => decide(pair, "original")}>
-                <Trash2 className="mr-2 h-4 w-4 shrink-0" />Eliminar original
-              </Button>
+            <div className="mt-5 flex flex-wrap items-center gap-2">
               <Button disabled={!isPending || Boolean(busy) || loading} className="h-auto min-h-10 whitespace-normal rounded-sm bg-green-700 text-white hover:bg-green-800" onClick={() => decide(pair, "keep")}>
-                <Check className="mr-2 h-4 w-4 shrink-0" />Conservar las dos
+                {isBusy ? <Loader2 className="mr-2 h-4 w-4 shrink-0 animate-spin" /> : <Check className="mr-2 h-4 w-4 shrink-0" />}Conservar ambas
+              </Button>
+              <Button disabled={!isPending || Boolean(busy) || loading} className="h-auto min-h-10 whitespace-normal rounded-sm bg-orange-600 text-white hover:bg-orange-700" onClick={() => decide(pair, "duplicate")}>
+                <Trash2 className="mr-2 h-4 w-4 shrink-0" />Borrar más nueva
               </Button>
               <Button variant="destructive" disabled={!isPending || Boolean(busy) || loading} className="h-auto min-h-10 whitespace-normal rounded-sm" onClick={() => decide(pair, "both")}>
-                <Trash2 className="mr-2 h-4 w-4 shrink-0" />Eliminar las dos
+                <Trash2 className="mr-2 h-4 w-4 shrink-0" />Borrar ambas
               </Button>
             </div>
             <details className="mt-3 text-sm">

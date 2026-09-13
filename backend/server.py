@@ -120,6 +120,7 @@ class QuestionUpdate(BaseModel):
     corrected_text: Optional[str] = None
     is_greeting: Optional[bool] = None
     is_duplicate: Optional[bool] = None
+    duplicate_of: Optional[str] = None
     real_name: Optional[str] = None
     real_name_confirmed: Optional[bool] = None
     clasificacion: Optional[str] = None
@@ -128,6 +129,15 @@ class QuestionUpdate(BaseModel):
     youtube_video_title: Optional[str] = None
     youtube_channel_id: Optional[str] = None
     youtube_channel_title: Optional[str] = None
+
+class DuplicateLinkRestore(BaseModel):
+    id: str
+    is_duplicate: bool
+    duplicate_of: Optional[str] = None
+
+class QuestionRestoreRequest(BaseModel):
+    question: Question
+    duplicate_links: List[DuplicateLinkRestore] = Field(default_factory=list)
 
 class Program(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -3164,6 +3174,34 @@ async def delete_question(question_id: str):
     )
 
     return {"message": "Pregunta eliminada", "remaining_in_batch": remaining if batch_id else 0}
+
+
+@api_router.post("/questions/restore")
+async def restore_question(data: QuestionRestoreRequest):
+    """Restore a question deleted from the editor and its duplicate links."""
+    existing = await db.questions.find_one({"id": data.question.id}, {"_id": 1})
+    if existing:
+        raise HTTPException(status_code=409, detail="La pregunta ya existe")
+
+    document = data.question.model_dump()
+    document["created_at"] = serialize_datetime(document["created_at"])
+    await db.questions.insert_one(document)
+
+    for link in data.duplicate_links:
+        await db.questions.update_one(
+            {"id": link.id},
+            {"$set": {"is_duplicate": link.is_duplicate, "duplicate_of": link.duplicate_of}},
+        )
+
+    batch_id = data.question.import_batch_id
+    if batch_id:
+        question_count = await db.questions.count_documents({"import_batch_id": batch_id})
+        await db.import_batches.update_one(
+            {"id": batch_id},
+            {"$set": {"question_count": question_count}},
+        )
+
+    return {"message": "Pregunta restaurada"}
 
 
 @api_router.get("/questions/by-id/{question_id}")

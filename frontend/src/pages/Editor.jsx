@@ -722,7 +722,12 @@ export default function Editor({ workflowMode = null }) {
 
       if (job.batch_id === selectedBatchRef.current) {
         await fetchQuestions();
-        if (job.type === "duplicates") await fetchDuplicatePairs();
+        if (job.type === "duplicates") {
+          const pendingPairs = await fetchDuplicatePairs();
+          if (job.status === "completed" && pendingPairs.length > 0) {
+            setShowOnlyDuplicates(true);
+          }
+        }
       }
     };
 
@@ -992,12 +997,14 @@ export default function Editor({ workflowMode = null }) {
   };
 
   const handleUpdateNames = async () => {
+    const snapshots = questions.map(createQuestionSnapshot);
     const scrollY = window.scrollY;
     setUpdatingNames(true);
     setNameUpdateResult(null);
     try {
       const response = await axios.post(`${API}/questions/update-names/${selectedBatch}`);
       const result = response.data;
+      pushQuestionUndo("Actualizar nombres", snapshots);
       const resolution = result.name_resolution;
       setNameUpdateResult(result);
       if (resolution?.unresolved_count > 0) {
@@ -1046,9 +1053,11 @@ export default function Editor({ workflowMode = null }) {
   };
 
   const handleCheckDuplicates = async () => {
+    const snapshots = questions.map(createQuestionSnapshot);
     setCheckingDuplicates(true);
     try {
       await axios.post(`${API}/questions/check-duplicates/${selectedBatch}`);
+      pushQuestionUndo("Buscar duplicados rapido", snapshots);
       await fetchQuestions();
       const pendingPairs = await fetchDuplicatePairs();
       if (pendingPairs.length > 0) {
@@ -1184,8 +1193,24 @@ export default function Editor({ workflowMode = null }) {
 
   const handleDeleteQuestion = async (questionId) => {
     const scrollY = window.scrollY;
+    const deletedQuestion = questions.find(q => q.id === questionId);
+    const duplicateLinks = questions
+      .filter(q => q.duplicate_of === questionId)
+      .map(q => ({
+        id: q.id,
+        is_duplicate: q.is_duplicate,
+        duplicate_of: q.duplicate_of,
+      }));
     try {
       await axios.delete(`${API}/questions/${questionId}`);
+      if (deletedQuestion) {
+        pushUndo(undoScope, {
+          type: "deleted_question",
+          label: "Eliminar pregunta",
+          question: createQuestionSnapshot(deletedQuestion),
+          duplicateLinks,
+        });
+      }
       setQuestions(prev => prev
         .filter(q => q.id !== questionId)
         .map(q => q.duplicate_of === questionId
@@ -1230,6 +1255,13 @@ export default function Editor({ workflowMode = null }) {
   const handleAcceptQuestion = async (question) => {
     try {
       const updates = { is_corrected: true };
+      if (workflowMode === "review_doubtful") {
+        Object.assign(updates, {
+          clasificacion: "pregunta",
+          motivo_clasificacion: "Confirmada manualmente",
+          is_greeting: false,
+        });
+      }
       if (!question.corrected_text) {
         updates.corrected_text = question.original_text;
       }
@@ -1379,8 +1411,11 @@ export default function Editor({ workflowMode = null }) {
     youtube_comment_id: question.youtube_comment_id,
     youtube_video_id: question.youtube_video_id,
     youtube_video_title: question.youtube_video_title,
+    youtube_channel_id: question.youtube_channel_id,
+    youtube_channel_title: question.youtube_channel_title,
     real_name: question.real_name,
     real_name_confirmed: question.real_name_confirmed,
+    real_name_source: question.real_name_source,
     original_text: question.original_text,
     corrected_text: question.corrected_text,
     is_corrected: question.is_corrected,
@@ -1392,6 +1427,8 @@ export default function Editor({ workflowMode = null }) {
     order_in_program: question.order_in_program,
     clasificacion: question.clasificacion,
     motivo_clasificacion: question.motivo_clasificacion,
+    created_at: question.created_at,
+    import_batch_id: question.import_batch_id,
   });
 
   const pushQuestionUndo = (label, snapshots) => {
@@ -1477,6 +1514,11 @@ export default function Editor({ workflowMode = null }) {
         await axios.post(`${API}/questions/${action.questionId}/move`, {
           target_program_id: action.fromProgramId
         });
+      } else if (action.type === "deleted_question") {
+        await axios.post(`${API}/questions/restore`, {
+          question: action.question,
+          duplicate_links: action.duplicateLinks || [],
+        });
       } else if (action.type === "question_snapshot") {
         await Promise.all(action.snapshots.map(snapshot => (
           axios.put(`${API}/questions/${snapshot.id}`, snapshot)
@@ -1490,6 +1532,9 @@ export default function Editor({ workflowMode = null }) {
         return false;
       }
       await Promise.all([fetchPrograms(), fetchQuestions()]);
+      if (workflowMode === "duplicates_fast" || workflowMode === "duplicates_ai" || workflowMode === "review_duplicates" || showOnlyDuplicates) {
+        await fetchDuplicatePairs();
+      }
       toast.success(action.type === "move"
         ? `Deshecho: pregunta devuelta a ${action.fromProgramName}`
         : `Deshecho: ${action.label}`
@@ -1523,6 +1568,7 @@ export default function Editor({ workflowMode = null }) {
   const isDoubtfulWorkflow = workflowMode === "review_doubtful";
   const isSpellingWorkflow = workflowMode === "spelling";
   const isFastDuplicateWorkflow = workflowMode === "duplicates_fast";
+  const isAiDuplicateWorkflow = workflowMode === "duplicates_ai";
   const acceptedPendingCorrectionCount = acceptedQuestions.filter(q => !q.is_corrected).length;
 
   return (
@@ -1807,24 +1853,45 @@ export default function Editor({ workflowMode = null }) {
         <div className="flex-1" />
 
         {isSpellingWorkflow ? (
-          <div className="flex flex-wrap items-center gap-5 text-sm" data-testid="spelling-summary">
+          <div className="flex flex-wrap items-center gap-x-7 gap-y-3 text-lg font-semibold [&>div>div:first-child]:h-4 [&>div>div:first-child]:w-4 [&_strong]:text-xl" data-testid="spelling-summary">
             <div className="flex items-center gap-2" data-testid="accepted-count">
               <div className="w-3 h-3 rounded-full bg-green-500" />
-              <span><strong>{visibleConfirmedCount}</strong> preguntas aceptadas</span>
+              <span><strong>{visibleConfirmedCount}</strong> total a corregir</span>
             </div>
+            {questions.length !== visibleConfirmedCount && (
+              <div className="flex items-center gap-2" data-testid="total-count">
+                <div className="w-3 h-3 rounded-full bg-foreground" />
+                <span><strong>{questions.length}</strong> total del lote</span>
+              </div>
+            )}
             <span className="text-muted-foreground">
               {acceptedPendingCorrectionCount > 0
                 ? `${acceptedPendingCorrectionCount} pendientes de corregir`
                 : "Corrección completada"}
             </span>
           </div>
+        ) : isClassifyWorkflow ? (
+          <div className="flex flex-wrap items-center gap-x-7 gap-y-3 text-lg font-semibold" data-testid="classification-summary">
+            <div className="flex items-center gap-2" data-testid="accepted-count">
+              <div className="w-4 h-4 rounded-full bg-green-500" />
+              <span><strong className="text-xl">{visibleConfirmedCount}</strong> preguntas aceptadas</span>
+            </div>
+            <div className="flex items-center gap-2" data-testid="doubtful-count">
+              <div className="w-4 h-4 rounded-full bg-orange-500" />
+              <span><strong className="text-xl">{doubtfulVisibleCount}</strong> dudosas</span>
+            </div>
+            <div className="flex items-center gap-2" data-testid="total-count">
+              <div className="w-4 h-4 rounded-full bg-foreground" />
+              <span><strong className="text-xl">{questions.length}</strong> total</span>
+            </div>
+          </div>
         ) : isDoubtfulWorkflow ? (
           <div className="flex items-center gap-2 text-lg font-semibold" data-testid="doubtful-count">
             <div className="w-4 h-4 rounded-full bg-amber-500" />
             <span><strong>{doubtfulVisibleCount}</strong> dudosas</span>
           </div>
-        ) : isFastDuplicateWorkflow ? (
-          <div className="flex flex-wrap items-center gap-6 text-sm" data-testid="fast-duplicate-summary">
+        ) : (isFastDuplicateWorkflow || isAiDuplicateWorkflow) ? (
+          <div className="flex flex-wrap items-center gap-x-7 gap-y-3 text-lg font-semibold [&>div>div:first-child]:h-4 [&>div>div:first-child]:w-4 [&_strong]:text-xl" data-testid="fast-duplicate-summary">
             <div className="flex items-center gap-2">
               <div className="w-3 h-3 rounded-full bg-foreground" />
               <span><strong>{classifiedAndReserveCount}</strong> preguntas tras clasificación y Reserva</span>
@@ -1835,7 +1902,7 @@ export default function Editor({ workflowMode = null }) {
             </div>
           </div>
         ) : (
-        <div className="flex items-center gap-6 text-sm">
+        <div className={`flex flex-wrap items-center ${workflowMode === "names" ? "gap-x-7 gap-y-3 text-lg font-semibold [&>div>div:first-child]:h-4 [&>div>div:first-child]:w-4 [&_strong]:text-xl" : "gap-6 text-sm"}`}>
           <div className="flex items-center gap-2" data-testid="accepted-count">
             <div className="w-3 h-3 rounded-full bg-green-500" />
             <span><strong>{visibleConfirmedCount}</strong> preguntas aceptadas</span>
@@ -1982,7 +2049,7 @@ export default function Editor({ workflowMode = null }) {
         </div>
       )}
 
-      {!duplicateReviewActive && !isSpellingWorkflow && !isClassifyWorkflow && !isDoubtfulWorkflow && !isFastDuplicateWorkflow && (
+      {!duplicateReviewActive && !isSpellingWorkflow && !isClassifyWorkflow && !isDoubtfulWorkflow && !isFastDuplicateWorkflow && !isAiDuplicateWorkflow && (
         <>
       {/* Assignment Filter */}
       <div className="flex items-center gap-2 mb-6 flex-wrap" data-testid="assignment-filters">

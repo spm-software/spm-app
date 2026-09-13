@@ -39,9 +39,7 @@ const workflowSteps = [
   { key: "names", label: "Nombres", path: "/flujo/nombres", description: "Actualizar autores" },
   { key: "duplicates_fast", label: "Duplicados rápido", path: "/flujo/duplicados-rapido", description: "Buscar coincidencias exactas" },
   { key: "duplicates_ai", label: "Duplicados IA", path: "/flujo/duplicados-ia", description: "Buscar coincidencias semánticas" },
-  { key: "review_duplicates", label: "Revisar duplicados", path: "/flujo/revisar-duplicados", description: "Aceptar o mantener" },
   { key: "spelling", label: "Ortografía", path: "/flujo/ortografia", description: "Corregir preguntas finales" },
-  { key: "reserve", label: "Reserva", path: "/flujo/reserva", description: "Incluir pendientes a mano", reserve: true },
   { key: "distribute", label: "Distribuir", path: "/distribuir", description: "Crear programas" },
   { key: "export", label: "Exportar", path: "/exportar", description: "Descargar TXT y PNG" },
 ];

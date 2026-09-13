@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { useLocation } from "react-router-dom";
 import axios from "axios";
 import { toast } from "sonner";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -23,6 +24,7 @@ import {
   ArrowRightLeft
 } from "lucide-react";
 import { API_BASE_URL as API } from "@/lib/api";
+import { useUndo } from "@/contexts/UndoContext";
 
 // Mirror of Editor's getNameState for visual consistency
 const getNameState = (q) => {
@@ -36,6 +38,10 @@ const getNameState = (q) => {
 };
 
 export default function Distribuidor() {
+  const location = useLocation();
+  const undoScope = location.pathname;
+  const { pushUndo, registerUndoHandler, setActiveScope } = useUndo();
+
   const [batches, setBatches] = useState([]);
   const [selectedBatch, setSelectedBatch] = useState("");
   const [numPrograms, setNumPrograms] = useState("4");
@@ -73,10 +79,19 @@ export default function Distribuidor() {
   }, [selectedBatch]);
 
   const handleMoveFromReserve = async (questionId, targetProgramId) => {
+    const question = questions.find((item) => item.id === questionId);
     try {
       await axios.post(`${API}/questions/${questionId}/move`, {
         target_program_id: targetProgramId
       });
+      if (question?.program_id) {
+        pushUndo(undoScope, {
+          type: "move",
+          label: "Mover pregunta",
+          questionId,
+          fromProgramId: question.program_id,
+        });
+      }
       await Promise.all([fetchPrograms(), fetchQuestions()]);
       toast.success("Pregunta movida");
     } catch (error) {
@@ -99,6 +114,31 @@ export default function Distribuidor() {
   useEffect(() => {
     fetchBatches();
   }, [fetchBatches]);
+
+  const handleUndoAction = useCallback(async (action) => {
+    if (action.type !== "move" || !action.fromProgramId) return false;
+    try {
+      await axios.post(`${API}/questions/${action.questionId}/move`, {
+        target_program_id: action.fromProgramId,
+      });
+      await Promise.all([fetchPrograms(), fetchQuestions()]);
+      toast.success("Deshecho: pregunta devuelta a Reserva");
+      return true;
+    } catch (error) {
+      console.error("Error undoing move:", error);
+      toast.error(error.response?.data?.detail || "No se pudo deshacer el movimiento");
+      return false;
+    }
+  }, [fetchPrograms, fetchQuestions]);
+
+  useEffect(() => {
+    setActiveScope(undoScope);
+    const unregister = registerUndoHandler(undoScope, handleUndoAction);
+    return () => {
+      unregister();
+      setActiveScope(null);
+    };
+  }, [handleUndoAction, registerUndoHandler, setActiveScope, undoScope]);
 
   useEffect(() => {
     if (selectedBatch) {
@@ -213,6 +253,27 @@ export default function Distribuidor() {
               </Select>
             </div>
 
+            {programs.length > 0 && (
+              <Button
+                variant="outline"
+                onClick={handleClearDistribution}
+                disabled={distributing || clearing}
+                className="rounded-sm uppercase tracking-wide text-destructive hover:text-destructive"
+                data-testid="clear-distribution-button"
+              >
+                {clearing ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    Limpiando...
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-4 h-4 mr-2" />
+                    Limpiar
+                  </>
+                )}
+              </Button>
+            )}
             <div className="flex-1" />
 
             <div className="text-right text-sm" data-testid="distribute-summary">
@@ -251,27 +312,6 @@ export default function Distribuidor() {
               )}
             </Button>
 
-            {programs.length > 0 && (
-              <Button
-                variant="outline"
-                onClick={handleClearDistribution}
-                disabled={distributing || clearing}
-                className="rounded-sm uppercase tracking-wide text-destructive hover:text-destructive"
-                data-testid="clear-distribution-button"
-              >
-                {clearing ? (
-                  <>
-                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                    Limpiando...
-                  </>
-                ) : (
-                  <>
-                    <Trash2 className="w-4 h-4 mr-2" />
-                    Limpiar
-                  </>
-                )}
-              </Button>
-            )}
           </div>
 
           {/* Rules reminder */}

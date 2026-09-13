@@ -56,9 +56,9 @@ function App() {
               <Route path="flujo/confirmar-nombres" element={<Navigate to="/flujo/nombres" replace />} />
               <Route path="flujo/duplicados-rapido" element={<Editor workflowMode="duplicates_fast" />} />
               <Route path="flujo/duplicados-ia" element={<Editor workflowMode="duplicates_ai" />} />
-              <Route path="flujo/revisar-duplicados" element={<Editor workflowMode="review_duplicates" />} />
+              <Route path="flujo/revisar-duplicados" element={<Navigate to="/flujo/duplicados-rapido" replace />} />
               <Route path="flujo/ortografia" element={<Editor workflowMode="spelling" />} />
-              <Route path="flujo/reserva" element={<Editor workflowMode="reserve" />} />
+              <Route path="flujo/reserva" element={<Navigate to="/distribuir" replace />} />
               <Route path="distribuir" element={<Distribuidor />} />
               <Route path="usuarios" element={<Usuarios />} />
               <Route path="bases-de-datos" element={<BasesDatos />} />
