@@ -35,7 +35,6 @@ const navItems = [
 const workflowSteps = [
   { key: "import", label: "Importar", path: "/importar", description: "Cargar comentarios" },
   { key: "classify", label: "Clasificar", path: "/flujo/clasificar", description: "Separar saludos y preguntas" },
-  { key: "review_doubtful", label: "Revisar dudosas", path: "/flujo/dudosas", description: "Confirmar las que son pregunta" },
   { key: "names", label: "Nombres", path: "/flujo/nombres", description: "Actualizar autores" },
   { key: "duplicates_fast", label: "Duplicados rápido", path: "/flujo/duplicados-rapido", description: "Buscar coincidencias exactas" },
   { key: "duplicates_ai", label: "Duplicados IA", path: "/flujo/duplicados-ia", description: "Buscar coincidencias semánticas" },
@@ -221,7 +220,7 @@ export default function Layout() {
       </aside>
 
       {/* Main content */}
-      <div className="md:hidden fixed top-0 left-0 right-0 z-50 bg-card border-b border-border shadow-sm">
+      <div className="md:hidden fixed top-0 left-0 right-0 z-50 border-b border-border bg-card pt-[env(safe-area-inset-top)] shadow-sm">
         <div className="h-16 px-4 flex items-center justify-between">
           <div className="flex items-center gap-3 min-w-0">
             <img
@@ -266,7 +265,7 @@ export default function Layout() {
         </div>
       </div>
 
-      <main className="app-main h-screen overflow-auto pt-16 pb-24 md:pt-0 md:pb-0">
+      <main className="app-main h-screen overflow-auto pt-[calc(4rem+env(safe-area-inset-top))] pb-24 md:pt-0 md:pb-0">
         {!isDatabaseSection && <div className="sticky top-0 z-30 border-b border-border bg-background/95 px-4 py-3 backdrop-blur md:px-8">
           <div className="flex items-center gap-2">
               <div className="workflow-step-strip flex min-w-0 flex-1 overflow-x-auto">
@@ -310,7 +309,7 @@ export default function Layout() {
                   "hidden h-8 shrink-0 rounded-sm border px-3 text-xs font-semibold uppercase tracking-wide transition-colors sm:inline-flex sm:items-center",
                   isLastWorkflowStep
                     ? "cursor-not-allowed border-border bg-secondary text-muted-foreground"
-                    : "border-border bg-card text-foreground hover:bg-secondary"
+                    : "border-green-700 bg-green-700 text-white hover:bg-green-800"
                 )}
                 data-testid="workflow-skip-button"
               >
@@ -323,7 +322,7 @@ export default function Layout() {
                 className={cn(
                   "flex h-8 shrink-0 items-center gap-1 rounded-sm px-3 text-xs font-semibold uppercase tracking-wide transition-colors",
                   canUndo
-                    ? "bg-primary text-primary-foreground hover:bg-primary/90"
+                    ? "bg-red-600 text-white hover:bg-red-700"
                     : "cursor-not-allowed border border-border bg-card text-muted-foreground opacity-70"
                 )}
                 title={undoTitle}

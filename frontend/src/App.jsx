@@ -51,7 +51,7 @@ function App() {
               <Route path="importar" element={<Importador />} />
               <Route path="editor" element={<Navigate to="/flujo/clasificar" replace />} />
               <Route path="flujo/clasificar" element={<Editor workflowMode="classify" />} />
-              <Route path="flujo/dudosas" element={<Editor workflowMode="review_doubtful" />} />
+              <Route path="flujo/dudosas" element={<Navigate to="/flujo/clasificar" replace />} />
               <Route path="flujo/nombres" element={<Editor workflowMode="names" />} />
               <Route path="flujo/confirmar-nombres" element={<Navigate to="/flujo/nombres" replace />} />
               <Route path="flujo/duplicados-rapido" element={<Editor workflowMode="duplicates_fast" />} />

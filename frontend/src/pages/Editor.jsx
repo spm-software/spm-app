@@ -923,7 +923,7 @@ export default function Editor({ workflowMode = null }) {
       setClasificationFilter("all");
       setShowOnlyDuplicates(false);
       setShowOnlyNoName(false);
-      setShowOnlyUnconfirmedNames(true);
+      setShowOnlyUnconfirmedNames(false);
       return;
     }
 
@@ -959,11 +959,10 @@ export default function Editor({ workflowMode = null }) {
     setShowOnlyDuplicates(false);
     setShowOnlyNoName(false);
     setShowOnlyUnconfirmedNames(false);
-  }, [workflowMode, batches, globalReserveMode, selectedBatch]);
+  }, [workflowMode, globalReserveMode, selectedBatch]);
 
   const duplicateReviewActive = workflowMode === "review_duplicates" || showOnlyDuplicates;
-  const nameReviewActive = workflowMode === "names";
-  const filterUnconfirmedNames = showOnlyUnconfirmedNames || nameReviewActive;
+  const filterUnconfirmedNames = showOnlyUnconfirmedNames;
 
   useEffect(() => {
     if ((duplicateReviewActive || workflowMode === "duplicates_fast") && selectedBatch && !globalReserveMode) {
@@ -1192,6 +1191,7 @@ export default function Editor({ workflowMode = null }) {
   };
 
   const handleDeleteQuestion = async (questionId) => {
+    const keepDuplicateReviewOpen = showOnlyDuplicates && (workflowMode === "duplicates_fast" || workflowMode === "duplicates_ai");
     const scrollY = window.scrollY;
     const deletedQuestion = questions.find(q => q.id === questionId);
     const duplicateLinks = questions
@@ -1220,6 +1220,9 @@ export default function Editor({ workflowMode = null }) {
       setDuplicates(prev => prev.filter(d =>
         d.new_question.id !== questionId && d.original_question.id !== questionId
       ));
+      if (keepDuplicateReviewOpen) {
+        setShowOnlyDuplicates(true);
+      }
       // Update batch list to reflect new count
       fetchBatches();
       toast.success("Pregunta eliminada");
@@ -1397,6 +1400,7 @@ export default function Editor({ workflowMode = null }) {
   )).length;
   const possibleDuplicateCount = duplicates.length;
   const visibleConfirmedCount = acceptedQuestions.length;
+  const manualNameReviewCount = questions.filter(q => getNameState(q) !== "confirmed").length;
   const ownConfirmedCount = ownBatchQuestions.filter(isAcceptedQuestion).length;
   const externalVisibleCount = globalReserveMode
     ? 0
@@ -1565,6 +1569,7 @@ export default function Editor({ workflowMode = null }) {
   const showSpellingActions = showAllActions || workflowMode === "spelling";
   const showReserveActions = showAllActions || workflowMode === "reserve";
   const isClassifyWorkflow = workflowMode === "classify";
+  const isNamesWorkflow = workflowMode === "names";
   const isDoubtfulWorkflow = workflowMode === "review_doubtful";
   const isSpellingWorkflow = workflowMode === "spelling";
   const isFastDuplicateWorkflow = workflowMode === "duplicates_fast";
@@ -1876,10 +1881,10 @@ export default function Editor({ workflowMode = null }) {
               <div className="w-4 h-4 rounded-full bg-green-500" />
               <span><strong className="text-xl">{visibleConfirmedCount}</strong> preguntas aceptadas</span>
             </div>
-            <div className="flex items-center gap-2" data-testid="doubtful-count">
+            <button type="button" onClick={() => { setAssignmentFilter("all"); setClasificationFilter(clasificationFilter === "dudoso" ? "all" : "dudoso"); setShowOnlyDuplicates(false); }} className="flex items-center gap-2 rounded-full border border-orange-400 bg-orange-50 px-3 py-1.5 text-orange-800 transition-colors hover:bg-orange-100" data-testid="doubtful-count" title={clasificationFilter === "dudoso" ? "Ver todas las preguntas" : "Mostrar preguntas dudosas"}>
               <div className="w-4 h-4 rounded-full bg-orange-500" />
               <span><strong className="text-xl">{doubtfulVisibleCount}</strong> dudosas</span>
-            </div>
+            </button>
             <div className="flex items-center gap-2" data-testid="total-count">
               <div className="w-4 h-4 rounded-full bg-foreground" />
               <span><strong className="text-xl">{questions.length}</strong> total</span>
@@ -1896,10 +1901,17 @@ export default function Editor({ workflowMode = null }) {
               <div className="w-3 h-3 rounded-full bg-foreground" />
               <span><strong>{classifiedAndReserveCount}</strong> preguntas tras clasificación y Reserva</span>
             </div>
-            <div className="flex items-center gap-2">
+            <button type="button" onClick={async () => { if (showOnlyDuplicates) { setShowOnlyDuplicates(false); return; } setShowOnlyDuplicates(true); await fetchDuplicatePairs(); }} disabled={possibleDuplicateCount === 0} className={`flex items-center gap-2 rounded-full border px-3 py-1.5 transition-colors disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-50 disabled:text-slate-400 ${showOnlyDuplicates ? "border-orange-600 bg-orange-600 text-white hover:bg-orange-700" : "border-orange-400 bg-orange-50 text-orange-800 hover:bg-orange-100"}`} title={possibleDuplicateCount === 0 ? "No hay posibles duplicados" : showOnlyDuplicates ? "Ver todas las preguntas" : "Revisar posibles duplicados"}>
               <div className={`w-3 h-3 rounded-full ${possibleDuplicateCount > 0 ? "bg-amber-500" : "bg-slate-300"}`} />
               <span><strong>{possibleDuplicateCount}</strong> posibles duplicados</span>
-            </div>
+            </button>
+          </div>
+        ) : isNamesWorkflow ? (
+          <div className="flex flex-wrap items-center gap-x-7 gap-y-3 text-lg font-semibold" data-testid="names-summary">
+            <button type="button" onClick={() => { setShowOnlyUnconfirmedNames(!showOnlyUnconfirmedNames); if (!showOnlyUnconfirmedNames) { setShowOnlyDuplicates(false); setShowOnlyNoName(false); } }} disabled={manualNameReviewCount === 0} className={`flex items-center gap-2 rounded-full border px-3 py-1.5 transition-colors disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-50 disabled:text-slate-400 ${showOnlyUnconfirmedNames ? "border-orange-600 bg-orange-600 text-white hover:bg-orange-700" : "border-orange-400 bg-orange-50 text-orange-800 hover:bg-orange-100"}`} title={manualNameReviewCount === 0 ? "No hay nombres pendientes de revisar" : showOnlyUnconfirmedNames ? "Ver todas las preguntas" : "Revisar nombres manualmente"}>
+              <div className={`h-4 w-4 rounded-full ${showOnlyUnconfirmedNames ? "bg-white" : "bg-orange-500"}`} />
+              <span><strong className="text-xl">{manualNameReviewCount}</strong> revisión manual</span>
+            </button>
           </div>
         ) : (
         <div className={`flex flex-wrap items-center ${workflowMode === "names" ? "gap-x-7 gap-y-3 text-lg font-semibold [&>div>div:first-child]:h-4 [&>div>div:first-child]:w-4 [&_strong]:text-xl" : "gap-6 text-sm"}`}>
