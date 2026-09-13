@@ -14,7 +14,9 @@ import {
   ArrowUp,
   Moon,
   Sun,
-  Undo2
+  Undo2,
+  ChevronDown,
+  ChevronUp
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
@@ -31,6 +33,13 @@ const navItems = [
   { to: "/bases-de-datos", icon: Database, label: "Bases de datos SPM" },
   { to: "/configuracion", icon: Settings, label: "Configuración" },
 ];
+
+const mobileNavItems = [
+  { to: "/", icon: LayoutDashboard, label: "Dashboard" },
+  { to: "/bases-de-datos", icon: Database, label: "Bases de datos" },
+  { to: "/configuracion", icon: Settings, label: "Configuracion" },
+];
+
 
 const workflowSteps = [
   { key: "import", label: "Importar", path: "/importar", description: "Cargar comentarios" },
@@ -73,6 +82,7 @@ export default function Layout() {
     return Number.isInteger(stored) && stored >= 0 && stored < workflowSteps.length ? stored : 0;
   });
 
+  const [isEditorMenuOpen, setIsEditorMenuOpen] = useState(false);
   useEffect(() => {
     const root = document.documentElement;
     root.classList.toggle("dark", isDarkMode);
@@ -84,6 +94,7 @@ export default function Layout() {
   }, [isDarkMode]);
 
   useEffect(() => {
+    setIsEditorMenuOpen(false);
     setWorkflowIndex((current) => {
       const next = getWorkflowIndexFromPath(location.pathname, current);
       sessionStorage.setItem(WORKFLOW_STEP_KEY, String(next));
@@ -125,6 +136,7 @@ export default function Layout() {
     setIsDarkMode((current) => !current);
   };
 
+  const isEditorSection = workflowSteps.some((step) => step.path === location.pathname) || location.pathname === "/editor";
   const isLastWorkflowStep = workflowIndex >= workflowSteps.length - 1;
   const isDatabaseSection = location.pathname.startsWith("/bases-de-datos");
   const undoTitle = activeAction
@@ -266,7 +278,7 @@ export default function Layout() {
       </div>
 
       <main className="app-main h-screen overflow-auto pt-[calc(4rem+env(safe-area-inset-top))] pb-24 md:pt-0 md:pb-0">
-        {!isDatabaseSection && <div className="sticky top-0 z-30 border-b border-border bg-background/95 px-4 py-3 backdrop-blur md:px-8">
+        {!isDatabaseSection && <div className="sticky top-0 z-30 hidden border-b border-border bg-background/95 px-4 py-3 backdrop-blur md:block md:px-8">
           <div className="flex items-center gap-2">
               <div className="workflow-step-strip flex min-w-0 flex-1 overflow-x-auto">
                 {workflowSteps.map((step, index) => {
@@ -359,16 +371,85 @@ export default function Layout() {
         </div>
       </main>
 
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-card border-t border-border pb-[env(safe-area-inset-bottom)]">
-        <div className="mobile-bottom-nav flex overflow-x-auto overscroll-x-contain">
-          {navItems.map((item) => (
+      {isEditorMenuOpen && (
+        <section id="mobile-editor-menu" className="fixed inset-x-0 bottom-[calc(4rem+env(safe-area-inset-bottom))] z-40 max-h-[70vh] overflow-y-auto border-t border-border bg-card shadow-[0_-12px_28px_rgba(0,0,0,0.14)] md:hidden" aria-label="Menu del editor">
+          <div className="sticky top-0 flex items-center justify-between border-b border-border bg-card px-5 py-4">
+            <div>
+              <p className="font-heading text-lg font-bold">EDITOR</p>
+              <p className="text-xs text-muted-foreground">Flujo de preguntas</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setIsEditorMenuOpen(false)}
+              className="flex h-9 w-9 items-center justify-center rounded-sm text-muted-foreground hover:bg-secondary hover:text-foreground"
+              aria-label="Cerrar menu del editor"
+            >
+              <ChevronDown className="h-5 w-5" />
+            </button>
+          </div>
+          <div className="divide-y divide-border">
+            {workflowSteps.map((step, index) => {
+              const status = getWorkflowStepStatus(index, workflowIndex);
+              const isCurrent = index === workflowIndex;
+
+              return (
+                <button
+                  key={step.key}
+                  type="button"
+                  onClick={() => {
+                    setIsEditorMenuOpen(false);
+                    goToWorkflowStep(index);
+                  }}
+                  className={cn(
+                    "flex w-full items-center gap-3 px-5 py-4 text-left transition-colors",
+                    isCurrent ? "bg-primary/5 text-primary" : "hover:bg-secondary"
+                  )}
+                >
+                  <span className={cn(
+                    "flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold",
+                    isCurrent ? "bg-primary text-primary-foreground" : index < workflowIndex ? "bg-green-100 text-green-700" : "bg-secondary text-muted-foreground"
+                  )}>
+                    {index + 1}
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-sm font-semibold">{step.label}</span>
+                    <span className="block truncate text-xs text-muted-foreground">{step.description}</span>
+                  </span>
+                  <span className={cn("text-[10px] font-semibold uppercase tracking-wide", isCurrent ? "text-primary" : "text-muted-foreground")}>
+                    {status.label}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+          <div className="border-t border-border p-4">
+            <button
+              type="button"
+              onClick={undoLast}
+              disabled={!canUndo}
+              className={cn(
+                "flex h-10 w-full items-center justify-center gap-2 rounded-sm text-xs font-semibold uppercase tracking-wide transition-colors",
+                canUndo ? "bg-red-600 text-white hover:bg-red-700" : "cursor-not-allowed border border-border bg-card text-muted-foreground opacity-70"
+              )}
+              title={undoTitle}
+            >
+              {undoing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Undo2 className="h-4 w-4" />}
+              Deshacer
+            </button>
+          </div>
+        </section>
+      )}
+
+      <nav className="fixed bottom-0 left-0 right-0 z-50 border-t border-border bg-card pb-[env(safe-area-inset-bottom)] md:hidden">
+        <div className="mobile-bottom-nav flex">
+          {mobileNavItems.map((item) => (
             <NavLink
               key={item.to}
               to={item.to}
               end={item.to === "/"}
               className={({ isActive }) =>
                 cn(
-                  "h-16 min-w-[76px] flex-1 flex flex-col items-center justify-center gap-1 px-1 text-[10px] font-medium transition-colors",
+                  "h-16 min-w-0 flex-1 flex flex-col items-center justify-center gap-1 px-1 text-[10px] font-medium transition-colors",
                   isActive
                     ? "text-primary bg-primary/5"
                     : "text-muted-foreground hover:text-foreground"
@@ -379,6 +460,19 @@ export default function Layout() {
               <span className="leading-none truncate max-w-full px-0.5">{item.label}</span>
             </NavLink>
           ))}
+          <button
+            type="button"
+            onClick={() => setIsEditorMenuOpen((open) => !open)}
+            className={cn(
+              "h-16 min-w-0 flex-1 flex flex-col items-center justify-center gap-1 px-1 text-[10px] font-medium transition-colors",
+              isEditorSection || isEditorMenuOpen ? "bg-primary/5 text-primary" : "text-muted-foreground hover:text-foreground"
+            )}
+            aria-expanded={isEditorMenuOpen}
+            aria-controls="mobile-editor-menu"
+          >
+            {isEditorMenuOpen ? <ChevronDown className="h-5 w-5" strokeWidth={1.5} /> : <ChevronUp className="h-5 w-5" strokeWidth={1.5} />}
+            <span className="leading-none">Editor</span>
+          </button>
         </div>
       </nav>
     </div>
